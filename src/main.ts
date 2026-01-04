@@ -12,7 +12,18 @@ import {stat} from "fs";
 var mouseChange = require('mouse-change');
 import { defaultControlsConfig, getKeyAction, getMouseButtonAction, isBrushActivate, ControlsConfig } from './controls-config';
 
+// Water source structure
+interface WaterSource {
+    position: vec2;  // Position on terrain (UV coordinates)
+    size: number;    // Source radius
+    strength: number; // Water emission strength
+}
 
+// Maximum number of water sources
+const MAX_WATER_SOURCES = 16;
+
+// Array to store multiple water sources
+let waterSources: WaterSource[] = [];
 
 // static variables
 var clientWidth : number;
@@ -58,7 +69,6 @@ const controlscomp = {
     spawnposx : 0.5,
     spawnposy : 0.5,
     posTemp : vec2.fromValues(0.0,0.0),
-    posPerm : vec2.fromValues(0.0,0.0),
     'Load Scene': loadScene, // A function pointer, essentially
     'Start/Resume' :StartGeneration,
     'ResetTerrain' : Reset,
@@ -81,8 +91,7 @@ const controlscomp = {
     brushStrenth : 0.40,
     brushOperation : 0, // 0 : add, 1 : subtract
     brushPressed : 0, // 0 : not pressed, 1 : pressed
-    pbrushOn : 0,
-    pbrushData : vec2.fromValues(5.0, 0.4), // size & strength
+    sourceCount : 0, // Number of active water sources
     thermalRate : 0.5,
     thermalErosionScale : 1.0,
     lightPosX : 0.4,
@@ -115,7 +124,6 @@ const controls = {
     spawnposx : 0.5,
     spawnposy : 0.5,
     posTemp : vec2.fromValues(0.0,0.0),
-    posPerm : vec2.fromValues(0.0,0.0),
     'Load Scene': loadScene, // A function pointer, essentially
     'Pause/Resume' :StartGeneration,
     'ResetTerrain' : Reset,
@@ -139,8 +147,7 @@ const controls = {
     brushStrenth : 0.25,
     brushOperation : 0, // 0 : add, 1 : subtract
     brushPressed : 0, // 0 : not pressed, 1 : pressed
-    pbrushOn : 0,
-    pbrushData : vec2.fromValues(5.0, 0.4), // size & strength
+    sourceCount : 0, // Number of active water sources
     thermalTalusAngleScale : 8.0,
     thermalRate : 0.5,
     thermalErosionScale : 1.0,
@@ -1212,13 +1219,48 @@ function onKeyDown(event : KeyboardEvent){
     }
 
     if (action === 'permanentWaterSource') {
-        controls.pbrushOn = controls.pbrushOn == 0 ? 1 : 0;
-        controls.posPerm = controls.posTemp;
-        controls.pbrushData = vec2.fromValues(controls.brushSize, controls.brushStrenth);
+        // Check if Shift is held for removal
+        if (event.shiftKey) {
+            // Remove nearest source to cursor
+            if (waterSources.length > 0) {
+                let nearestIndex = 0;
+                let nearestDist = Number.MAX_VALUE;
+                
+                for (let i = 0; i < waterSources.length; i++) {
+                    const dist = vec2.distance(waterSources[i].position, controls.posTemp);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearestIndex = i;
+                    }
+                }
+                
+                // Remove the nearest source
+                waterSources.splice(nearestIndex, 1);
+                controls.sourceCount = waterSources.length;
+                console.log(`Removed water source. Remaining: ${waterSources.length}`);
+            }
+        } else {
+            // Add new source at cursor position
+            if (waterSources.length < MAX_WATER_SOURCES) {
+                const newSource: WaterSource = {
+                    position: vec2.clone(controls.posTemp),
+                    size: controls.brushSize,
+                    strength: controls.brushStrenth
+                };
+                waterSources.push(newSource);
+                controls.sourceCount = waterSources.length;
+                console.log(`Added water source at (${newSource.position[0].toFixed(3)}, ${newSource.position[1].toFixed(3)}). Total: ${waterSources.length}`);
+            } else {
+                console.log(`Maximum ${MAX_WATER_SOURCES} water sources reached`);
+            }
+        }
     }
     
     if (action === 'removePermanentSource') {
-        controls.pbrushOn = 0;
+        // Remove all sources
+        waterSources = [];
+        controls.sourceCount = 0;
+        console.log('Removed all water sources');
     }
 }
 
@@ -1772,9 +1814,31 @@ function main() {
     lambert.setInt(controls.TerrainPlatte, "u_TerrainPlatte");
     lambert.setInt(controls.ShowFlowTrace ? 0 : 1,"u_FlowTrace");
     lambert.setInt(controls.SedimentTrace ? 0 : 1,"u_SedimentTrace");
-    lambert.setVec2(controls.posPerm,'u_permanentPos');
-    lambert.setInt(controls.pbrushOn, "u_pBrushOn");
-    lambert.setVec2(controls.pbrushData,"u_PBrushData");
+    // Create arrays for shader uniforms (water sources)
+    const sourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
+    const sourceSizes = new Float32Array(MAX_WATER_SOURCES);
+    const sourceStrengths = new Float32Array(MAX_WATER_SOURCES);
+
+    // Fill arrays with source data
+    for (let i = 0; i < MAX_WATER_SOURCES; i++) {
+        if (i < waterSources.length) {
+            sourcePositions[i * 2] = waterSources[i].position[0];
+            sourcePositions[i * 2 + 1] = waterSources[i].position[1];
+            sourceSizes[i] = waterSources[i].size;
+            sourceStrengths[i] = waterSources[i].strength;
+        } else {
+            // Fill with zeros for inactive sources
+            sourcePositions[i * 2] = 0.0;
+            sourcePositions[i * 2 + 1] = 0.0;
+            sourceSizes[i] = 0.0;
+            sourceStrengths[i] = 0.0;
+        }
+    }
+
+    // Set source arrays for terrain shader (visualization)
+    lambert.setSourceCount(waterSources.length);
+    lambert.setSourcePositions(sourcePositions);
+    lambert.setSourceSizes(sourceSizes);
     gl_context.uniform3fv(gl_context.getUniformLocation(lambert.prog,"unif_LightPos"),vec3.fromValues(controls.lightPosX,controls.lightPosY,controls.lightPosZ));
 
     sceneDepthShader.setSimres(simres);
@@ -1785,12 +1849,14 @@ function main() {
     rains.setBrushStrength(controls.brushStrenth);
     rains.setBrushType(controls.brushType);
     rains.setBrushPressed(controls.brushPressed);
-    rains.setInt(controls.pbrushOn, "u_pBrushOn");
-    rains.setVec2(controls.pbrushData,"u_PBrushData");
+    // Set source arrays for rain shader (water emission)
+    rains.setSourceCount(waterSources.length);
+    rains.setSourcePositions(sourcePositions);
+    rains.setSourceSizes(sourceSizes);
+    rains.setSourceStrengths(sourceStrengths);
     rains.setBrushPos(pos);
     rains.setBrushOperation(controls.brushOperation);
     rains.setSpawnPos(vec2.fromValues(controls.spawnposx, controls.spawnposy));
-    rains.setVec2(controls.posPerm,'u_permanentPos');
     rains.setTime(timer);
     gl_context.uniform1i(gl_context.getUniformLocation(rains.prog,"u_RainErosion"),controls.RainErosion ? 1 : 0);
     rains.setFloat(controls.RainErosionStrength,'u_RainErosionStrength');

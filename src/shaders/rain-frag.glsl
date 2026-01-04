@@ -14,13 +14,14 @@ uniform int u_BrushType;
 uniform int u_BrushPressed;
 uniform vec2 u_BrushPos;
 uniform int u_BrushOperation;
-uniform int u_pBrushOn;
 uniform int u_RainErosion;
 uniform float u_RainErosionStrength;
 uniform float u_RainErosionDropSize;
 
-uniform vec2 u_permanentPos;
-uniform vec2 u_PBrushData;
+uniform int u_SourceCount;
+uniform vec2 u_SourcePositions[16];  // Max 16 sources
+uniform float u_SourceSizes[16];
+uniform float u_SourceStrengths[16];
 
 layout (location = 0) out vec4 writeTerrain;
 
@@ -175,26 +176,21 @@ void main() {
 //                  addwater += 0.006 * aw;
 
 
-      // permanent water source brush
-      if(u_pBrushOn != 0){
-            vec3 ro = u_MouseWorldPos.xyz;
-            vec3 rd = u_MouseWorldDir;
-            vec2 pointOnPlane = u_permanentPos;
+      // permanent water source brush - handle multiple sources
+      for(int i = 0; i < u_SourceCount; i++){
+            vec2 pointOnPlane = u_SourcePositions[i];
             float pdis2fragment = distance(pointOnPlane, curuv);
-            amount = 0.0006 * u_PBrushData.y;
-            if (pdis2fragment < 0.01 * u_PBrushData.x){
-                  float dens = (0.01 * u_PBrushData.x - pdis2fragment) / (0.01 * u_PBrushData.x);
-
-
-                        addwater =  amount * dens * 280.0;
-                        //float aw = noise(vec3(curuv * 100.0, u_Time));
-                        float aw = fbm(curuv*200.0 + vec2(sin(u_Time * 5.0), cos(u_Time*15.0)));
-                        addwater *= aw;
-
-
-
+            float sourceSize = u_SourceSizes[i];
+            float sourceStrength = u_SourceStrengths[i];
+            
+            if (pdis2fragment < 0.01 * sourceSize){
+                  float dens = (0.01 * sourceSize - pdis2fragment) / (0.01 * sourceSize);
+                  float sourceAmount = 0.0006 * sourceStrength;
+                  float sourceWater = sourceAmount * dens * 280.0;
+                  float aw = fbm(curuv*200.0 + vec2(sin(u_Time * 5.0), cos(u_Time*15.0)));
+                  sourceWater *= aw;
+                  addwater += sourceWater;
             }
-
       }
 
 

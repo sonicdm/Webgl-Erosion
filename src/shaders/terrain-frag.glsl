@@ -43,9 +43,9 @@ uniform float u_SnowRange;
 uniform float u_ForestRange;
 uniform int u_TerrainPlatte;
 uniform vec3 unif_LightPos;
-uniform vec2 u_permanentPos;
-uniform int u_pBrushOn;
-uniform vec2 u_PBrushData;
+uniform int u_SourceCount;
+uniform vec2 u_SourcePositions[16];  // Max 16 sources
+uniform float u_SourceSizes[16];
 uniform int u_FlowTrace;
 
 
@@ -175,18 +175,16 @@ void main()
 
     }
 
-    if(u_pBrushOn!= 0){
-        vec3 ro = u_MouseWorldPos.xyz;
-        vec3 rd = u_MouseWorldDir;
-        vec2 pointOnPlane = u_permanentPos;
+    // Visualize all water sources
+    for(int i = 0; i < u_SourceCount; i++){
+        vec2 pointOnPlane = u_SourcePositions[i];
         float pdis2fragment = distance(pointOnPlane, fs_Uv);
-        if (pdis2fragment < 0.01 * u_PBrushData.x){
-            float dens = (0.01 * u_PBrushData.x - pdis2fragment) / (0.01 * u_PBrushData.x);
-
-
-            addcol = permanentCol * 0.8;
-
-            addcol *= dens * 5.0;
+        float sourceSize = u_SourceSizes[i];
+        
+        if (pdis2fragment < 0.01 * sourceSize){
+            float dens = (0.01 * sourceSize - pdis2fragment) / (0.01 * sourceSize);
+            vec3 sourceCol = permanentCol * 0.8;
+            addcol += sourceCol * dens * 5.0;
         }
     }
 

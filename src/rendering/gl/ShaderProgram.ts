@@ -231,6 +231,38 @@ class ShaderProgram {
     }
   }
 
+  setSourceCount(count: number) {
+    this.use();
+    const loc = gl.getUniformLocation(this.prog, "u_SourceCount");
+    if (loc !== -1) {
+      gl.uniform1i(loc, count);
+    }
+  }
+
+  setSourcePositions(positions: Float32Array) {
+    this.use();
+    const loc = gl.getUniformLocation(this.prog, "u_SourcePositions");
+    if (loc !== -1) {
+      gl.uniform2fv(loc, positions);
+    }
+  }
+
+  setSourceSizes(sizes: Float32Array) {
+    this.use();
+    const loc = gl.getUniformLocation(this.prog, "u_SourceSizes");
+    if (loc !== -1) {
+      gl.uniform1fv(loc, sizes);
+    }
+  }
+
+  setSourceStrengths(strengths: Float32Array) {
+    this.use();
+    const loc = gl.getUniformLocation(this.prog, "u_SourceStrengths");
+    if (loc !== -1) {
+      gl.uniform1fv(loc, strengths);
+    }
+  }
+
   setTerrainDebug(t:number){
     this.use();
     if(this.unifTerrainDebug!==-1){
