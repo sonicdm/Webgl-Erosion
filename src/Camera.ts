@@ -7,6 +7,7 @@ import {vec3, mat4} from 'gl-matrix';
 // @ts-ignore
 
 import {Vector3} from "three";
+import { ControlsConfig } from './controls-config';
 
 
 
@@ -33,7 +34,7 @@ class Camera {
   tdirection : Vector3 = new Vector3(0,0,0);
   tup : Vector3 = new  Vector3(0,0,0);
 
-  constructor(position: vec3, target: vec3) {
+  constructor(position: vec3, target: vec3, cameraConfig?: ControlsConfig['camera'], brushUsesLeftClick?: boolean) {
 
 
     vec3.subtract(this.direction, target, position);
@@ -48,13 +49,52 @@ class Camera {
     this.threeCamera.position.set(position[0],position[1],position[2]);
     this.threeControls = new OrbitControls(this.threeCamera, document.getElementById('canvas'));
 
-    // this.threeControls.enableZoom = true;
-    // this.threeControls.rotateSpeed = 0.3;
-    // this.threeControls.zoomSpeed = 1.0;
-    // this.threeControls.panSpeed = 2.0;
-    // this.threeControls.target.set(target);
-    this.threeControls.enableDamping = true;
-    this.threeControls.dampingFactor = 0.08;
+    // Apply camera configuration if provided
+    if (cameraConfig) {
+        // Configure mouse button mappings
+        const mouseButtons: any = {
+            LEFT: null,
+            MIDDLE: null,
+            RIGHT: null
+        };
+        // If brush uses left click, ensure LEFT is disabled for camera
+        if (brushUsesLeftClick) {
+            console.log('[DEBUG] Camera: Disabling LEFT button for OrbitControls (brush uses it)');
+            mouseButtons.LEFT = null;
+        }
+        // Set rotate button (unless it's LEFT and brush uses it)
+        if (cameraConfig.rotateButton) {
+            if (!brushUsesLeftClick || cameraConfig.rotateButton !== 'LEFT') {
+                mouseButtons[cameraConfig.rotateButton] = THREE.MOUSE.ROTATE;
+            }
+        }
+        // Set pan button (unless it's LEFT and brush uses it)
+        if (cameraConfig.panButton) {
+            if (!brushUsesLeftClick || cameraConfig.panButton !== 'LEFT') {
+                mouseButtons[cameraConfig.panButton] = THREE.MOUSE.PAN;
+            }
+        }
+        this.threeControls.mouseButtons = mouseButtons;
+        console.log('[DEBUG] Camera: OrbitControls mouseButtons set to:', mouseButtons);
+
+        // Apply speed settings
+        this.threeControls.rotateSpeed = cameraConfig.rotateSpeed;
+        this.threeControls.zoomSpeed = cameraConfig.zoomSpeed;
+        this.threeControls.panSpeed = cameraConfig.panSpeed;
+
+        // Apply enable/disable settings
+        this.threeControls.enableRotate = cameraConfig.enableRotate;
+        this.threeControls.enablePan = cameraConfig.enablePan;
+        this.threeControls.enableZoom = cameraConfig.enableZoom;
+
+        // Apply damping settings
+        this.threeControls.enableDamping = cameraConfig.enableDamping;
+        this.threeControls.dampingFactor = cameraConfig.dampingFactor;
+    } else {
+        // Default settings
+        this.threeControls.enableDamping = true;
+        this.threeControls.dampingFactor = 0.08;
+    }
     console.log( this.threeCamera.position);
 
 

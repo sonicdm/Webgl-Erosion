@@ -10,6 +10,7 @@ import {gl, setGL} from './globals';
 import ShaderProgram, {Shader} from './rendering/gl/ShaderProgram';
 import {stat} from "fs";
 var mouseChange = require('mouse-change');
+import { defaultControlsConfig, getKeyAction, getMouseButtonAction, isBrushActivate, ControlsConfig } from './controls-config';
 
 
 
@@ -1189,29 +1190,121 @@ function handleInteraction (buttons : number, x : number, y : number){
     //console.log(x + ' ' + y);
 }
 
+// Controls configuration - can be changed at runtime if needed
+let controlsConfig: ControlsConfig = defaultControlsConfig;
+
 function onKeyDown(event : KeyboardEvent){
-    if(event.key == 'c'){
+    const key = event.key.toLowerCase();
+    const action = getKeyAction(key, controlsConfig);
+    
+    // Check if this key is brushActivate (could be keyboard key OR mouse button string)
+    if (isBrushActivate(key, controlsConfig)) {
         controls.brushPressed = 1;
-    }else{
-        controls.brushPressed = 0;
+    } else if (action === 'brushActivate') {
+        controls.brushPressed = 1;
+    } else {
+        // Only reset if another key is pressed (not if mouse button is the activator)
+        if (controlsConfig.keys.brushActivate !== 'LEFT' && 
+            controlsConfig.keys.brushActivate !== 'MIDDLE' && 
+            controlsConfig.keys.brushActivate !== 'RIGHT') {
+            controls.brushPressed = 0;
+        }
     }
 
-    if(event.key == 'r'){
+    if (action === 'permanentWaterSource') {
         controls.pbrushOn = controls.pbrushOn == 0 ? 1 : 0;
         controls.posPerm = controls.posTemp;
         controls.pbrushData = vec2.fromValues(controls.brushSize, controls.brushStrenth);
     }
-    if(event.key == 'p'){
+    
+    if (action === 'removePermanentSource') {
         controls.pbrushOn = 0;
     }
-
 }
 
 function onKeyUp(event : KeyboardEvent){
-    if(event.key == 'c'){
+    const key = event.key.toLowerCase();
+    const action = getKeyAction(key, controlsConfig);
+    
+    // Only deactivate if this key was the brush activator (not if mouse button is the activator)
+    if (isBrushActivate(key, controlsConfig) || action === 'brushActivate') {
         controls.brushPressed = 0;
     }
 }
+
+// Store original brushOperation when modifier is held (for restoration on release)
+let originalBrushOperation: number | null = null;
+
+function onMouseDown(event : MouseEvent | PointerEvent){
+    // ALWAYS log first thing - if this doesn't show, handler isn't being called
+    const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][event.button];
+    console.log('[DEBUG] onMouseDown CALLED - button:', event.button, 'buttonName:', buttonName, 'target:', event.target);
+    console.log('[DEBUG] Config - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
+    
+    const action = getMouseButtonAction(event.button, controlsConfig);
+    console.log('[DEBUG] onMouseDown - action:', action, 'brushType:', controls.brushType);
+    
+    if (action === 'brushActivate') {
+        console.log('[DEBUG] Activating brush - setting brushPressed = 1');
+        controls.brushPressed = 1;
+        
+        // Check for brush invert modifier (Shift, Ctrl, or Alt)
+        const invertModifier = controlsConfig.modifiers.brushInvert;
+        if (invertModifier) {
+            const modifierPressed = 
+                (invertModifier === 'Ctrl' && (event.ctrlKey || event.metaKey)) ||
+                (invertModifier === 'Shift' && event.shiftKey) ||
+                (invertModifier === 'Alt' && event.altKey);
+            
+            if (modifierPressed) {
+                // Store original operation and invert it
+                originalBrushOperation = controls.brushOperation;
+                controls.brushOperation = controls.brushOperation === 0 ? 1 : 0; // Toggle: 0 (Add) ↔ 1 (Subtract)
+                console.log('[DEBUG] Brush operation inverted to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
+            } else {
+                // No modifier, use normal operation
+                originalBrushOperation = null;
+            }
+        } else {
+            originalBrushOperation = null;
+        }
+        
+        // Prevent OrbitControls from handling this event
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        console.log('[DEBUG] brushPressed set to:', controls.brushPressed);
+        return; // Exit early to prevent other handlers
+    } else {
+        console.log('[DEBUG] Not a brush action - button:', event.button, 'buttonName:', buttonName);
+        console.log('[DEBUG] Expected - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
+    }
+}
+
+function onMouseUp(event : MouseEvent | PointerEvent){
+    console.log('[DEBUG] onMouseUp CALLED - button:', event.button, 'target:', event.target);
+    const action = getMouseButtonAction(event.button, controlsConfig);
+    console.log('[DEBUG] onMouseUp - action:', action);
+    
+    if (action === 'brushActivate') {
+        console.log('[DEBUG] Deactivating brush - setting brushPressed = 0');
+        controls.brushPressed = 0;
+        
+        // Restore original brushOperation if it was inverted
+        if (originalBrushOperation !== null) {
+            controls.brushOperation = originalBrushOperation;
+            originalBrushOperation = null;
+            console.log('[DEBUG] Brush operation restored to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
+        }
+        
+        // Prevent OrbitControls from handling this event
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+    }
+}
+
+// These functions are no longer needed - we handle pointer events directly in the listeners above
 
 function main() {
 
@@ -1263,10 +1356,13 @@ function main() {
     //thermalerosionpara.open();
     var terraineditor = gui.addFolder('Terrain Editor');
     terraineditor.add(controls,'brushType',{NoBrush : 0, TerrainBrush : 1, WaterBrush : 2});
-    terraineditor.add(controls,'brushSize',0.1, 20.0);
+    const brushSizeController = terraineditor.add(controls,'brushSize',0.1, 20.0);
     terraineditor.add(controls,'brushStrenth',0.1,2.0);
     terraineditor.add(controls,'brushOperation', {Add : 0, Subtract : 1});
     terraineditor.open();
+    
+    // Store brushSize controller reference for updating UI when changed via Ctrl+Scroll
+    (window as any).brushSizeController = brushSizeController;
     var renderingpara = gui.addFolder('Rendering Parameters');
     renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);
     renderingpara.add(controls, 'TerrainPlatte', {AlpineMtn : 0, Desert : 1, Jungle : 2});
@@ -1293,6 +1389,111 @@ function main() {
   mouseChange(canvas, handleInteraction);
   document.addEventListener('keydown', onKeyDown, false);
   document.addEventListener('keyup', onKeyUp, false);
+  
+  // Attach to window FIRST in capture phase to intercept before OrbitControls
+  // Use pointer events since OrbitControls uses pointer events (PR #21972)
+  console.log('[DEBUG] Setting up pointer listeners on window (capture phase)');
+  console.log('[DEBUG] Config - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
+  window.addEventListener('pointerdown', (e) => {
+    const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][e.button];
+    console.log('[DEBUG] WINDOW pointerdown CAPTURE - button:', e.button, 'buttonName:', buttonName, 'target:', e.target);
+    // Check if target is canvas or contains canvas
+    const target = e.target as HTMLElement;
+    const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
+    console.log('[DEBUG] WINDOW pointerdown - isCanvas:', isCanvas, 'target:', target, 'canvas:', canvas);
+    if (isCanvas) {
+      // Check if this is a brush action BEFORE calling handler
+      const action = getMouseButtonAction(e.button, controlsConfig);
+      if (action === 'brushActivate') {
+        console.log('[DEBUG] WINDOW pointerdown - BRUSH ACTION, stopping propagation immediately');
+        // Update mouse position for ray casting
+        lastX = e.clientX;
+        lastY = e.clientY;
+        // Stop propagation IMMEDIATELY to prevent OrbitControls from seeing it
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        // Now call our handler
+        onMouseDown(e);
+        return;
+      }
+    }
+  }, true);
+  window.addEventListener('pointerup', (e) => {
+    console.log('[DEBUG] WINDOW pointerup CAPTURE - button:', e.button, 'target:', e.target);
+    const target = e.target as HTMLElement;
+    if (target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas) {
+      const action = getMouseButtonAction(e.button, controlsConfig);
+      if (action === 'brushActivate') {
+        console.log('[DEBUG] WINDOW pointerup - BRUSH ACTION, stopping propagation');
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        onMouseUp(e);
+      }
+    }
+  }, true);
+  
+  // Handle pointermove to update brush position while brush is active
+  window.addEventListener('pointermove', (e) => {
+    if (controls.brushPressed === 1) {
+      // Update lastX and lastY for ray casting when brush is active
+      const target = e.target as HTMLElement;
+      const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
+      if (isCanvas) {
+        // Update mouse position for ray casting
+        lastX = e.clientX;
+        lastY = e.clientY;
+      }
+    }
+  }, true);
+  
+  // Handle pointercancel to deactivate brush if pointer is lost
+  window.addEventListener('pointercancel', (e) => {
+    if (controls.brushPressed === 1) {
+      console.log('[DEBUG] WINDOW pointercancel - deactivating brush');
+      controls.brushPressed = 0;
+    }
+  }, true);
+  
+  // Handle wheel events for brush size adjustment (configurable modifier + Scroll)
+  // Attach to canvas in capture phase to intercept before OrbitControls
+  canvas.addEventListener('wheel', (e) => {
+    const scrollModifier = controlsConfig.modifiers.brushSizeScroll;
+    if (!scrollModifier) {
+      // Brush size scroll is disabled, let OrbitControls handle all scroll events
+      return;
+    }
+    
+    // Check if the configured modifier is pressed
+    const modifierPressed = 
+      (scrollModifier === 'Ctrl' && (e.ctrlKey || e.metaKey)) ||
+      (scrollModifier === 'Shift' && e.shiftKey) ||
+      (scrollModifier === 'Alt' && e.altKey);
+    
+    if (modifierPressed) {
+      // Prevent default zoom behavior so OrbitControls doesn't zoom
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      
+      // Adjust brush size based on scroll direction with very fine granularity
+      // deltaY > 0 means scrolling down (decrease size), < 0 means scrolling up (increase size)
+      const scrollDelta = e.deltaY;
+      const sizeChange = scrollDelta * 0.01; // Much more granular: 0.01 per scroll unit
+      const newSize = controls.brushSize - sizeChange; // Invert because scroll down should decrease
+      
+      // Clamp to valid range (0.1 to 20.0) and round to 2 decimal places for cleaner values
+      controls.brushSize = Math.round(Math.max(0.1, Math.min(20.0, newSize)) * 100) / 100;
+      
+      // Force dat-gui controller to update the display
+      const brushSizeController = (window as any).brushSizeController;
+      if (brushSizeController) {
+        brushSizeController.updateDisplay();
+      }
+    }
+    // If modifier is not pressed, do nothing - let OrbitControls handle zoom normally
+  }, { capture: true, passive: false }); // capture: true to intercept before OrbitControls, passive: false allows preventDefault
 
     if (!gl_context) {
     alert('WebGL 2 not supported!');
@@ -1318,7 +1519,10 @@ function main() {
   loadScene();
 
 
-  const camera = new Camera(vec3.fromValues(-0.18, 0.3, 0.6), vec3.fromValues(0, 0, 0));
+  // Check if brush uses left click (either from mouse.brushActivate or keys.brushActivate)
+  const brushUsesLeftClick = controlsConfig.mouse.brushActivate === 'LEFT' || 
+                             (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
+  const camera = new Camera(vec3.fromValues(-0.18, 0.3, 0.6), vec3.fromValues(0, 0, 0), controlsConfig.camera, brushUsesLeftClick);
   const renderer = new OpenGLRenderer(canvas);
   renderer.setClearColor(0.0, 0.0, 0.0, 0);
   gl_context.enable(gl_context.DEPTH_TEST);
