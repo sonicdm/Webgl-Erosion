@@ -12,6 +12,7 @@ uniform float u_Kc;
 uniform float u_Kd;
 uniform float u_timestep;
 uniform float u_Time;
+uniform float u_RockErosionResistance;
 
 layout (location = 0) out vec4 writeTerrain;
 layout (location = 1) out vec4 writeSediment;
@@ -92,6 +93,15 @@ void main() {
   float Ks = u_Ks;
   float Kd = u_Kd;
   float alpha = 5.0;
+  
+  // Check if this is rock material (B channel > 0.5) and apply erosion resistance
+  vec4 curTerrain = texture(readTerrain,curuv);
+  float rockFactor = curTerrain.z > 0.5 ? u_RockErosionResistance : 1.0;
+  
+  // Apply erosion resistance to rock (reduce erosion and deposition)
+  Kc *= rockFactor;
+  Ks *= rockFactor;
+  Kd *= rockFactor;
 
   vec3 nor = calnor(curuv);
   float slopeSin;
@@ -112,7 +122,7 @@ void main() {
 //  newVel = curvel;
 
   vec4 curSediment = texture(readSediment,curuv);
-  vec4 curTerrain = texture(readTerrain,curuv);
+  // curTerrain already read above for rock check
 
 
 

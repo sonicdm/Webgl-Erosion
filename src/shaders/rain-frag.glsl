@@ -143,6 +143,8 @@ void main() {
                         //aw = pow(aw, 8.0);
                         addwater *= aw;
                         addwater = u_BrushOperation == 0 ? addwater : -addwater;
+                  }else if(u_BrushType == 3 && u_BrushPressed == 1){
+                        // Rock brush - will be handled in output to set B channel
                   }
 
 
@@ -228,5 +230,28 @@ void main() {
 //      }
 
 
-      writeTerrain = vec4(min(max(cur.x + addterrain, -0.10),2000.30),max(cur.y+rain * raindeg + addwater, 0.0f),cur.z,cur.w);
+      // Handle rock material placement (store in B channel: 1.0 = rock, 0.0 = normal terrain)
+      float rockMaterial = cur.z;
+      // Check for rock brush - handle it in the same brush check block for consistency
+      if(u_BrushType == 3 && u_BrushPressed == 1){
+            vec2 pointOnPlane = u_BrushPos;
+            float pdis2fragment = distance(pointOnPlane, curuv);
+            if (pdis2fragment < 0.01 * u_BrushSize){
+                  float dens = (0.01 * u_BrushSize - pdis2fragment * 0.5) / (0.01 * u_BrushSize);
+                  // Use a much stronger mix factor for rock placement - make it clearly visible
+                  // Clamp dens to ensure it's positive and meaningful
+                  dens = max(0.0, dens);
+                  float mixFactor = dens * u_BrushStrength * 2.0; // Strong multiplier for immediate effect
+                  mixFactor = min(mixFactor, 1.0); // Clamp to 1.0
+                  if(u_BrushOperation == 0){
+                        // Add rock material - use max to ensure it increases
+                        rockMaterial = max(rockMaterial, mix(rockMaterial, 1.0, mixFactor));
+                  } else {
+                        // Remove rock material - use min to ensure it decreases
+                        rockMaterial = min(rockMaterial, mix(rockMaterial, 0.0, mixFactor));
+                  }
+            }
+      }
+      
+      writeTerrain = vec4(min(max(cur.x + addterrain, -0.10),2000.30),max(cur.y+rain * raindeg + addwater, 0.0f),rockMaterial,cur.w);
 }

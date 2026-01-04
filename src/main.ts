@@ -142,12 +142,13 @@ const controls = {
     TerrainPlatte : 1, // 0 normal alphine mtn, 1 desert, 2 jungle
     SnowRange : 0,
     ForestRange : 0,
-    brushType : 2, // 0 : no brush, 1 : terrain, 2 : water
+    brushType : 2, // 0 : no brush, 1 : terrain, 2 : water, 3 : rock
     brushSize : 4,
     brushStrenth : 0.25,
     brushOperation : 0, // 0 : add, 1 : subtract
     brushPressed : 0, // 0 : not pressed, 1 : pressed
     sourceCount : 0, // Number of active water sources
+    rockErosionResistance : 0.1, // 0.0 = erodes normally, 1.0 = doesn't erode (multiplier for Ks/Kc)
     thermalTalusAngleScale : 8.0,
     thermalRate : 0.5,
     thermalErosionScale : 1.0,
@@ -1397,7 +1398,8 @@ function main() {
     thermalerosionpara.add(controls,'thermalErosionScale',0.0, 5.0 );
     //thermalerosionpara.open();
     var terraineditor = gui.addFolder('Terrain Editor');
-    terraineditor.add(controls,'brushType',{NoBrush : 0, TerrainBrush : 1, WaterBrush : 2});
+    terraineditor.add(controls,'brushType',{NoBrush : 0, TerrainBrush : 1, WaterBrush : 2, RockBrush : 3});
+    terraineditor.add(controls,'rockErosionResistance', 0.0, 1.0);
     const brushSizeController = terraineditor.add(controls,'brushSize',0.1, 20.0);
     terraineditor.add(controls,'brushStrenth',0.1,2.0);
     terraineditor.add(controls,'brushOperation', {Add : 0, Subtract : 1});
@@ -1880,6 +1882,7 @@ function main() {
     sediment.setKc(controls.Kc);
     sediment.setKs(controls.Ks);
     sediment.setKd(controls.Kd);
+    sediment.setRockErosionResistance(controls.rockErosionResistance);
     sediment.setTimestep(controls.timestep);
     sediment.setTime(timer);
 

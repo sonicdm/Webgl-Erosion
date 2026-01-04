@@ -196,7 +196,8 @@ void main(){
   //writeVel = vec4(veloci * u_VelMult, velr, velt);
   writeVel = vec4(veloci * u_VelMult, curvel.z, curvel.w);
   //writeTerrain = vec4(cur.x, max(0.0, deltaH + curTerrain.y ), 0.0, 1.0);
-  writeTerrain = vec4(cur.x, max(cur.y+deltavol, 0.0), 0.0, 1.0);
+  // Preserve B channel (rock material) and A channel
+  writeTerrain = vec4(cur.x, max(cur.y+deltavol, 0.0), cur.z, cur.w);
 
 
 }

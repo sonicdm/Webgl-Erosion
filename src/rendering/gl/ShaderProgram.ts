@@ -41,6 +41,7 @@ class ShaderProgram {
   unifKs : WebGLUniformLocation;
   unifKc : WebGLUniformLocation;
   unifKd : WebGLUniformLocation;
+  unifRockErosionResistance : WebGLUniformLocation;
   unifTimestep : WebGLUniformLocation;
   unifPipeArea : WebGLUniformLocation;
 
@@ -92,6 +93,7 @@ class ShaderProgram {
     this.unifKs = gl.getUniformLocation(this.prog, "u_Ks");
     this.unifKc = gl.getUniformLocation(this.prog, "u_Kc");
     this.unifKd = gl.getUniformLocation(this.prog, "u_Kd");
+    this.unifRockErosionResistance = gl.getUniformLocation(this.prog, "u_RockErosionResistance");
     this.unifTimestep = gl.getUniformLocation(this.prog, "u_timestep");
     this.unifPipeArea = gl.getUniformLocation(this.prog,"u_PipeArea");
 
@@ -372,6 +374,13 @@ class ShaderProgram {
       if(this.unifKd!==-1){
           gl.uniform1f(this.unifKd,k);
       }
+  }
+
+  setRockErosionResistance(resistance: number) {
+    this.use();
+    if(this.unifRockErosionResistance !== -1){
+      gl.uniform1f(this.unifRockErosionResistance, resistance);
+    }
   }
 
   setSimres(res:number){

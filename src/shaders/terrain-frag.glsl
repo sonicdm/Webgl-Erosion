@@ -169,6 +169,8 @@ void main()
                 addcol = sand * 0.8;
             }else if(u_BrushType == 2){
                 addcol = watercol * 0.8;
+            }else if(u_BrushType == 3){
+                addcol = rock1 * 0.8;
             }
             addcol *= 1.0;
         }
@@ -204,6 +206,7 @@ void main()
     vec4 fH = texture(hightmap,fs_Uv);
     float yval = fH.x * 4.0;
     float wval = fH.y;
+    float rockVal = fH.z; // Rock material value (1.0 = rock, 0.0 = normal)
     float sval = texture(sediBlend, fs_Uv).x;
 
     vec3 finalcol = vec3(0);
@@ -235,7 +238,13 @@ void main()
         finalcol = mix(dirtcol,finalcol,pow(abs(nor.y)/0.75,u_SnowRange));
     }
 
-
+    // Apply rock material color (rock is darker than regular terrain)
+    if(rockVal > 0.1){
+        // Use darker rock colors - mix between rock3 (darkest) and rock2 based on rock value
+        vec3 rockCol = mix(rock3, rock2, clamp((rockVal - 0.1) / 0.9, 0.0, 1.0));
+        // Strongly apply rock color - rock should be clearly visible and darker
+        finalcol = mix(finalcol, rockCol, min(rockVal * 1.5, 1.0));
+    }
 
     vec3 normal = lamb*(finalcol) + ambientCol;
     vec3 fcol = normal;
