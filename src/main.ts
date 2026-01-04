@@ -1218,6 +1218,30 @@ function onKeyDown(event : KeyboardEvent){
             controls.brushPressed = 0;
         }
     }
+    
+    // If brush is active, check if modifier is pressed to invert operation
+    if (controls.brushPressed === 1) {
+        const invertModifier = controlsConfig.modifiers.brushInvert;
+        if (invertModifier) {
+            const modifierPressed = 
+                (invertModifier === 'Ctrl' && (event.ctrlKey || event.metaKey)) ||
+                (invertModifier === 'Shift' && event.shiftKey) ||
+                (invertModifier === 'Alt' && event.altKey);
+            
+            // Check if this is the modifier key being pressed
+            const isModifierKey = 
+                (invertModifier === 'Ctrl' && (key === 'control' || key === 'meta')) ||
+                (invertModifier === 'Shift' && key === 'shift') ||
+                (invertModifier === 'Alt' && key === 'alt');
+            
+            if (isModifierKey && modifierPressed && originalBrushOperation === null) {
+                // Modifier just pressed while brush is active - invert operation
+                originalBrushOperation = controls.brushOperation;
+                controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
+                console.log('[DEBUG] Brush operation inverted on modifier press to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
+            }
+        }
+    }
 
     if (action === 'permanentWaterSource') {
         // Check if Shift is held for removal
@@ -1272,6 +1296,23 @@ function onKeyUp(event : KeyboardEvent){
     // Only deactivate if this key was the brush activator (not if mouse button is the activator)
     if (isBrushActivate(key, controlsConfig) || action === 'brushActivate') {
         controls.brushPressed = 0;
+    }
+    
+    // If brush is active and modifier is released, restore original operation
+    if (controls.brushPressed === 1) {
+        const invertModifier = controlsConfig.modifiers.brushInvert;
+        if (invertModifier) {
+            const isModifierKey = 
+                (invertModifier === 'Ctrl' && (key === 'control' || key === 'meta')) ||
+                (invertModifier === 'Shift' && key === 'shift') ||
+                (invertModifier === 'Alt' && key === 'alt');
+            
+            if (isModifierKey && originalBrushOperation !== null) {
+                controls.brushOperation = originalBrushOperation;
+                originalBrushOperation = null;
+                console.log('[DEBUG] Brush operation restored on modifier release to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
+            }
+        }
     }
 }
 
@@ -1488,6 +1529,27 @@ function main() {
         // Update mouse position for ray casting
         lastX = e.clientX;
         lastY = e.clientY;
+        
+        // Continuously check modifier state while brush is active
+        const invertModifier = controlsConfig.modifiers.brushInvert;
+        if (invertModifier) {
+          const modifierPressed = 
+            (invertModifier === 'Ctrl' && (e.ctrlKey || e.metaKey)) ||
+            (invertModifier === 'Shift' && e.shiftKey) ||
+            (invertModifier === 'Alt' && e.altKey);
+          
+          if (modifierPressed && originalBrushOperation === null) {
+            // Modifier is pressed but operation not inverted yet - invert it
+            originalBrushOperation = controls.brushOperation;
+            controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
+            console.log('[DEBUG] Brush operation inverted on modifier (pointermove) to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
+          } else if (!modifierPressed && originalBrushOperation !== null) {
+            // Modifier released - restore original operation
+            controls.brushOperation = originalBrushOperation;
+            originalBrushOperation = null;
+            console.log('[DEBUG] Brush operation restored on modifier release (pointermove) to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
+          }
+        }
       }
     }
   }, true);
