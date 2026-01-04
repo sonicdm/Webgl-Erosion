@@ -96,12 +96,43 @@ void main() {
   
   // Check if this is rock material (B channel > 0.5) and apply erosion resistance
   vec4 curTerrain = texture(readTerrain,curuv);
-  float rockFactor = curTerrain.z > 0.5 ? u_RockErosionResistance : 1.0;
+  bool isRock = curTerrain.z > 0.5;
+  float rockFactor = isRock ? u_RockErosionResistance : 1.0;
   
-  // Apply erosion resistance to rock (reduce erosion and deposition)
-  Kc *= rockFactor;
-  Ks *= rockFactor;
-  Kd *= rockFactor;
+  // Check neighboring cells for rock to boost erosion in non-rock areas between rock sections
+  // This creates crevices/valleys between rock areas
+  float neighborRockFactor = 1.0;
+  float capacityBoost = 1.0; // Boost sediment capacity for soil between rock
+  
+  if (!isRock) {
+    // Sample neighboring cells to see if any are rock
+    vec4 topTerrain = texture(readTerrain, curuv + vec2(0.0, div));
+    vec4 rightTerrain = texture(readTerrain, curuv + vec2(div, 0.0));
+    vec4 bottomTerrain = texture(readTerrain, curuv + vec2(0.0, -div));
+    vec4 leftTerrain = texture(readTerrain, curuv + vec2(-div, 0.0));
+    
+    int rockNeighbors = 0;
+    
+    // Check each neighbor for rock
+    if (topTerrain.z > 0.5) rockNeighbors++;
+    if (rightTerrain.z > 0.5) rockNeighbors++;
+    if (bottomTerrain.z > 0.5) rockNeighbors++;
+    if (leftTerrain.z > 0.5) rockNeighbors++;
+    
+    // MUCH stronger boost for soil between rock to create deep crevices
+    // The more rock neighbors, the faster the soil should erode away
+    if (rockNeighbors > 0) {
+      // Very aggressive erosion boost - soil between rock should erode much faster
+      neighborRockFactor = 1.0 + float(rockNeighbors) * 3.0; // 4x to 13x erosion rate
+      // Also boost capacity significantly so more material can be picked up
+      capacityBoost = 1.0 + float(rockNeighbors) * 2.0; // 3x to 9x capacity boost
+    }
+  }
+  
+  // Apply erosion resistance to rock - only reduce erosion (Ks), not capacity (Kc) or deposition (Kd)
+  // Boost erosion in non-rock areas adjacent to rock to create crevices
+  Ks *= rockFactor * neighborRockFactor; // Reduce for rock, boost for non-rock near rock
+  Kc *= capacityBoost; // Boost capacity for soil between rock so it erodes faster
 
   vec3 nor = calnor(curuv);
   float slopeSin;
@@ -150,13 +181,16 @@ void main() {
   float outsedi = curSediment.x;
 
   float water = curTerrain.y;
-
+  
+  // Track if erosion is happening (height decrease)
+  float heightChange = 0.0;
 
   if(sedicap >cursedi){
     float changesedi = (sedicap -cursedi)*(Ks);
     //changesedi = min(changesedi, curTerrain.y);
 
       hight = hight - changesedi;
+      heightChange = -changesedi; // Negative = erosion
       // water = water + (sedicap-cursedi)*Ks;
       outsedi = outsedi + changesedi;
 
@@ -164,13 +198,92 @@ void main() {
     float changesedi = (cursedi-sedicap)*Kd;
     //changesedi = min(changesedi, curTerrain.y);
     hight = hight + changesedi;
+    heightChange = changesedi; // Positive = deposition
     //water = water - (cursedi-sedicap)*Kd;
     outsedi = outsedi - changesedi;
   }
 
-
+  // Apply rock material spreading - rock fills in where terrain has eroded
+  // Only spread when terrain has eroded down to the lowest PAINTED rock that is CONTIGUOUS
+  // (directly touching/adjacent) to the neighboring terrain sections
+  float finalRockMaterial = curTerrain.z;
+  if (!isRock && heightChange < 0.0) { // Only if erosion is happening
+    // Sample neighboring cells for rock (these are the contiguous/adjacent cells)
+    // Use the ORIGINAL terrain height (before this frame's erosion) to find the painted rock edge
+    vec4 topTerrain = texture(readTerrain, curuv + vec2(0.0, div));
+    vec4 rightTerrain = texture(readTerrain, curuv + vec2(div, 0.0));
+    vec4 bottomTerrain = texture(readTerrain, curuv + vec2(0.0, -div));
+    vec4 leftTerrain = texture(readTerrain, curuv + vec2(-div, 0.0));
+    
+    float lowestContiguousRockHeight = 999999.0; // Find the lowest contiguous painted rock edge
+    float bestRockValue = 0.0;
+    int contiguousRockCount = 0;
+    
+    // Find the lowest PAINTED edge of rock that is CONTIGUOUS (directly adjacent/touching)
+    // to this terrain cell. Use the ORIGINAL height (curTerrain.x) of rock neighbors,
+    // not the current height after erosion, to find where rock was originally painted.
+    if (topTerrain.z > 0.5) {
+      // This rock neighbor is contiguous - it's directly touching this cell
+      // Use the rock's original height to find the painted edge
+      if (topTerrain.x < lowestContiguousRockHeight) {
+        lowestContiguousRockHeight = topTerrain.x;
+        bestRockValue = topTerrain.z;
+      }
+      contiguousRockCount++;
+    }
+    if (rightTerrain.z > 0.5) {
+      if (rightTerrain.x < lowestContiguousRockHeight) {
+        lowestContiguousRockHeight = rightTerrain.x;
+        bestRockValue = rightTerrain.z;
+      }
+      contiguousRockCount++;
+    }
+    if (bottomTerrain.z > 0.5) {
+      if (bottomTerrain.x < lowestContiguousRockHeight) {
+        lowestContiguousRockHeight = bottomTerrain.x;
+        bestRockValue = bottomTerrain.z;
+      }
+      contiguousRockCount++;
+    }
+    if (leftTerrain.z > 0.5) {
+      if (leftTerrain.x < lowestContiguousRockHeight) {
+        lowestContiguousRockHeight = leftTerrain.x;
+        bestRockValue = leftTerrain.z;
+      }
+      contiguousRockCount++;
+    }
+    
+    // Only spread if:
+    // 1. There are contiguous rock neighbors (rock sections directly touching this terrain)
+    // 2. Current cell's ORIGINAL height (before erosion) was above the rock, and
+    //    has now eroded significantly below the lowest CONTIGUOUS painted rock edge
+    //    Compare original terrain height to rock height to see if it was originally above
+    float originalTerrainHeight = curTerrain.x; // Original height before this frame's erosion
+    
+    // Only spread if original terrain was above rock and has eroded well below it
+    if (contiguousRockCount > 0 && originalTerrainHeight > lowestContiguousRockHeight) {
+      // Calculate how far the CURRENT height is below the lowest contiguous painted edge
+      float depthBelowContiguousEdge = lowestContiguousRockHeight - hight;
+      
+      // Only spread if we're significantly below the painted edge (at least 0.2 units)
+      if (depthBelowContiguousEdge >= 0.2) {
+        // Spread amount based on depth below contiguous painted edge and erosion rate
+        float erosionAmount = abs(heightChange);
+        
+        // Very gradual spreading - scales with depth below the contiguous painted edge
+        // Only count depth beyond the 0.2 threshold
+        float effectiveDepth = depthBelowContiguousEdge - 0.2;
+        float depthFactor = clamp(effectiveDepth * 2.0, 0.0, 1.0);
+        float spreadFactor = min(erosionAmount * 0.5 * (1.0 + depthFactor * 0.2), 0.01); // Max 1% per frame, very slow
+        
+        // Use max to ensure rock value increases (doesn't decrease if already partially rock)
+        finalRockMaterial = max(curTerrain.z, mix(curTerrain.z, 1.0, spreadFactor));
+      }
+    }
+  }
+  
   writeTerrainNormal = vec4(vec3(abs(slopeSin)),1.f);
   writeSediment = vec4(outsedi,0.0f,0.0f,1.0f);
-  writeTerrain = vec4(hight,curTerrain.y,curTerrain.z,curTerrain.w);
+  writeTerrain = vec4(hight,curTerrain.y,finalRockMaterial,curTerrain.w);
   writeVelocity = curvel;
 }
