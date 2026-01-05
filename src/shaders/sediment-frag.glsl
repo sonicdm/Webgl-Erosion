@@ -185,6 +185,9 @@ void main() {
   // Track if erosion is happening (height decrease)
   float heightChange = 0.0;
 
+  // Track original rock material value before erosion
+  float originalRockMaterial = curTerrain.z;
+  
   if(sedicap >cursedi){
     float changesedi = (sedicap -cursedi)*(Ks);
     //changesedi = min(changesedi, curTerrain.y);
@@ -193,6 +196,17 @@ void main() {
       heightChange = -changesedi; // Negative = erosion
       // water = water + (sedicap-cursedi)*Ks;
       outsedi = outsedi + changesedi;
+      
+      // When rock erodes, convert it to regular soil
+      // Reduce rock material value proportionally to erosion amount
+      if (isRock && changesedi > 0.0) {
+        // Calculate how much rock should convert to soil based on erosion
+        // More erosion = more rock converted to soil
+        // Scale conversion rate with erosion amount - larger erosion = faster conversion
+        float erosionAmount = changesedi;
+        float conversionRate = min(erosionAmount * 0.1, 0.05); // Convert up to 5% per frame, scales with erosion
+        originalRockMaterial = max(0.0, originalRockMaterial - conversionRate); // Reduce rock value, convert to soil
+      }
 
   }else {
     float changesedi = (cursedi-sedicap)*Kd;
@@ -206,8 +220,24 @@ void main() {
   // Apply rock material spreading - rock fills in where terrain has eroded
   // Only spread when terrain has eroded down to the lowest PAINTED rock that is CONTIGUOUS
   // (directly touching/adjacent) to the neighboring terrain sections
-  float finalRockMaterial = curTerrain.z;
-  if (!isRock && heightChange < 0.0) { // Only if erosion is happening
+  // IMPORTANT: Don't spread rock when water is present or flowing to prevent damming
+  // Start with the eroded rock material value (rock converts to soil when it erodes)
+  float finalRockMaterial = originalRockMaterial;
+  float waterLevel = curTerrain.y; // Water height in this cell
+  float waterVelocity = length(curvel.xy); // Water flow velocity
+  
+  // Check if this area is below the water surface by comparing total height (terrain + water)
+  // to neighboring rock's total height
+  float currentTotalHeight = hight + waterLevel; // Current terrain + water height
+  
+  // Only spread rock if:
+  // 1. There's little or no water (water < 0.1) AND
+  // 2. Water is not actively flowing (velocity < 0.5) AND
+  // 3. Erosion is happening
+  // This prevents rock from creating barriers that dam up water
+  bool canSpreadRock = waterLevel < 0.1 && waterVelocity < 0.5;
+  
+  if (!isRock && heightChange < 0.0 && canSpreadRock) { // Only if erosion is happening AND water conditions allow
     // Sample neighboring cells for rock (these are the contiguous/adjacent cells)
     // Use the ORIGINAL terrain height (before this frame's erosion) to find the painted rock edge
     vec4 topTerrain = texture(readTerrain, curuv + vec2(0.0, div));
@@ -265,8 +295,33 @@ void main() {
       // Calculate how far the CURRENT height is below the lowest contiguous painted edge
       float depthBelowContiguousEdge = lowestContiguousRockHeight - hight;
       
+      // Check if this area is below the water surface by comparing total height (terrain + water)
+      // to neighboring rock's total height - if water would need to flow through here, don't spread rock
+      float lowestRockTotalHeight = 999999.0;
+      if (topTerrain.z > 0.5) {
+        float rockTotalHeight = topTerrain.x + topTerrain.y; // Rock terrain + water
+        if (rockTotalHeight < lowestRockTotalHeight) lowestRockTotalHeight = rockTotalHeight;
+      }
+      if (rightTerrain.z > 0.5) {
+        float rockTotalHeight = rightTerrain.x + rightTerrain.y;
+        if (rockTotalHeight < lowestRockTotalHeight) lowestRockTotalHeight = rockTotalHeight;
+      }
+      if (bottomTerrain.z > 0.5) {
+        float rockTotalHeight = bottomTerrain.x + bottomTerrain.y;
+        if (rockTotalHeight < lowestRockTotalHeight) lowestRockTotalHeight = rockTotalHeight;
+      }
+      if (leftTerrain.z > 0.5) {
+        float rockTotalHeight = leftTerrain.x + leftTerrain.y;
+        if (rockTotalHeight < lowestRockTotalHeight) lowestRockTotalHeight = rockTotalHeight;
+      }
+      
+      // Don't spread rock if current area's total height (terrain + water) is below or near
+      // the water surface level of neighboring rock - this would block water flow
+      bool isBelowWaterSurface = currentTotalHeight < lowestRockTotalHeight + 0.3;
+      
       // Only spread if we're significantly below the painted edge (at least 0.2 units)
-      if (depthBelowContiguousEdge >= 0.2) {
+      // AND not below the water surface (to allow water to flow through)
+      if (depthBelowContiguousEdge >= 0.2 && !isBelowWaterSurface) {
         // Spread amount based on depth below contiguous painted edge and erosion rate
         float erosionAmount = abs(heightChange);
         

@@ -55,6 +55,9 @@ void main() {
   vec4 curTerrain = texture(readTerrain,curuv);
   vec4 curFlux = texture(readFlux,curuv) * damping;
 
+  // Calculate height differences for flow (terrain height + water height)
+  // Note: Rock material (z channel) does NOT affect flow - water flows normally over rock
+  // Flow is based purely on height differences (x = terrain height, y = water height)
   float Htopout = (curTerrain.y+curTerrain.x )-(top.y+top.x );
   float Hrightout = (curTerrain.y+curTerrain.x)-(right.y+right.x);
   float Hbottomout = (curTerrain.y+curTerrain.x)-(bottom.x+bottom.y);
