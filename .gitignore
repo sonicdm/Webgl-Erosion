@@ -85,3 +85,6 @@ typings/
 # Gradle
 .idea/**/gradle.xml
 .idea/**/libraries
+
+# Build output
+dist/
