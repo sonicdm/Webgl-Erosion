@@ -307,6 +307,8 @@ void main() {
 
       // Handle rock material placement (store in B channel: 1.0 = rock, 0.0 = normal terrain)
       float rockMaterial = cur.z;
+      float baseRockSurfaceHeight = cur.w; // A channel stores base rock surface height
+      
       // Check for rock brush - handle it in the same brush check block for consistency
       if(u_BrushType == 3 && u_BrushPressed == 1){
             vec2 pointOnPlane = u_BrushPos;
@@ -320,13 +322,28 @@ void main() {
                   mixFactor = min(mixFactor, 1.0); // Clamp to 1.0
                   if(u_BrushOperation == 0){
                         // Add rock material - use max to ensure it increases
+                        float oldRockMaterial = rockMaterial;
                         rockMaterial = max(rockMaterial, mix(rockMaterial, 1.0, mixFactor));
+                        
+                        // If we're placing rock (and rock material is significant), reset base rock surface height
+                        // This makes the new rock surface the base, even if there was sediment on top
+                        // Reset whenever we're painting rock, not just when it increases (handles already-high rock)
+                        if(rockMaterial > 0.5 && mixFactor > 0.01){
+                              // Calculate final height after terrain modifications
+                              float finalHeight = min(max(cur.x + addterrain, -0.10),2000.30);
+                              // Reset base rock surface to current height - new rock becomes the base
+                              baseRockSurfaceHeight = finalHeight;
+                        }
                   } else {
                         // Remove rock material - use min to ensure it decreases
                         rockMaterial = min(rockMaterial, mix(rockMaterial, 0.0, mixFactor));
+                        // If rock is removed, clear the base rock surface height
+                        if(rockMaterial < 0.1){
+                              baseRockSurfaceHeight = 0.0;
+                        }
                   }
             }
       }
       
-      writeTerrain = vec4(min(max(cur.x + addterrain, -0.10),2000.30),max(cur.y+rain * raindeg + addwater, 0.0f),rockMaterial,cur.w);
+      writeTerrain = vec4(min(max(cur.x + addterrain, -0.10),2000.30),max(cur.y+rain * raindeg + addwater, 0.0f),rockMaterial,baseRockSurfaceHeight);
 }

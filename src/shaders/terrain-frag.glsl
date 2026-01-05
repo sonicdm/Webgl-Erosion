@@ -251,8 +251,41 @@ void main()
     if(rockVal > 0.1){
         // Use darker rock colors - mix between rock3 (darkest) and rock2 based on rock value
         vec3 rockCol = mix(rock3, rock2, clamp((rockVal - 0.1) / 0.9, 0.0, 1.0));
-        // Strongly apply rock color - rock should be clearly visible and darker
-        finalcol = mix(finalcol, rockCol, min(rockVal * 1.5, 1.0));
+        
+        // Check if there's sediment on top of rock
+        float baseRockHeight = fH.w;
+        float sedimentLayerThickness = 0.0;
+        float sedimentBlendFactor = 0.0;
+        
+        // Check if base rock height is valid and current height is significantly above it
+        // If base height is very close to current height (within 0.01), it means new rock was placed (no sediment)
+        float heightDiff = fH.x - baseRockHeight;
+        if(baseRockHeight > 0.001 && abs(heightDiff) > 0.01){
+            // There's sediment on top of rock (height is significantly above base)
+            // Only apply blending if height is above base (positive difference)
+            if(heightDiff > 0.0){
+                sedimentLayerThickness = heightDiff;
+                // Blend factor: 0.0 = pure rock, 1.0 = pure dirt
+                // Use a smooth curve - more sediment = more dirt color
+                // At 0.1 units of sediment, it should be mostly dirt
+                sedimentBlendFactor = smoothstep(0.0, 0.1, sedimentLayerThickness);
+            }
+        }
+        // If abs(heightDiff) <= 0.01, treat as no sediment (new rock was placed, base was reset to current height)
+        
+        // Blend between rock color and dirt color based on sediment coverage
+        vec3 surfaceCol = mix(rockCol, dirtcol, sedimentBlendFactor);
+        
+        // Apply the blended color - reduce rock color influence when there's sediment on top
+        // When sedimentBlendFactor is high, apply dirt color directly to look like normal dirt
+        if(sedimentBlendFactor > 0.8){
+            // Mostly covered with sediment - apply dirt color directly, no rock color
+            finalcol = mix(finalcol, dirtcol, 0.9);
+        } else {
+            // Partially covered or no sediment - apply blended rock/sediment color
+            float rockColorStrength = min(rockVal * 1.5, 1.0) * (1.0 - sedimentBlendFactor * 0.7);
+            finalcol = mix(finalcol, surfaceCol, rockColorStrength);
+        }
     }
 
     vec3 normal = lamb*(finalcol) + ambientCol;
@@ -304,6 +337,27 @@ void main()
         fcol = vec3(sval * 300.0);
     }else if(u_TerrainDebug == 8){
         fcol = slopesin;
+    }else if(u_TerrainDebug == 10){
+        // Rock/Soil material debug view
+        // Rock (rockVal > 0.5): dark gray/black
+        // Soil (rockVal <= 0.5): brown/tan
+        // Sediment on rock: bright yellow/orange (clearly distinct)
+        
+        float baseRockHeight = fH.w;
+        // Only show as sediment on rock if height is significantly above base (at least 0.05 units)
+        // This prevents false positives from floating point errors
+        bool hasSedimentOnRock = baseRockHeight > 0.001 && rockVal > 0.1 && (fH.x - baseRockHeight) > 0.05;
+        
+        if(hasSedimentOnRock){
+            // Sediment on rock - bright yellow/orange to clearly distinguish from both rock and soil
+            fcol = vec3(1.0, 0.8, 0.2); // Bright yellow-orange
+        } else if(rockVal > 0.5){
+            // Rock - dark gray, intensity based on rock value
+            fcol = vec3(0.2, 0.2, 0.2) * (0.5 + rockVal * 0.5);
+        } else {
+            // Soil - brown/tan
+            fcol = vec3(0.6, 0.5, 0.4);
+        }
     }
 
 

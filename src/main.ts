@@ -1240,7 +1240,7 @@ function main() {
     erosionpara.add(controls,'Ks', 0.001,0.2);
     erosionpara.add(controls,'Kd', 0.0001,0.1);
     //erosionpara.add(controls,'AdvectionSpeedScaling', 0.1, 1.0);
-    erosionpara.add(controls, 'TerrainDebug', {noDebugView : 0, sediment : 1, velocity : 2, velocityHeatmap : 9, terrain : 3, flux : 4, terrainflux : 5, maxslippage : 6, flowMap : 7, spikeDiffusion : 8});
+    erosionpara.add(controls, 'TerrainDebug', {noDebugView : 0, sediment : 1, velocity : 2, velocityHeatmap : 9, terrain : 3, flux : 4, terrainflux : 5, maxslippage : 6, flowMap : 7, spikeDiffusion : 8, rockMaterial : 10});
     erosionpara.add(controls, 'AdvectionMethod', {Semilagrangian : 0, MacCormack : 1});
     erosionpara.add(controls, 'VelocityMultiplier',1.0,5.0);
     erosionpara.open();

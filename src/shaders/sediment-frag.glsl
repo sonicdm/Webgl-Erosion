@@ -97,14 +97,24 @@ void main() {
   // Check if this is rock material (B channel > 0.5) and apply erosion resistance
   vec4 curTerrain = texture(readTerrain,curuv);
   bool isRock = curTerrain.z > 0.5;
-  // Apply rock resistance based on rock material value - even partially rock should have some resistance
-  // This prevents rock from losing resistance too quickly as it converts to soil
-  // Use a more aggressive scaling to ensure rock maintains strong resistance
+  
+  // Track base rock surface height (A channel stores the height of the rock surface
+  // before any sediment was deposited on top)
+  float baseRockSurfaceHeight = curTerrain.w;
+  // If A channel is 0 or uninitialized and this is rock, initialize it to current height
+  if (isRock && baseRockSurfaceHeight < 0.001) {
+    baseRockSurfaceHeight = curTerrain.x;
+  }
+  
+  // Rock should maintain constant resistance until fully converted to soil
+  // Use binary check: if rock material exists, apply full resistance
   float rockMaterialValue = curTerrain.z;
-  // Rock resistance scales from full resistance at 1.0 to no resistance at 0.0
-  // Use a power curve to make resistance drop off more slowly
-  float rockResistanceFactor = pow(clamp(rockMaterialValue, 0.0, 1.0), 0.5); // Square root curve - slower dropoff
-  float rockFactor = mix(1.0, u_RockErosionResistance, rockResistanceFactor);
+  bool hasRock = rockMaterialValue > 0.1; // Threshold for "still rock"
+  float rockFactor = hasRock ? u_RockErosionResistance : 1.0;
+  
+  // Check if there's sediment on top of rock
+  // If current height is above base rock surface, there's sediment on top
+  bool hasSedimentOnRock = isRock && curTerrain.x > baseRockSurfaceHeight + 0.001;
   
   // Check neighboring cells for rock to boost erosion in non-rock areas between rock sections
   // This creates crevices/valleys between rock areas
@@ -145,13 +155,17 @@ void main() {
   // Rock erodes slower AND produces less sediment capacity when it does erode
   // This ensures rock produces less total sediment overall
   // The capacity reduction should be proportional to the erosion resistance
+  // BUT: If there's sediment on top of rock, use normal capacity for the sediment layer
+  float effectiveCapacityRockFactor = hasSedimentOnRock ? 1.0 : rockFactor;
+  
   // Boost erosion in non-rock areas adjacent to rock to create crevices
   Ks *= rockFactor * neighborRockFactor; // Reduce for rock, boost for non-rock near rock
   Kc *= capacityBoost; // Boost capacity for soil between rock so it erodes faster
   // IMPORTANT: Reduce sediment capacity for rock proportionally to erosion resistance
   // Rock produces less fine sediment when it erodes, scaled by the same factor as erosion resistance
   // This ensures sediment production is proportional to erosion rate
-  Kc *= rockFactor; // Reduce capacity for rock by the same factor as erosion resistance (already includes gradual scaling)
+  // But use normal capacity if there's sediment on top
+  Kc *= effectiveCapacityRockFactor; // Reduce capacity for rock, but not for sediment on rock
 
   vec3 nor = calnor(curuv);
   float slopeSin;
@@ -208,17 +222,31 @@ void main() {
   float originalRockMaterial = curTerrain.z;
   
   if(sedicap >cursedi){
-    float changesedi = (sedicap -cursedi)*(Ks);
+    // Check if we're eroding sediment on top of rock or the rock itself
+    bool erodingSedimentLayer = hasSedimentOnRock && hight > baseRockSurfaceHeight;
+    
+    // Only apply rock resistance if we're eroding the actual rock, not sediment on top
+    float effectiveRockFactor = erodingSedimentLayer ? 1.0 : rockFactor;
+    
+    // Calculate erosion with correct resistance
+    float changesedi = (sedicap -cursedi) * (Ks * effectiveRockFactor);
     //changesedi = min(changesedi, curTerrain.y);
 
       hight = hight - changesedi;
       heightChange = -changesedi; // Negative = erosion
+      
+      // If we've eroded down to the base rock surface, reset the base surface height
+      if (hasSedimentOnRock && hight <= baseRockSurfaceHeight) {
+        baseRockSurfaceHeight = hight; // Update base to current height
+      }
+      
       // water = water + (sedicap-cursedi)*Ks;
       outsedi = outsedi + changesedi;
       
       // When rock erodes, gradually convert it to regular soil
       // Rock should erode into normal sediment, but conversion should be very slow so rock resistance actually matters
-      if (rockMaterialValue > 0.1 && changesedi > 0.0) {
+      // Only convert if we're actually eroding rock, not sediment on top
+      if (rockMaterialValue > 0.1 && changesedi > 0.0 && !erodingSedimentLayer) {
         // Convert rock to soil proportionally to the amount eroded
         // IMPORTANT: Conversion should be very slow so rock stays rock longer and erosion resistance has effect
         // More erosion = more rock converted to soil, but at a much slower rate
@@ -232,6 +260,14 @@ void main() {
   }else {
     float changesedi = (cursedi-sedicap)*Kd;
     //changesedi = min(changesedi, curTerrain.y);
+    
+    // If sediment is depositing on rock, store the base rock surface height
+    // Store the height BEFORE deposition as the base surface
+    if (isRock && baseRockSurfaceHeight < 0.001) {
+      // Initialize base surface to height before this deposition
+      baseRockSurfaceHeight = curTerrain.x;
+    }
+    
     hight = hight + changesedi;
     heightChange = changesedi; // Positive = deposition
     //water = water - (cursedi-sedicap)*Kd;
@@ -381,12 +417,21 @@ void main() {
         
         // Use max to ensure rock value increases (doesn't decrease if already partially rock)
         finalRockMaterial = newRockValue;
+        
+        // When rock spreads, set the base rock surface height to current height
+        // This marks where the rock surface is before any future sediment deposition
+        baseRockSurfaceHeight = hight;
       }
     }
   }
   
+  // If this cell became rock (through spreading), ensure base surface is initialized
+  if (finalRockMaterial > 0.5 && baseRockSurfaceHeight < 0.001) {
+    baseRockSurfaceHeight = hight;
+  }
+  
   writeTerrainNormal = vec4(vec3(abs(slopeSin)),1.f);
   writeSediment = vec4(outsedi,0.0f,0.0f,1.0f);
-  writeTerrain = vec4(hight,curTerrain.y,finalRockMaterial,curTerrain.w);
+  writeTerrain = vec4(hight,curTerrain.y,finalRockMaterial,baseRockSurfaceHeight);
   writeVelocity = curvel;
 }
