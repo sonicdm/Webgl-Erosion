@@ -171,6 +171,15 @@ void main()
                 addcol = watercol * 0.8;
             }else if(u_BrushType == 3){
                 addcol = rock1 * 0.8;
+            }else if(u_BrushType == 4){
+                // Smooth brush - light blue
+                addcol = vec3(0.5, 0.8, 1.0) * 0.8;
+            }else if(u_BrushType == 5){
+                // Flatten brush - yellow
+                addcol = vec3(1.0, 1.0, 0.3) * 0.8;
+            }else if(u_BrushType == 6){
+                // Slope brush - green
+                addcol = vec3(0.3, 1.0, 0.3) * 0.8;
             }
             addcol *= 1.0;
         }

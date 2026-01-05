@@ -10,7 +10,9 @@ import {gl, setGL} from './globals';
 import ShaderProgram, {Shader} from './rendering/gl/ShaderProgram';
 import {stat} from "fs";
 var mouseChange = require('mouse-change');
-import { defaultControlsConfig, getKeyAction, getMouseButtonAction, isBrushActivate, ControlsConfig } from './controls-config';
+import { getKeyAction, getMouseButtonAction, isBrushActivate, ControlsConfig, isModifierPressed } from './controls-config';
+import { loadSettings } from './settings';
+import { handleBrushMouseDown, handleBrushMouseUp, updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
 
 // Water source structure
 interface WaterSource {
@@ -144,11 +146,15 @@ const controls = {
     TerrainPlatte : 1, // 0 normal alphine mtn, 1 desert, 2 jungle
     SnowRange : 0,
     ForestRange : 0,
-    brushType : 2, // 0 : no brush, 1 : terrain, 2 : water, 3 : rock
+    brushType : 2, // 0 : no brush, 1 : terrain, 2 : water, 3 : rock, 4 : smooth, 5 : flatten, 6 : slope
     brushSize : 4,
     brushStrenth : 0.25,
     brushOperation : 0, // 0 : add, 1 : subtract
     brushPressed : 0, // 0 : not pressed, 1 : pressed
+    flattenTargetHeight : 0.0, // Target height for flatten brush (will be set to center height on Alt+click)
+    slopeStartPos : vec2.fromValues(0.0, 0.0), // Start position for slope brush
+    slopeEndPos : vec2.fromValues(0.0, 0.0), // End position for slope brush
+    slopeActive : 0, // 0 : not active, 1 : start set, 2 : end set
     sourceCount : 0, // Number of active water sources
     rockErosionResistance : 0.1, // 0.0 = erodes normally, 1.0 = doesn't erode (multiplier for Ks/Kc)
     thermalTalusAngleScale : 8.0,
@@ -1296,7 +1302,8 @@ function handleInteraction (buttons : number, x : number, y : number){
 }
 
 // Controls configuration - can be changed at runtime if needed
-let controlsConfig: ControlsConfig = defaultControlsConfig;
+// controlsConfig will be loaded from settings in main() function
+let controlsConfig: ControlsConfig;
 
 function onKeyDown(event : KeyboardEvent){
     const key = event.key.toLowerCase();
@@ -1320,10 +1327,7 @@ function onKeyDown(event : KeyboardEvent){
     if (controls.brushPressed === 1) {
         const invertModifier = controlsConfig.modifiers.brushInvert;
         if (invertModifier) {
-            const modifierPressed = 
-                (invertModifier === 'Ctrl' && (event.ctrlKey || event.metaKey)) ||
-                (invertModifier === 'Shift' && event.shiftKey) ||
-                (invertModifier === 'Alt' && event.altKey);
+            const modifierPressed = isModifierPressed(invertModifier, event);
             
             // Check if this is the modifier key being pressed
             const isModifierKey = 
@@ -1331,9 +1335,9 @@ function onKeyDown(event : KeyboardEvent){
                 (invertModifier === 'Shift' && key === 'shift') ||
                 (invertModifier === 'Alt' && key === 'alt');
             
-            if (isModifierKey && modifierPressed && originalBrushOperation === null) {
+            if (isModifierKey && modifierPressed && getOriginalBrushOperation() === null) {
                 // Modifier just pressed while brush is active - invert operation
-                originalBrushOperation = controls.brushOperation;
+                setOriginalBrushOperation(controls.brushOperation);
                 controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
                 console.log('[DEBUG] Brush operation inverted on modifier press to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
             }
@@ -1404,17 +1408,17 @@ function onKeyUp(event : KeyboardEvent){
                 (invertModifier === 'Shift' && key === 'shift') ||
                 (invertModifier === 'Alt' && key === 'alt');
             
-            if (isModifierKey && originalBrushOperation !== null) {
-                controls.brushOperation = originalBrushOperation;
-                originalBrushOperation = null;
+            if (isModifierKey && getOriginalBrushOperation() !== null) {
+                const original = getOriginalBrushOperation();
+                if (original !== null) {
+                    controls.brushOperation = original;
+                    setOriginalBrushOperation(null);
+                }
                 console.log('[DEBUG] Brush operation restored on modifier release to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
             }
         }
     }
 }
-
-// Store original brushOperation when modifier is held (for restoration on release)
-let originalBrushOperation: number | null = null;
 
 function onMouseDown(event : MouseEvent | PointerEvent){
     // ALWAYS log first thing - if this doesn't show, handler isn't being called
@@ -1426,36 +1430,27 @@ function onMouseDown(event : MouseEvent | PointerEvent){
     console.log('[DEBUG] onMouseDown - action:', action, 'brushType:', controls.brushType);
     
     if (action === 'brushActivate') {
-        console.log('[DEBUG] Activating brush - setting brushPressed = 1');
-        controls.brushPressed = 1;
+        const brushContext: BrushContext = {
+            controls: controls as BrushControls,
+            controlsConfig: controlsConfig,
+            simres: simres,
+            HightMapCpuBuf: HightMapCpuBuf
+        };
         
-        // Check for brush invert modifier (Shift, Ctrl, or Alt)
-        const invertModifier = controlsConfig.modifiers.brushInvert;
-        if (invertModifier) {
-            const modifierPressed = 
-                (invertModifier === 'Ctrl' && (event.ctrlKey || event.metaKey)) ||
-                (invertModifier === 'Shift' && event.shiftKey) ||
-                (invertModifier === 'Alt' && event.altKey);
-            
-            if (modifierPressed) {
-                // Store original operation and invert it
-                originalBrushOperation = controls.brushOperation;
-                controls.brushOperation = controls.brushOperation === 0 ? 1 : 0; // Toggle: 0 (Add) ↔ 1 (Subtract)
-                console.log('[DEBUG] Brush operation inverted to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
-            } else {
-                // No modifier, use normal operation
-                originalBrushOperation = null;
-            }
+        const result = handleBrushMouseDown(event, brushContext);
+        
+        if (result.shouldActivate) {
+            controls.brushPressed = result.brushPressed;
+            // Prevent OrbitControls from handling this event
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            console.log('[DEBUG] brushPressed set to:', controls.brushPressed);
+            return; // Exit early to prevent other handlers
         } else {
-            originalBrushOperation = null;
+            // Brush handler already prevented default and stopped propagation
+            return;
         }
-        
-        // Prevent OrbitControls from handling this event
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        console.log('[DEBUG] brushPressed set to:', controls.brushPressed);
-        return; // Exit early to prevent other handlers
     } else {
         console.log('[DEBUG] Not a brush action - button:', event.button, 'buttonName:', buttonName);
         console.log('[DEBUG] Expected - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
@@ -1471,12 +1466,14 @@ function onMouseUp(event : MouseEvent | PointerEvent){
         console.log('[DEBUG] Deactivating brush - setting brushPressed = 0');
         controls.brushPressed = 0;
         
-        // Restore original brushOperation if it was inverted
-        if (originalBrushOperation !== null) {
-            controls.brushOperation = originalBrushOperation;
-            originalBrushOperation = null;
-            console.log('[DEBUG] Brush operation restored to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
-        }
+        const brushContext: BrushContext = {
+            controls: controls as BrushControls,
+            controlsConfig: controlsConfig,
+            simres: simres,
+            HightMapCpuBuf: HightMapCpuBuf
+        };
+        
+        handleBrushMouseUp(event, brushContext);
         
         // Prevent OrbitControls from handling this event
         event.preventDefault();
@@ -1538,7 +1535,14 @@ function main() {
     thermalerosionpara.add(controls,'thermalErosionScale',0.0, 5.0 );
     //thermalerosionpara.open();
     var terraineditor = gui.addFolder('Terrain Editor');
-    terraineditor.add(controls,'brushType',{NoBrush : 0, TerrainBrush : 1, WaterBrush : 2, RockBrush : 3});
+    const brushTypeController = terraineditor.add(controls,'brushType',{NoBrush : 0, TerrainBrush : 1, WaterBrush : 2, RockBrush : 3, SmoothBrush : 4, FlattenBrush : 5, SlopeBrush : 6});
+    brushTypeController.onChange((value: number) => {
+        // Reset slope state when switching brush types
+        if (value !== 6) {
+            controls.slopeActive = 0;
+        }
+    });
+    terraineditor.add(controls,'flattenTargetHeight', 0.0, 500.0);
     terraineditor.add(controls,'rockErosionResistance', 0.0, 1.0);
     const brushSizeController = terraineditor.add(controls,'brushSize',0.1, 20.0);
     terraineditor.add(controls,'brushStrenth',0.1,2.0);
@@ -1574,10 +1578,7 @@ function main() {
   document.addEventListener('keydown', onKeyDown, false);
   document.addEventListener('keyup', onKeyUp, false);
   
-  // Attach to window FIRST in capture phase to intercept before OrbitControls
-  // Use pointer events since OrbitControls uses pointer events (PR #21972)
-  console.log('[DEBUG] Setting up pointer listeners on window (capture phase)');
-  console.log('[DEBUG] Config - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
+  // Note: controlsConfig will be loaded in main() before event listeners are set up
   window.addEventListener('pointerdown', (e) => {
     const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][e.button];
     console.log('[DEBUG] WINDOW pointerdown CAPTURE - button:', e.button, 'buttonName:', buttonName, 'target:', e.target);
@@ -1632,20 +1633,20 @@ function main() {
         // Continuously check modifier state while brush is active
         const invertModifier = controlsConfig.modifiers.brushInvert;
         if (invertModifier) {
-          const modifierPressed = 
-            (invertModifier === 'Ctrl' && (e.ctrlKey || e.metaKey)) ||
-            (invertModifier === 'Shift' && e.shiftKey) ||
-            (invertModifier === 'Alt' && e.altKey);
+          const modifierPressed = isModifierPressed(invertModifier, e);
           
-          if (modifierPressed && originalBrushOperation === null) {
+          if (modifierPressed && getOriginalBrushOperation() === null) {
             // Modifier is pressed but operation not inverted yet - invert it
-            originalBrushOperation = controls.brushOperation;
+            setOriginalBrushOperation(controls.brushOperation);
             controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
             console.log('[DEBUG] Brush operation inverted on modifier (pointermove) to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
-          } else if (!modifierPressed && originalBrushOperation !== null) {
+          } else if (!modifierPressed && getOriginalBrushOperation() !== null) {
             // Modifier released - restore original operation
-            controls.brushOperation = originalBrushOperation;
-            originalBrushOperation = null;
+            const original = getOriginalBrushOperation();
+            if (original !== null) {
+                controls.brushOperation = original;
+                setOriginalBrushOperation(null);
+            }
             console.log('[DEBUG] Brush operation restored on modifier release (pointermove) to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
           }
         }
@@ -1671,10 +1672,7 @@ function main() {
     }
     
     // Check if the configured modifier is pressed
-    const modifierPressed = 
-      (scrollModifier === 'Ctrl' && (e.ctrlKey || e.metaKey)) ||
-      (scrollModifier === 'Shift' && e.shiftKey) ||
-      (scrollModifier === 'Alt' && e.altKey);
+      const modifierPressed = isModifierPressed(scrollModifier, e);
     
     if (modifierPressed) {
       // Prevent default zoom behavior so OrbitControls doesn't zoom
@@ -1723,6 +1721,8 @@ function main() {
   // Initial call to load scene
   loadScene();
 
+  // Load settings (from localStorage or defaults)
+  controlsConfig = loadSettings();
 
   // Check if brush uses left click (either from mouse.brushActivate or keys.brushActivate)
   const brushUsesLeftClick = controlsConfig.mouse.brushActivate === 'LEFT' || 
@@ -2012,6 +2012,22 @@ function main() {
     rains.setBrushStrength(controls.brushStrenth);
     rains.setBrushType(controls.brushType);
     rains.setBrushPressed(controls.brushPressed);
+    rains.setSimres(simres);
+    
+    // Update brush state (flatten target height, slope end points, etc.)
+    const brushContext: BrushContext = {
+        controls: controls as BrushControls,
+        controlsConfig: controlsConfig,
+        simres: simres,
+        HightMapCpuBuf: HightMapCpuBuf
+    };
+    updateBrushState(pos, brushContext);
+    
+    // Set brush uniforms for shader
+    rains.setFloat(controls.flattenTargetHeight, 'u_FlattenTargetHeight');
+    rains.setVec2(controls.slopeStartPos, 'u_SlopeStartPos');
+    rains.setVec2(controls.slopeEndPos, 'u_SlopeEndPos');
+    rains.setInt(controls.slopeActive, 'u_SlopeActive');
     // Set source arrays for rain shader (water emission)
     rains.setSourceCount(waterSources.length);
     rains.setSourcePositions(sourcePositions);

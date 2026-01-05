@@ -159,9 +159,10 @@ class ShaderProgram {
   }
   setVec2(v : vec2, name : string){
     this.use();
-    let newv = gl.getUniformLocation(this.prog,name);
-    gl.uniform2fv(newv, v);
-
+    const loc = gl.getUniformLocation(this.prog, name);
+    if (loc !== -1) {
+      gl.uniform2fv(loc, v);
+    }
   }
   setTime(t:number){
     this.use();

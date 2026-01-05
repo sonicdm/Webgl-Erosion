@@ -11,6 +11,7 @@ export interface ControlsConfig {
     modifiers: {
         brushSizeScroll: 'Ctrl' | 'Shift' | 'Alt' | null; // Modifier key for brush size adjustment via scroll wheel (null = disabled)
         brushInvert: 'Ctrl' | 'Shift' | 'Alt' | null; // Modifier key to invert brush operation (Add/Subtract) when held with brush activate
+        brushSecondary: 'Ctrl' | 'Shift' | 'Alt' | null; // Modifier key for secondary brush operation (e.g., Alt+click for flatten target height, slope end point)
     };
     camera: {
         // Mouse button mappings: 'LEFT', 'MIDDLE', 'RIGHT', or null to disable
@@ -46,6 +47,7 @@ export const defaultControlsConfig: ControlsConfig = {
     modifiers: {
         brushSizeScroll: 'Ctrl',      // Hold this modifier + scroll to adjust brush size (Ctrl, Shift, Alt, or null to disable)
         brushInvert: 'Shift',          // Hold this modifier + brush activate to invert operation (Add ↔ Subtract)
+        brushSecondary: 'Alt',        // Hold this modifier + brush activate for secondary operation (e.g., flatten target height, slope end point)
     },
     camera: {
         // Default OrbitControls bindings: LEFT = rotate, MIDDLE = pan, RIGHT = rotate (with shift = pan)
@@ -124,5 +126,23 @@ export function getMouseButtonAction(button: number, config: ControlsConfig): st
     }
     console.log('[DEBUG] getMouseButtonAction - NO MATCH');
     return null;
+}
+
+/**
+ * Helper function to check if a modifier key is pressed based on the config
+ */
+export function isModifierPressed(modifier: 'Ctrl' | 'Shift' | 'Alt' | null, event: MouseEvent | PointerEvent | KeyboardEvent): boolean {
+    if (modifier === null) return false;
+    
+    switch (modifier) {
+        case 'Ctrl':
+            return event.ctrlKey || event.metaKey; // metaKey for Mac Cmd key
+        case 'Shift':
+            return event.shiftKey;
+        case 'Alt':
+            return event.altKey;
+        default:
+            return false;
+    }
 }
 

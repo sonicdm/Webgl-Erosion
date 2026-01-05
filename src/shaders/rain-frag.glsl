@@ -5,6 +5,7 @@ uniform sampler2D readTerrain;
 
 uniform float u_Time;
 uniform float raindeg;
+uniform float u_SimRes; // Simulation resolution for neighbor sampling
 
 uniform vec4 u_MouseWorldPos;
 uniform vec3 u_MouseWorldDir;
@@ -17,6 +18,10 @@ uniform int u_BrushOperation;
 uniform int u_RainErosion;
 uniform float u_RainErosionStrength;
 uniform float u_RainErosionDropSize;
+uniform float u_FlattenTargetHeight; // Target height for flatten brush (will be set from center)
+uniform vec2 u_SlopeStartPos; // Start position for slope brush
+uniform vec2 u_SlopeEndPos; // End position for slope brush
+uniform int u_SlopeActive; // 0 = not active, 1 = start set, 2 = end set
 
 uniform int u_SourceCount;
 uniform vec2 u_SourcePositions[16];  // Max 16 sources
@@ -121,6 +126,12 @@ void main() {
       float addwater = 0.0;
       float amount = 0.0006 * u_BrushStrength;
       float aw = fbm(curuv*10.0 + vec2(sin(u_Time * 35.0), cos(u_Time*115.0)));
+      float div = 1.0 / u_SimRes; // Pixel size in UV space
+      
+      // Read current terrain
+      vec4 cur = texture(readTerrain, curuv);
+      float currentHeight = cur.x;
+      
       // normal water brush
       if(u_BrushType != 0){
             vec3 ro = u_MouseWorldPos.xyz;
@@ -129,29 +140,78 @@ void main() {
             float pdis2fragment = distance(pointOnPlane, curuv);
             if (pdis2fragment < 0.01 * u_BrushSize){
                   float dens = (0.01 * u_BrushSize - pdis2fragment * 0.5) / (0.01 * u_BrushSize);
+                  dens = max(0.0, dens); // Clamp density
 
                   if(u_BrushType == 1 && u_BrushPressed == 1){
+                        // Shift Terrain - Elevate with primary button, lower with secondary (Alt+brush)
+                        // u_BrushOperation: 0 = primary (elevate), 1 = secondary (lower)
                         addterrain =  amount * 1.0 * 280.0;
                         addterrain = u_BrushOperation == 0 ? addterrain : -addterrain;
                   }else if(u_BrushType == 2 && u_BrushPressed == 1){
-
-
-
+                        // Water brush
                         addwater =  amount * dens * 200.0;
-                        //float aw = noise(vec3(curuv * 100.0, u_Time));
-
-                        //aw = pow(aw, 8.0);
                         addwater *= aw;
                         addwater = u_BrushOperation == 0 ? addwater : -addwater;
                   }else if(u_BrushType == 3 && u_BrushPressed == 1){
                         // Rock brush - will be handled in output to set B channel
+                  }else if(u_BrushType == 4 && u_BrushPressed == 1){
+                        // Soften Terrain - gentle smoothing (primary button only)
+                        if (u_BrushOperation == 0) {
+                              vec4 top = texture(readTerrain, curuv + vec2(0.0, div));
+                              vec4 right = texture(readTerrain, curuv + vec2(div, 0.0));
+                              vec4 bottom = texture(readTerrain, curuv + vec2(0.0, -div));
+                              vec4 left = texture(readTerrain, curuv + vec2(-div, 0.0));
+                              
+                              float avgHeight = (top.x + right.x + bottom.x + left.x) / 4.0;
+                              float smoothAmount = dens * u_BrushStrength * 0.1; // Smoothing strength
+                              addterrain = (avgHeight - currentHeight) * smoothAmount;
+                        }
+                  }else if(u_BrushType == 5 && u_BrushPressed == 1){
+                        // Flatten Terrain - secondary button (Alt) sets target, primary flattens
+                        // Only flatten when primary button is pressed (brushOperation == 0)
+                        // Alt+click (brushOperation == 1) should NOT flatten, just set target in JS
+                        if (u_BrushOperation == 0) {
+                              // Primary button: flatten to target height
+                              float targetHeight = u_FlattenTargetHeight;
+                              float flattenAmount = dens * u_BrushStrength * 0.2; // Flattening strength
+                              addterrain = (targetHeight - currentHeight) * flattenAmount;
+                        }
+                        // When Alt is pressed (brushOperation == 1), don't do anything - JS will set target
+                  }else if(u_BrushType == 6 && u_BrushPressed == 1){
+                        // Slope Terrain - primary sets start, secondary (Alt) drags from end
+                        // Only work when Alt is pressed (secondary button) and start is set
+                        if (u_SlopeActive >= 1 && u_BrushOperation == 1) {
+                              // Secondary button (Alt) - dragging from end point
+                              // Create slope from start to current brush position
+                              vec2 slopeDir = pointOnPlane - u_SlopeStartPos;
+                              float slopeLength = length(slopeDir);
+                              
+                              if (slopeLength > 0.001) {
+                                    // Normalize direction
+                                    vec2 slopeDirNorm = normalize(slopeDir);
+                                    
+                                    // Project current position onto the slope line
+                                    vec2 toCurrent = curuv - u_SlopeStartPos;
+                                    float projDist = dot(toCurrent, slopeDirNorm);
+                                    
+                                    // Get heights at start and end (current brush position)
+                                    vec4 startTerrain = texture(readTerrain, u_SlopeStartPos);
+                                    vec4 endTerrain = texture(readTerrain, pointOnPlane);
+                                    float startHeight = startTerrain.x;
+                                    float endHeight = endTerrain.x;
+                                    
+                                    // Calculate target height based on position along slope
+                                    float t = clamp(projDist / slopeLength, 0.0, 1.0);
+                                    float targetHeight = mix(startHeight, endHeight, t);
+                                    
+                                    // Apply slope within brush radius
+                                    float slopeAmount = dens * u_BrushStrength * 0.3;
+                                    addterrain = (targetHeight - currentHeight) * slopeAmount;
+                              }
+                        }
                   }
 
-
-
             }
-
-
 
       }
 
@@ -200,7 +260,7 @@ void main() {
 
 
 
-      vec4 cur = texture(readTerrain,curuv);
+      // cur already declared at top of main()
       float rain = raindeg;
 
 
