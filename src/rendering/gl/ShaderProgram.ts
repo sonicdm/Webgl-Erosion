@@ -1,6 +1,9 @@
 import {vec2, vec4, mat4, vec3} from 'gl-matrix';
 import Drawable from './Drawable';
 import {gl} from '../../globals';
+import * as TerrainUniforms from './uniforms/TerrainUniforms';
+import * as BrushUniforms from './uniforms/BrushUniforms';
+import * as SimulationUniforms from './uniforms/SimulationUniforms';
 
 var activeProgram: WebGLProgram = null;
 
@@ -187,51 +190,37 @@ class ShaderProgram {
 
     setTerrainType(t:number){
     this.use();
-    if(this.unifTerrainType!==-1){
-      gl.uniform1i(this.unifTerrainType,t);
-    }
+    TerrainUniforms.setTerrainType(this.prog, t);
     }
 
     setBrushType(t :number){
     this.use();
-    if(this.unifBrushType !== -1){
-      gl.uniform1i(this.unifBrushType,t);
-    }
+    BrushUniforms.setBrushType(this.prog, t);
     }
 
     setBrushSize(t:number){
     this.use();
-    if(this.unifBrushSize !== -1){
-      gl.uniform1f(this.unifBrushSize, t);
-    }
+    BrushUniforms.setBrushSize(this.prog, t);
     }
 
   setBrushStrength(t:number){
     this.use();
-    if(this.unifBrushStrength !== -1){
-      gl.uniform1f(this.unifBrushStrength, t);
-    }
+    BrushUniforms.setBrushStrength(this.prog, t);
   }
 
     setBrushOperation(t :number){
       this.use();
-      if(this.unifBrushOperation !== -1){
-        gl.uniform1i(this.unifBrushOperation,t);
-      }
+      BrushUniforms.setBrushOperation(this.prog, t);
     }
 
     setBrushPos(t:vec2){
     this.use();
-    if(this.unifBrusPos !== -1){
-      gl.uniform2fv(this.unifBrusPos, t);
-    }
+    BrushUniforms.setBrushPos(this.prog, t);
     }
 
   setBrushPressed(t :number){
     this.use();
-    if(this.unifBrushPressed !== -1){
-      gl.uniform1i(this.unifBrushPressed,t);
-    }
+    BrushUniforms.setBrushPressed(this.prog, t);
   }
 
   setSourceCount(count: number) {
@@ -268,23 +257,17 @@ class ShaderProgram {
 
   setTerrainDebug(t:number){
     this.use();
-    if(this.unifTerrainDebug!==-1){
-      gl.uniform1i(this.unifTerrainDebug,t);
-    }
+    TerrainUniforms.setTerrainDebug(this.prog, t);
   }
 
   setTerrainScale(t : number){
     this.use();
-    if(this.unifTerrainScale !== -1){
-      gl.uniform1f(this.unifTerrainScale, t);
-    }
+    TerrainUniforms.setTerrainScale(this.prog, t);
   }
 
   setTerrainHeight(t : number){
     this.use();
-    if(this.unifTerrainHeight !== -1){
-      gl.uniform1f(this.unifTerrainHeight, t);
-    }
+    TerrainUniforms.setTerrainHeight(this.prog, t);
   }
 
 
@@ -313,9 +296,7 @@ class ShaderProgram {
 
     setRndTerrain(r:number){
     this.use();
-    if(this.unifRndTerrain!==-1){
-      gl.uniform1i(this.unifRndTerrain,r);
-    }
+    TerrainUniforms.setRndTerrain(this.prog, r);
     }
   setPlanePos(pos: vec2) {
     this.use();
@@ -337,58 +318,42 @@ class ShaderProgram {
     }
   setPipeLen(len : number){
     this.use();
-    if(this.unifPipeLen!==-1){
-      gl.uniform1f(this.unifPipeLen,len);
-    }
+    SimulationUniforms.setPipeLen(this.prog, len);
   }
 
   setKs(k :number){
     this.use();
-    if(this.unifKs!==-1){
-      gl.uniform1f(this.unifKs,k);
-    }
+    SimulationUniforms.setKs(this.prog, k);
   }
 
   setKc(k :number){
       this.use();
-      if(this.unifKc!==-1){
-          gl.uniform1f(this.unifKc,k);
-      }
+      SimulationUniforms.setKc(this.prog, k);
   }
 
   setTimestep(t:number){
     this.use();
-    if(this.unifTimestep!==-1){
-      gl.uniform1f(this.unifTimestep,t);
-    }
+    SimulationUniforms.setTimestep(this.prog, t);
   }
 
   setPipeArea(a:number){
     this.use();
-    if(this.unifPipeArea!==-1){
-      gl.uniform1f(this.unifPipeArea,a);
-    }
+    SimulationUniforms.setPipeArea(this.prog, a);
   }
 
   setKd(k :number){
       this.use();
-      if(this.unifKd!==-1){
-          gl.uniform1f(this.unifKd,k);
-      }
+      SimulationUniforms.setKd(this.prog, k);
   }
 
   setRockErosionResistance(resistance: number) {
     this.use();
-    if(this.unifRockErosionResistance !== -1){
-      gl.uniform1f(this.unifRockErosionResistance, resistance);
-    }
+    SimulationUniforms.setRockErosionResistance(this.prog, resistance);
   }
 
   setSimres(res:number){
     this.use();
-    if(this.unifSimRes!==-1){
-      gl.uniform1f(this.unifSimRes,res);
-    }
+    SimulationUniforms.setSimres(this.prog, res);
   }
 
 
