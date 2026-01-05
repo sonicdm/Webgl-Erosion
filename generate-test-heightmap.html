@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Test Heightmap</title>
+</head>
+<body>
+    <h1>Test Heightmap Generator</h1>
+    <p>Click the button to generate the test heightmap</p>
+    <button onclick="generateHeightmap()">Generate Test Heightmap</button>
+    <button id="downloadBtn" onclick="downloadHeightmap()" style="display: none; margin-left: 10px;">Download Heightmap</button>
+    <br><br>
+    <canvas id="canvas" style="border: 1px solid #ccc; max-width: 800px; height: auto;"></canvas>
+    
+    <script>
+        let generatedCanvas = null;
+        
+        function generateHeightmap() {
+            const canvas = document.getElementById('canvas');
+            const size = 1024; // Match your simres
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            const imageData = ctx.createImageData(size, size);
+            const data = imageData.data;
+            
+            // Parameters - TOP DOWN VIEW
+            const columnRadius = 0.15; // Radius of each column (as fraction of total width)
+            const indentDepth = 0.1; // Depth of indent (how much lower the center is, as fraction of height range) - half as deep
+            const indentWidth = 0.85; // Width of indent (as fraction of column radius) - most of column width
+            const spoutSize = 0.05; // Size of spout notch (as fraction) - increased for visibility
+            const spoutDepth = 0.5; // Position of spout (0.5 = halfway down indent depth)
+            const baseHeight = 0.5; // Base height of columns (0-1 range) - half height
+            const indentHeight = baseHeight - indentDepth; // Height at center of indent (0.4) - deepest point
+            const spoutHeightValue = indentHeight + (baseHeight - indentHeight) * 0.5; // Height of spout (0.45) - halfway between indent and base
+            
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const fx = x / size; // 0 to 1 (X coordinate)
+                    const fy = y / size; // 0 to 1 (Y coordinate)
+                    
+                    let height = 0.0;
+                    
+                    // Function to generate column pattern (top-down view)
+                    // spoutNorth: true = spout pointing north (up), false = spout pointing south (down)
+                    function generateColumn(centerX, centerY, spoutNorth) {
+                        // Distance from column center
+                        const dx = fx - centerX;
+                        const dy = fy - centerY;
+                        const distFromCenter = Math.sqrt(dx * dx + dy * dy);
+                        
+                        // Check if inside column
+                        if (distFromCenter < columnRadius) {
+                            // Default to base height
+                            height = baseHeight;
+                            
+                            // Indent is a depressed circular area centered on the column
+                            const indentCenterY = centerY; // Centered vertically
+                            const indentCenterX = centerX; // Centered horizontally
+                            const indentRadius = columnRadius * indentWidth; // Indent is smaller than column
+                            
+                            // Distance from indent center
+                            const indentDx = fx - indentCenterX;
+                            const indentDy = fy - indentCenterY;
+                            const distFromIndentCenter = Math.sqrt(indentDx * indentDx + indentDy * indentDy);
+                            
+                            // Calculate spout position (halfway down the indent depth)
+                            const spoutRadius = indentRadius * (1.0 - indentDepth * spoutDepth); // Radius where spout is positioned
+                            
+                            // Check if we're inside the circular indent
+                            if (distFromIndentCenter < indentRadius) {
+                                // Inside the circular indent - completely flat, same height everywhere
+                                height = indentHeight;
+                            }
+                            
+                            // Spout extends from indent wall to column edge, at halfway down indent depth
+                            // The spout is a flat radial channel that goes from the indent wall to the column edge
+                            // Check if we're in the spout region (between indent edge and column edge)
+                            if (distFromIndentCenter >= indentRadius && distFromIndentCenter <= columnRadius) {
+                                // Spout is positioned at halfway down the indent depth
+                                // The spout depth corresponds to a specific radius (halfway between indent center and indent edge)
+                                const spoutDepthRadius = indentRadius * (1.0 - indentDepth * spoutDepth);
+                                
+                                // Check if we're at the spout depth (halfway down indent) - allow tolerance
+                                const distFromSpoutDepth = Math.abs(distFromIndentCenter - spoutDepthRadius);
+                                
+                                // Spout is a flat channel/notch pointing north (up) or south (down)
+                                const angle = Math.atan2(indentDy, indentDx);
+                                let isOnSpoutSide = false;
+                                
+                                if (spoutNorth) {
+                                    // Spout pointing north (up) - angle ≈ -π/2 or 3π/2
+                                    isOnSpoutSide = Math.abs(angle + Math.PI/2) < spoutSize || Math.abs(angle - 3*Math.PI/2) < spoutSize;
+                                } else {
+                                    // Spout pointing south (down) - angle ≈ π/2
+                                    isOnSpoutSide = Math.abs(angle - Math.PI/2) < spoutSize;
+                                }
+                                
+                                // If we're on the correct side and at the spout depth, create the flat channel
+                                // The spout extends from indent wall to column edge - full radial distance
+                                if (isOnSpoutSide && distFromSpoutDepth < spoutSize * 2.0) {
+                                    // Spout extends from indent wall to column edge - completely flat
+                                    height = spoutHeightValue; // Spout protrusion
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Left column (centered at x=0.25, y=0.5) - spout pointing north (up)
+                    if (fx < 0.5) {
+                        generateColumn(0.25, 0.5, true); // true = spout pointing north
+                    }
+                    // Right column (centered at x=0.75, y=0.5) - spout pointing north (up)
+                    else {
+                        generateColumn(0.75, 0.5, true); // true = spout pointing north
+                    }
+                    
+                    // Convert height (0-1) to grayscale (0-255)
+                    const gray = Math.floor(height * 255);
+                    const idx = (y * size + x) * 4;
+                    data[idx] = gray;     // R
+                    data[idx + 1] = gray; // G
+                    data[idx + 2] = gray; // B
+                    data[idx + 3] = 255;  // A
+                }
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+            
+            // Store the canvas for download
+            generatedCanvas = canvas;
+            
+            // Show download button
+            document.getElementById('downloadBtn').style.display = 'inline-block';
+        }
+        
+        function downloadHeightmap() {
+            if (!generatedCanvas) {
+                alert('Please generate a heightmap first!');
+                return;
+            }
+            
+            // Download the image
+            generatedCanvas.toBlob(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'test-heightmap.png';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+    </script>
+</body>
+</html>
+

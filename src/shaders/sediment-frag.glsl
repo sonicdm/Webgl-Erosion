@@ -97,14 +97,25 @@ void main() {
   // Check if this is rock material (B channel > 0.5) and apply erosion resistance
   vec4 curTerrain = texture(readTerrain,curuv);
   bool isRock = curTerrain.z > 0.5;
-  float rockFactor = isRock ? u_RockErosionResistance : 1.0;
+  // Apply rock resistance based on rock material value - even partially rock should have some resistance
+  // This prevents rock from losing resistance too quickly as it converts to soil
+  // Use a more aggressive scaling to ensure rock maintains strong resistance
+  float rockMaterialValue = curTerrain.z;
+  // Rock resistance scales from full resistance at 1.0 to no resistance at 0.0
+  // Use a power curve to make resistance drop off more slowly
+  float rockResistanceFactor = pow(clamp(rockMaterialValue, 0.0, 1.0), 0.5); // Square root curve - slower dropoff
+  float rockFactor = mix(1.0, u_RockErosionResistance, rockResistanceFactor);
   
   // Check neighboring cells for rock to boost erosion in non-rock areas between rock sections
   // This creates crevices/valleys between rock areas
+  // IMPORTANT: Don't boost erosion for recently converted soil (was rock) - this causes excessive sediment
   float neighborRockFactor = 1.0;
   float capacityBoost = 1.0; // Boost sediment capacity for soil between rock
   
-  if (!isRock) {
+  // Check if this was recently rock (to prevent boosting recently converted soil)
+  bool wasRecentlyRock = curTerrain.z > 0.1;
+  
+  if (!isRock && !wasRecentlyRock) {
     // Sample neighboring cells to see if any are rock
     vec4 topTerrain = texture(readTerrain, curuv + vec2(0.0, div));
     vec4 rightTerrain = texture(readTerrain, curuv + vec2(div, 0.0));
@@ -121,6 +132,7 @@ void main() {
     
     // MUCH stronger boost for soil between rock to create deep crevices
     // The more rock neighbors, the faster the soil should erode away
+    // BUT: Only apply to soil that was never rock, not recently converted soil
     if (rockNeighbors > 0) {
       // Very aggressive erosion boost - soil between rock should erode much faster
       neighborRockFactor = 1.0 + float(rockNeighbors) * 3.0; // 4x to 13x erosion rate
@@ -129,10 +141,17 @@ void main() {
     }
   }
   
-  // Apply erosion resistance to rock - only reduce erosion (Ks), not capacity (Kc) or deposition (Kd)
+  // Apply erosion resistance to rock - reduce both erosion (Ks) and capacity (Kc)
+  // Rock erodes slower AND produces less sediment capacity when it does erode
+  // This ensures rock produces less total sediment overall
+  // The capacity reduction should be proportional to the erosion resistance
   // Boost erosion in non-rock areas adjacent to rock to create crevices
   Ks *= rockFactor * neighborRockFactor; // Reduce for rock, boost for non-rock near rock
   Kc *= capacityBoost; // Boost capacity for soil between rock so it erodes faster
+  // IMPORTANT: Reduce sediment capacity for rock proportionally to erosion resistance
+  // Rock produces less fine sediment when it erodes, scaled by the same factor as erosion resistance
+  // This ensures sediment production is proportional to erosion rate
+  Kc *= rockFactor; // Reduce capacity for rock by the same factor as erosion resistance (already includes gradual scaling)
 
   vec3 nor = calnor(curuv);
   float slopeSin;
@@ -197,14 +216,16 @@ void main() {
       // water = water + (sedicap-cursedi)*Ks;
       outsedi = outsedi + changesedi;
       
-      // When rock erodes, convert it to regular soil
-      // Reduce rock material value proportionally to erosion amount
-      if (isRock && changesedi > 0.0) {
-        // Calculate how much rock should convert to soil based on erosion
-        // More erosion = more rock converted to soil
-        // Scale conversion rate with erosion amount - larger erosion = faster conversion
+      // When rock erodes, gradually convert it to regular soil
+      // Rock should erode into normal sediment, but conversion should be very slow so rock resistance actually matters
+      if (rockMaterialValue > 0.1 && changesedi > 0.0) {
+        // Convert rock to soil proportionally to the amount eroded
+        // IMPORTANT: Conversion should be very slow so rock stays rock longer and erosion resistance has effect
+        // More erosion = more rock converted to soil, but at a much slower rate
         float erosionAmount = changesedi;
-        float conversionRate = min(erosionAmount * 0.1, 0.05); // Convert up to 5% per frame, scales with erosion
+        // Convert rock to soil very slowly - scales with erosion but much slower
+        // This ensures rock stays rock long enough for the resistance to matter
+        float conversionRate = min(erosionAmount * 0.05, originalRockMaterial * 0.01); // Convert up to 1% of rock per frame, scales with erosion
         originalRockMaterial = max(0.0, originalRockMaterial - conversionRate); // Reduce rock value, convert to soil
       }
 
@@ -234,10 +255,13 @@ void main() {
   // 1. There's little or no water (water < 0.1) AND
   // 2. Water is not actively flowing (velocity < 0.5) AND
   // 3. Erosion is happening
+  // 4. The area was NOT recently rock (to prevent converting eroded rock back to rock)
   // This prevents rock from creating barriers that dam up water
+  // IMPORTANT: Don't spread rock into areas that were recently rock - rock should erode to soil and stay soil
   bool canSpreadRock = waterLevel < 0.1 && waterVelocity < 0.5;
+  // wasRecentlyRock is already defined earlier in the function
   
-  if (!isRock && heightChange < 0.0 && canSpreadRock) { // Only if erosion is happening AND water conditions allow
+  if (!isRock && heightChange < 0.0 && canSpreadRock && !wasRecentlyRock) { // Only if erosion is happening AND water conditions allow AND wasn't recently rock
     // Sample neighboring cells for rock (these are the contiguous/adjacent cells)
     // Use the ORIGINAL terrain height (before this frame's erosion) to find the painted rock edge
     vec4 topTerrain = texture(readTerrain, curuv + vec2(0.0, div));
@@ -331,8 +355,32 @@ void main() {
         float depthFactor = clamp(effectiveDepth * 2.0, 0.0, 1.0);
         float spreadFactor = min(erosionAmount * 0.5 * (1.0 + depthFactor * 0.2), 0.01); // Max 1% per frame, very slow
         
+        // Calculate how much rock material is being added
+        float currentRockValue = curTerrain.z;
+        float newRockValue = max(currentRockValue, mix(currentRockValue, 1.0, spreadFactor));
+        float rockMaterialAdded = newRockValue - currentRockValue;
+        
+        // IMPORTANT: When rock spreads, we must maintain material conservation
+        // Rock spreading converts existing soil/sediment into rock material
+        // To prevent creating material out of thin air, we need to:
+        // 1. Reduce sediment (we're converting sediment into rock)
+        // 2. Slightly adjust height (rock is denser, but we want to be conservative)
+        
+        if (rockMaterialAdded > 0.0) {
+          // Reduce sediment proportionally to rock material added
+          // When soil converts to rock, the sediment that was in that soil is consumed
+          float sedimentConsumed = rockMaterialAdded * outsedi * 0.5; // Consume up to 50% of sediment for rock conversion
+          outsedi = max(0.0, outsedi - sedimentConsumed);
+          
+          // Rock is denser than soil, so converting soil to rock should slightly increase height
+          // But be very conservative - only small adjustment to prevent material creation
+          float rockDensityRatio = 1.1; // Rock is 10% denser than soil (conservative)
+          float heightAdjustment = rockMaterialAdded * effectiveDepth * 0.05 * rockDensityRatio; // Very small adjustment
+          hight = hight + heightAdjustment;
+        }
+        
         // Use max to ensure rock value increases (doesn't decrease if already partially rock)
-        finalRockMaterial = max(curTerrain.z, mix(curTerrain.z, 1.0, spreadFactor));
+        finalRockMaterial = newRockValue;
       }
     }
   }

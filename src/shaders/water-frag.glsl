@@ -94,14 +94,23 @@ void main()
     float wval = texture(hightmap,fs_Uv).y;
     wval /= 1.0;
 
-
+    // Check if underlying terrain is rock (B channel > 0.1)
+    vec4 terrainSample = texture(hightmap, fs_Uv);
+    float rockVal = terrainSample.z;
+    bool isRock = rockVal > 0.1;
 
     vec3 watercolor = mix(vec3(0.8,0.0,0.0), vec3(0.0,0.0,0.8), sediment * 2.0);
     vec3 watercolorspec = vec3(1.0);
     watercolorspec *= spec;
 
+    // Base water color - make it brighter on rock for better visibility
+    vec3 baseWaterColor = vec3(0.0, 0.3, 0.5);
+    if (isRock) {
+        // Make water brighter and more saturated on rock for better contrast
+        // Rock is dark, so water should be lighter to stand out
+        baseWaterColor = mix(baseWaterColor, vec3(0.2, 0.5, 0.8), 0.5); // Brighter blue on rock
+    }
 
-
-    out_Col = vec4(vec3(0.0,0.3,0.5) + R * reflectedSky + watercolorspec  , min((1.8 + spec) * u_WaterTransparency * dpVal,1.0));
+    out_Col = vec4(baseWaterColor + R * reflectedSky + watercolorspec  , min((1.8 + spec) * u_WaterTransparency * dpVal,1.0));
     col_reflect = vec4(1.0);
 }

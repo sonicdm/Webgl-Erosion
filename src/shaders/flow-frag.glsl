@@ -55,9 +55,21 @@ void main() {
   vec4 curTerrain = texture(readTerrain,curuv);
   vec4 curFlux = texture(readFlux,curuv) * damping;
 
+  // Check if this is rock material - rock surfaces are smoother, so water flows faster
+  float rockVal = curTerrain.z;
+  bool isRock = rockVal > 0.5;
+  // Rock has lower roughness/friction, so water flows faster
+  // Reduce effective pipe length on rock to simulate lower friction (smoother surface)
+  // Rock typically has 2-3x lower roughness coefficient than soil
+  float effectivePipeLen = pipelen;
+  if (isRock) {
+    // Reduce pipe length on rock by factor of 2-3 (representing lower friction)
+    // This makes flow faster on rock surfaces
+    effectivePipeLen = pipelen * 0.4; // Water flows ~2.5x faster on rock
+  }
+
   // Calculate height differences for flow (terrain height + water height)
-  // Note: Rock material (z channel) does NOT affect flow - water flows normally over rock
-  // Flow is based purely on height differences (x = terrain height, y = water height)
+  // Flow is based on height differences, but rock affects flow speed through reduced friction
   float Htopout = (curTerrain.y+curTerrain.x )-(top.y+top.x );
   float Hrightout = (curTerrain.y+curTerrain.x)-(right.y+right.x);
   float Hbottomout = (curTerrain.y+curTerrain.x)-(bottom.x+bottom.y);
@@ -74,10 +86,10 @@ void main() {
 //  float fbottomout = max(0.f,(u_timestep*g*u_PipeArea*Hbottomout)/pipelen);
 //  float fleftout = max(0.f,(u_timestep*g*u_PipeArea*Hleftout)/pipelen);
 
-  float ftopout = max(0.f,curFlux.x+(u_timestep*g*u_PipeArea*Htopout)/pipelen);
-  float frightout = max(0.f,curFlux.y+(u_timestep*g*u_PipeArea*Hrightout)/pipelen);
-  float fbottomout = max(0.f,curFlux.z+(u_timestep*g*u_PipeArea*Hbottomout)/pipelen);
-  float fleftout = max(0.f,curFlux.w+(u_timestep*g*u_PipeArea*Hleftout)/pipelen);
+  float ftopout = max(0.f,curFlux.x+(u_timestep*g*u_PipeArea*Htopout)/effectivePipeLen);
+  float frightout = max(0.f,curFlux.y+(u_timestep*g*u_PipeArea*Hrightout)/effectivePipeLen);
+  float fbottomout = max(0.f,curFlux.z+(u_timestep*g*u_PipeArea*Hbottomout)/effectivePipeLen);
+  float fleftout = max(0.f,curFlux.w+(u_timestep*g*u_PipeArea*Hleftout)/effectivePipeLen);
 
   float waterOut = u_timestep*(ftopout+frightout+fbottomout+fleftout);
   //damping = 1.0;
