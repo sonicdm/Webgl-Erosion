@@ -103,23 +103,33 @@ export function handleBrushMouseDown(
             return { shouldActivate: false, brushPressed: 0 };
             
         } else if (brushTypeNum === 6) {
-            // Slope: Secondary modifier+click and drag sets end point
-            console.log('[DEBUG] Slope brush detected with secondary modifier');
-            if (controls.slopeActive === 0) {
-                // Start point should be set by primary click first
-                // If secondary modifier is pressed first, don't activate brush
-                console.log('[DEBUG] Slope secondary modifier+click - start point not set yet, ignoring');
+            // Slope: Alt+click sets START point
+            console.log('[DEBUG] Slope brush detected with Alt modifier - setting START point');
+            
+            // If both points were already set, clear the end point to start fresh
+            if (controls.slopeActive === 2) {
+                console.log('[DEBUG] Resetting slope - clearing old end point, setting new START point');
+                controls.slopeEndPos = vec2.fromValues(0.0, 0.0);
+                controls.slopeActive = 1; // Now waiting for end point
+            }
+            
+            controls.slopeStartPos = vec2.clone(controls.posTemp);
+            
+            // Check if end point was already set (slopeActive == 1 means end was set first, but we just reset it)
+            if (controls.slopeActive === 1 && !vec2.equals(controls.slopeEndPos, vec2.fromValues(0.0, 0.0))) {
+                // End point was already set, now start is set - activate slope creation
+                controls.slopeActive = 2;
+                console.log('[DEBUG] Both points set - START at:', controls.slopeStartPos[0], controls.slopeStartPos[1], 'END at:', controls.slopeEndPos[0], controls.slopeEndPos[1]);
+                // Continue to activate brush (brushPressed = 1 is already set above)
+            } else {
+                // Start point set, waiting for end point
+                controls.slopeActive = 1;
+                console.log('[DEBUG] Slope START point set at UV:', controls.slopeStartPos[0], controls.slopeStartPos[1], 'waiting for end point');
+                // Just set the point, don't activate brush yet
                 event.preventDefault();
                 event.stopPropagation();
                 event.stopImmediatePropagation();
                 return { shouldActivate: false, brushPressed: 0 };
-            } else if (controls.slopeActive === 1) {
-                // Start is set, secondary modifier+click means we're dragging from end
-                // Activate brush for slope creation
-                controls.slopeActive = 2;
-                controls.slopeEndPos = vec2.clone(controls.posTemp);
-                console.log('[DEBUG] Slope secondary modifier+click - End point SET at UV:', controls.slopeEndPos[0], controls.slopeEndPos[1], 'Start was at:', controls.slopeStartPos[0], controls.slopeStartPos[1]);
-                // Continue to activate brush (brushPressed = 1 is already set above)
             }
         }
     } else {
@@ -127,26 +137,34 @@ export function handleBrushMouseDown(
         controls.brushOperation = 0; // Primary button
         originalBrushOperation = null;
         
-        // Handle slope brush start point (primary click)
+        // Handle slope brush end point (primary click)
         if (brushTypeNum === 6) {
-            console.log('[DEBUG] Slope brush primary click handler');
-            if (controls.slopeActive === 0) {
-                // Set start point on first primary click
-                controls.slopeStartPos = vec2.clone(controls.posTemp);
+            console.log('[DEBUG] Slope brush primary click handler - setting END point');
+            controls.slopeEndPos = vec2.clone(controls.posTemp);
+            
+            // Check if start point was already set (slopeActive == 1 means start was set first)
+            if (controls.slopeActive === 1 && !vec2.equals(controls.slopeStartPos, vec2.fromValues(0.0, 0.0))) {
+                // Start point was already set, now end point is set - activate slope creation
+                controls.slopeActive = 2;
+                console.log('[DEBUG] Both points set - END at:', controls.slopeEndPos[0], controls.slopeEndPos[1], 'START at:', controls.slopeStartPos[0], controls.slopeStartPos[1]);
+                // Continue to activate brush (brushPressed = 1 is already set above)
+            } else if (controls.slopeActive === 2) {
+                // Both already set - user is setting a new end point, reset and wait for start point again
+                console.log('[DEBUG] Resetting slope - new END point set at:', controls.slopeEndPos[0], controls.slopeEndPos[1], 'waiting for Alt+click to set new start point');
+                controls.slopeActive = 1; // Reset to waiting for start point
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                return { shouldActivate: false, brushPressed: 0 };
+            } else {
+                // End point set first, waiting for Alt+click to set start point
                 controls.slopeActive = 1;
-                console.log('[DEBUG] Slope start point set at:', controls.slopeStartPos[0], controls.slopeStartPos[1]);
-                // Don't activate brush for slope start point - just set the point
+                console.log('[DEBUG] End point set at:', controls.slopeEndPos[0], controls.slopeEndPos[1], 'waiting for Alt+click to set start point');
                 event.preventDefault();
                 event.stopPropagation();
                 event.stopImmediatePropagation();
                 return { shouldActivate: false, brushPressed: 0 };
             }
-            // If start is already set, primary click doesn't do anything for slope
-            // (Secondary modifier+click is needed to drag from end)
-            event.preventDefault();
-            event.stopPropagation();
-            event.stopImmediatePropagation();
-            return { shouldActivate: false, brushPressed: 0 };
         }
         
         // Check for brush invert modifier - but not the secondary modifier (secondary modifier is for secondary operation)
@@ -220,29 +238,13 @@ export function updateBrushState(
         }
     }
     
-    // Handle slope brush start/end points
+    // Handle slope brush - once both points are set, continuously apply slope
     if (brushTypeNum === 6) {
-        // Update end point continuously when secondary modifier is held (secondary button drag)
-        if (controls.brushPressed === 1 && controls.brushOperation === 1 && controls.slopeActive >= 1) {
-            controls.slopeEndPos = vec2.clone(pos); // Update end to current brush position
-            if (controls.slopeActive === 1) {
-                controls.slopeActive = 2; // Mark as active when dragging
-                console.log('[DEBUG] Slope - End point updated to UV:', controls.slopeEndPos[0], controls.slopeEndPos[1], 'Start at:', controls.slopeStartPos[0], controls.slopeStartPos[1]);
-            }
-            
-            // Read heights at start and end for debugging
-            const startX = Math.floor(controls.slopeStartPos[0] * context.simres);
-            const startY = Math.floor(controls.slopeStartPos[1] * context.simres);
-            const endX = Math.floor(controls.slopeEndPos[0] * context.simres);
-            const endY = Math.floor(controls.slopeEndPos[1] * context.simres);
-            const startIndex = (startY * context.simres + startX) * 4;
-            const endIndex = (endY * context.simres + endX) * 4;
-            
-            if (startIndex >= 0 && startIndex < context.HightMapCpuBuf.length && endIndex >= 0 && endIndex < context.HightMapCpuBuf.length) {
-                const startHeight = context.HightMapCpuBuf[startIndex];
-                const endHeight = context.HightMapCpuBuf[endIndex];
-                console.log('[DEBUG] Slope heights - Start:', startHeight, 'at UV', controls.slopeStartPos[0], controls.slopeStartPos[1], 'End:', endHeight, 'at UV', controls.slopeEndPos[0], controls.slopeEndPos[1]);
-            }
+        // When both points are set and brush is active, apply slope continuously
+        if (controls.brushPressed === 1 && controls.slopeActive === 2) {
+            // Both points are set, slope is being applied
+            // The shader will handle the actual slope creation
+            // No need to update positions here - they're already set
         }
     }
 }

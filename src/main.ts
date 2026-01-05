@@ -13,6 +13,7 @@ var mouseChange = require('mouse-change');
 import { getKeyAction, getMouseButtonAction, isBrushActivate, ControlsConfig, isModifierPressed } from './controls-config';
 import { loadSettings } from './settings';
 import { handleBrushMouseDown, handleBrushMouseUp, updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
+import { initBrushPalette, updatePaletteSelection } from './brush-palette';
 
 // Water source structure
 interface WaterSource {
@@ -1491,7 +1492,8 @@ function main() {
   stats.setMode(0);
   stats.domElement.style.position = 'absolute';
   stats.domElement.style.left = '0px';
-  stats.domElement.style.top = '0px';
+  stats.domElement.style.bottom = '0px';
+  stats.domElement.style.top = 'auto';
   document.body.appendChild(stats.domElement);
 
 
@@ -1545,12 +1547,60 @@ function main() {
     terraineditor.add(controls,'flattenTargetHeight', 0.0, 500.0);
     terraineditor.add(controls,'rockErosionResistance', 0.0, 1.0);
     const brushSizeController = terraineditor.add(controls,'brushSize',0.1, 20.0);
-    terraineditor.add(controls,'brushStrenth',0.1,2.0);
-    terraineditor.add(controls,'brushOperation', {Add : 0, Subtract : 1});
+    const brushStrengthController = terraineditor.add(controls,'brushStrenth',0.1,2.0);
+    const brushOperationController = terraineditor.add(controls,'brushOperation', {Add : 0, Subtract : 1});
     terraineditor.open();
+    
+    // Initialize brush palette UI (floating palette for quick brush selection)
+    const brushPalette = initBrushPalette(
+        controls,
+        (brushType: number) => {
+            controls.brushType = brushType;
+            // Reset slope state when switching brush types
+            if (brushType !== 6) {
+                controls.slopeActive = 0;
+            }
+            // Update dat-gui to reflect the change
+            brushTypeController.updateDisplay();
+        },
+        (size: number) => {
+            controls.brushSize = size;
+            brushSizeController.updateDisplay();
+        },
+        (strength: number) => {
+            controls.brushStrenth = strength;
+        },
+        (operation: number) => {
+            controls.brushOperation = operation;
+            brushOperationController.updateDisplay();
+        }
+    );
+    (window as any).brushPalette = brushPalette; // Store reference for updates
     
     // Store brushSize controller reference for updating UI when changed via Ctrl+Scroll
     (window as any).brushSizeController = brushSizeController;
+    
+    // Update palette when controls change from dat-gui
+    brushTypeController.onChange(() => {
+        if ((window as any).brushPalette) {
+            updatePaletteSelection((window as any).brushPalette, controls);
+        }
+    });
+    brushSizeController.onChange(() => {
+        if ((window as any).brushPalette) {
+            updatePaletteSelection((window as any).brushPalette, controls);
+        }
+    });
+    brushStrengthController.onChange(() => {
+        if ((window as any).brushPalette) {
+            updatePaletteSelection((window as any).brushPalette, controls);
+        }
+    });
+    brushOperationController.onChange(() => {
+        if ((window as any).brushPalette) {
+            updatePaletteSelection((window as any).brushPalette, controls);
+        }
+    });
     var renderingpara = gui.addFolder('Rendering Parameters');
     renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);
     renderingpara.add(controls, 'TerrainPlatte', {AlpineMtn : 0, Desert : 1, Jungle : 2});

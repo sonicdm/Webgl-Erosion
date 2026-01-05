@@ -178,25 +178,29 @@ void main() {
                         }
                         // When Alt is pressed (brushOperation == 1), don't do anything - JS will set target
                   }else if(u_BrushType == 6 && u_BrushPressed == 1){
-                        // Slope Terrain - primary sets start, secondary (Alt) drags from end
-                        // Only work when Alt is pressed (secondary button) and start is set
-                        if (u_SlopeActive >= 1 && u_BrushOperation == 1) {
-                              // Secondary button (Alt) - dragging from end point
-                              // Create slope from start to current brush position
-                              vec2 slopeDir = pointOnPlane - u_SlopeStartPos;
+                        // Slope Terrain - click sets end point, Alt+click sets start point
+                        // Once both points are set (u_SlopeActive == 2), create slope between them
+                        // Only apply when brush is pressed AND near the slope line
+                        if (u_SlopeActive == 2) {
+                              // Both points are set - create slope from start to end
+                              vec2 slopeDir = u_SlopeEndPos - u_SlopeStartPos;
                               float slopeLength = length(slopeDir);
                               
                               if (slopeLength > 0.001) {
                                     // Normalize direction
                                     vec2 slopeDirNorm = normalize(slopeDir);
                                     
-                                    // Project current position onto the slope line
+                                    // Project brush position onto the slope line to see where we are along it
+                                    vec2 brushToStart = u_BrushPos - u_SlopeStartPos;
+                                    float brushProjDist = dot(brushToStart, slopeDirNorm);
+                                    
+                                    // Project current fragment position onto the slope line
                                     vec2 toCurrent = curuv - u_SlopeStartPos;
                                     float projDist = dot(toCurrent, slopeDirNorm);
                                     
-                                    // Get heights at start and end (current brush position)
+                                    // Get heights at start and end points
                                     vec4 startTerrain = texture(readTerrain, u_SlopeStartPos);
-                                    vec4 endTerrain = texture(readTerrain, pointOnPlane);
+                                    vec4 endTerrain = texture(readTerrain, u_SlopeEndPos);
                                     float startHeight = startTerrain.x;
                                     float endHeight = endTerrain.x;
                                     
@@ -204,9 +208,20 @@ void main() {
                                     float t = clamp(projDist / slopeLength, 0.0, 1.0);
                                     float targetHeight = mix(startHeight, endHeight, t);
                                     
-                                    // Apply slope within brush radius
-                                    float slopeAmount = dens * u_BrushStrength * 0.3;
-                                    addterrain = (targetHeight - currentHeight) * slopeAmount;
+                                    // Check if current fragment is within brush radius of the brush position
+                                    float distToBrush = distance(curuv, u_BrushPos);
+                                    float brushRadius = 0.01 * u_BrushSize;
+                                    
+                                    // Only apply slope when fragment is within brush radius
+                                    if (distToBrush < brushRadius) {
+                                          // Calculate density based on distance from brush center
+                                          float dens = (brushRadius - distToBrush) / brushRadius;
+                                          dens = max(0.0, dens);
+                                          
+                                          // Apply slope with increased strength for faster application
+                                          float slopeAmount = dens * u_BrushStrength * 3.0;
+                                          addterrain = (targetHeight - currentHeight) * slopeAmount;
+                                    }
                               }
                         }
                   }
