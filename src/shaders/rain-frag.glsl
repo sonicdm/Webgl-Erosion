@@ -218,8 +218,8 @@ void main() {
                                           float dens = (brushRadius - distToBrush) / brushRadius;
                                           dens = max(0.0, dens);
                                           
-                                          // Apply slope with increased strength for faster application
-                                          float slopeAmount = dens * u_BrushStrength * 3.0;
+                                          // Apply slope with moderate strength - lower than before to avoid over-correction
+                                          float slopeAmount = dens * u_BrushStrength * 0.3;
                                           addterrain = (targetHeight - currentHeight) * slopeAmount;
                                     }
                               }

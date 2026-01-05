@@ -1775,6 +1775,7 @@ function main() {
     rains.setSourceSizes(sourceSizes);
     rains.setSourceStrengths(sourceStrengths);
     rains.setBrushPos(pos);
+    // Set brush operation - this determines add vs subtract mode
     rains.setBrushOperation(controls.brushOperation);
     rains.setSpawnPos(vec2.fromValues(controls.spawnposx, controls.spawnposy));
     rains.setTime(timer);

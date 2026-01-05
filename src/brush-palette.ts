@@ -434,6 +434,7 @@ export function createBrushPalette(
     `;
     
     const addBtn = document.createElement('button');
+    addBtn.className = 'operation-add-btn';
     addBtn.textContent = '➕ Add';
     addBtn.style.cssText = `
         flex: 1;
@@ -448,11 +449,16 @@ export function createBrushPalette(
     `;
     addBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        // Update controls object first
+        controls.brushOperation = 0;
+        // Then call the callback to update dat-gui
         onOperationChange(0);
+        // Refresh palette visual state
         updatePaletteSelection(palette, controls);
     });
     
     const subtractBtn = document.createElement('button');
+    subtractBtn.className = 'operation-subtract-btn';
     subtractBtn.textContent = '➖ Subtract';
     subtractBtn.style.cssText = `
         flex: 1;
@@ -467,7 +473,11 @@ export function createBrushPalette(
     `;
     subtractBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        // Update controls object first
+        controls.brushOperation = 1;
+        // Then call the callback to update dat-gui
         onOperationChange(1);
+        // Refresh palette visual state
         updatePaletteSelection(palette, controls);
     });
     
@@ -599,10 +609,9 @@ export function updatePaletteSelection(
         }
     }
 
-    // Update operation buttons
-    const operationButtons = palette.querySelectorAll('button');
-    const addBtn = Array.from(operationButtons).find(btn => btn.textContent?.includes('Add')) as HTMLButtonElement;
-    const subtractBtn = Array.from(operationButtons).find(btn => btn.textContent?.includes('Subtract')) as HTMLButtonElement;
+    // Update operation buttons - use class selectors for more reliable finding
+    const addBtn = palette.querySelector('.operation-add-btn') as HTMLButtonElement;
+    const subtractBtn = palette.querySelector('.operation-subtract-btn') as HTMLButtonElement;
     if (addBtn && subtractBtn) {
         addBtn.style.background = controls.brushOperation === 0 ? '#27AE60' : '#333';
         addBtn.style.borderColor = controls.brushOperation === 0 ? '#27AE60' : '#555';
