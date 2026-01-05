@@ -128,6 +128,8 @@ const controls = {
     'Pause/Resume' :StartGeneration,
     'ResetTerrain' : Reset,
     'setTerrainRandom':setTerrainRandom,
+    'Import Height Map': loadHeightMap,
+    'Clear Height Map': clearHeightMap,
     SimulationSpeed : 3,
     TerrainBaseMap : 0,
     TerrainBaseType : 0,//0 ordinary fbm, 1 domain warping, 2 terrace, 3 voroni
@@ -216,6 +218,12 @@ let write_sediment_blend : WebGLTexture;
 let sediment_advect_a : WebGLTexture;
 let sediment_advect_b : WebGLTexture;
 
+// Height map texture for importing external height maps
+let heightmap_tex : WebGLTexture | null = null;
+
+// Reference to the initial terrain shader (set in main function)
+let noiseterrain: ShaderProgram | null = null;
+
 
 // ================ dat gui button call backs ============
 // =============================================================
@@ -248,6 +256,84 @@ function Reset(){
 function setTerrainRandom() {
 }
 
+// Function to load a height map image and convert it to a texture
+function loadHeightMap() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e: Event) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (event: ProgressEvent<FileReader>) => {
+            const img = new Image();
+            img.onload = () => {
+                // Create a canvas to process the image
+                const canvas = document.createElement('canvas');
+                canvas.width = simres;
+                canvas.height = simres;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+                
+                // Draw and scale the image to match simulation resolution
+                ctx.drawImage(img, 0, 0, simres, simres);
+                const imageData = ctx.getImageData(0, 0, simres, simres);
+                
+                // Convert image data to height map texture
+                // Use grayscale (red channel) as height, scale to terrain height range
+                const heightData = new Float32Array(simres * simres * 4);
+                const maxHeight = controls.TerrainHeight * 120.0;
+                
+                for (let i = 0; i < simres * simres; i++) {
+                    const r = imageData.data[i * 4];
+                    const g = imageData.data[i * 4 + 1];
+                    const b = imageData.data[i * 4 + 2];
+                    // Convert RGB to grayscale and normalize to 0-1, then scale
+                    const gray = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
+                    const height = gray * maxHeight;
+                    
+                    heightData[i * 4] = height;      // R: terrain height
+                    heightData[i * 4 + 1] = 0.0;   // G: water (start with no water)
+                    heightData[i * 4 + 2] = 0.0;   // B: rock material
+                    heightData[i * 4 + 3] = 1.0;   // A: alpha
+                }
+                
+                // Create or update height map texture
+                if (!heightmap_tex) {
+                    heightmap_tex = gl_context.createTexture();
+                }
+                
+                gl_context.bindTexture(gl_context.TEXTURE_2D, heightmap_tex);
+                gl_context.texImage2D(gl_context.TEXTURE_2D, 0, gl_context.RGBA32F, 
+                    simres, simres, 0, gl_context.RGBA, gl_context.FLOAT, heightData);
+                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.LINEAR);
+                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MAG_FILTER, gl_context.LINEAR);
+                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.CLAMP_TO_EDGE);
+                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_T, gl_context.CLAMP_TO_EDGE);
+                gl_context.bindTexture(gl_context.TEXTURE_2D, null);
+                
+                // Mark terrain as dirty to regenerate
+                TerrainGeometryDirty = true;
+                console.log('Height map loaded successfully');
+            };
+            img.src = event.target?.result as string;
+        };
+        reader.readAsDataURL(file);
+    };
+    input.click();
+}
+
+// Function to clear the height map and use procedural generation
+function clearHeightMap() {
+    if (heightmap_tex) {
+        gl_context.deleteTexture(heightmap_tex);
+        heightmap_tex = null;
+        TerrainGeometryDirty = true;
+        console.log('Height map cleared, using procedural generation');
+    }
+}
+
 
 function Render2Texture(renderer:OpenGLRenderer, gl_context:WebGL2RenderingContext,camera:Camera,shader:ShaderProgram,cur_texture:WebGLTexture){
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER,render_buffer);
@@ -275,6 +361,17 @@ function Render2Texture(renderer:OpenGLRenderer, gl_context:WebGL2RenderingConte
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,frame_buffer);
     renderer.clear();
     shader.use();
+    
+    // Set height map texture if this is the initial terrain shader and height map exists
+    if (noiseterrain && shader === noiseterrain && heightmap_tex) {
+        const useHeightMap = 1;
+        gl_context.uniform1i(gl_context.getUniformLocation(shader.prog,"u_UseHeightMap"), useHeightMap);
+        gl_context.activeTexture(gl_context.TEXTURE0 + 10);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, heightmap_tex);
+        gl_context.uniform1i(gl_context.getUniformLocation(shader.prog,"u_HeightMap"), 10);
+    } else if (noiseterrain && shader === noiseterrain) {
+        gl_context.uniform1i(gl_context.getUniformLocation(shader.prog,"u_UseHeightMap"), 0);
+    }
 
     renderer.render(camera,shader,[square]);
     // if(cur_texture == read_terrain_tex){
@@ -1410,12 +1507,14 @@ function main() {
     simcontrols.add(controls,'SimulationSpeed',{fast:3,medium : 2, slow : 1});
     simcontrols.open();
     var terrainParameters = gui.addFolder('Terrain Parameters');
-    terrainParameters.add(controls,'SimulationResolution',{256 : 256 , 512 : 512, 1024 : 1024, 2048 : 2048} );
+    terrainParameters.add(controls,'SimulationResolution',{256 : 256 , 512 : 512, 1024 : 1024, 2048 : 2048, 4096 : 4096} );
     terrainParameters.add(controls,'TerrainScale', 0.1, 4.0);
     terrainParameters.add(controls,'TerrainHeight', 1.0, 5.0);
     terrainParameters.add(controls,'TerrainMask',{OFF : 0 ,Sphere : 1, slope : 2});
     terrainParameters.add(controls,'TerrainBaseType', {ordinaryFBM : 0, domainWarp : 1, terrace : 2, voroni : 3, ridgeNoise : 4});
     terrainParameters.add(controls,'ResetTerrain');
+    terrainParameters.add(controls,'Import Height Map');
+    terrainParameters.add(controls,'Clear Height Map');
     terrainParameters.open();
     var erosionpara = gui.addFolder('Erosion Parameters');
     var RainErosionPara = erosionpara.addFolder('Rain Erosion Parameters');
@@ -1647,7 +1746,7 @@ function main() {
     new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/flat-frag.glsl')),
     ]);
 
-    const noiseterrain = new ShaderProgram([
+    noiseterrain = new ShaderProgram([
       new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
       new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/initial-frag.glsl')),
     ]);

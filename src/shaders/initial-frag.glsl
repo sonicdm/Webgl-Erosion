@@ -8,6 +8,8 @@ uniform float u_TerrainScale;
 uniform float u_TerrainHeight;
 uniform int u_terrainBaseType;
 uniform int u_TerrainMask;
+uniform sampler2D u_HeightMap; // Optional height map texture
+uniform int u_UseHeightMap; // 0 = procedural, 1 = use height map
 
 layout (location = 0) out vec4 initial;
 layout (location = 1) out vec4 initial2;
@@ -151,38 +153,46 @@ void main() {
   vec2 rdp2 = vec2(0.1,0.8);
   vec2 uv = 0.5f*fs_Pos+vec2(0.5f);
 
-
-    float c_mask = circle_mask(uv);
-    vec2 cpos = 1.5 * uv * u_TerrainScale;
-    cpos = cpos + vec2(1.f*sin(u_Time / 3.0) + 2.1,1.0 * cos(u_Time/17.0)+3.6);
-
-    float terrain_hight = fbm(cpos*2.0)*1.1;
-    float base_height = fbm(cpos*6.2)/1.0;
-
-
-
-
-    terrain_hight = pow(terrain_hight,3.0)/1.0;
-    //terrain_hight = ridgenoise(terrain_hight);
-    if(u_terrainBaseType == 2){
-        terrain_hight = teR(terrain_hight / 1.2);
-    }else if(u_terrainBaseType == 1){
-        terrain_hight = domainwarp(cpos * 2.0)/1.0;
-    }else if(u_terrainBaseType == 3){
-        terrain_hight = voroni(cpos * 2.0)/3.0;
-    }else if(u_terrainBaseType == 4){
-        terrain_hight =  ridgenoise(pow(fbm(cpos*1.5),2.0));
-    }
-
-
-    terrain_hight *= u_TerrainHeight*120.0;
-    if(u_TerrainMask == 1){
-        terrain_hight *= 2.0 * pow(c_mask, 1.0);
-    }else if(u_TerrainMask == 2){
-        terrain_hight *= (uv.x + uv.y) * 1.0;
-    }
-    //terrain_hight = test(uv) * 500.0;
+    float terrain_hight;
     float rainfall = .0f;
+    
+    // Check if we should use the imported height map
+    if(u_UseHeightMap == 1){
+        // Sample from the height map texture
+        vec4 heightMapSample = texture(u_HeightMap, uv);
+        terrain_hight = heightMapSample.x; // R channel contains terrain height
+        // Optionally preserve water and rock from height map if they exist
+        // rainfall = heightMapSample.y; // G channel for water (currently 0.0)
+        // rock material = heightMapSample.z; // B channel for rock (currently 0.0)
+    } else {
+        // Procedural generation (original code)
+        float c_mask = circle_mask(uv);
+        vec2 cpos = 1.5 * uv * u_TerrainScale;
+        cpos = cpos + vec2(1.f*sin(u_Time / 3.0) + 2.1,1.0 * cos(u_Time/17.0)+3.6);
+
+        terrain_hight = fbm(cpos*2.0)*1.1;
+        float base_height = fbm(cpos*6.2)/1.0;
+
+        terrain_hight = pow(terrain_hight,3.0)/1.0;
+        //terrain_hight = ridgenoise(terrain_hight);
+        if(u_terrainBaseType == 2){
+            terrain_hight = teR(terrain_hight / 1.2);
+        }else if(u_terrainBaseType == 1){
+            terrain_hight = domainwarp(cpos * 2.0)/1.0;
+        }else if(u_terrainBaseType == 3){
+            terrain_hight = voroni(cpos * 2.0)/3.0;
+        }else if(u_terrainBaseType == 4){
+            terrain_hight =  ridgenoise(pow(fbm(cpos*1.5),2.0));
+        }
+
+        terrain_hight *= u_TerrainHeight*120.0;
+        if(u_TerrainMask == 1){
+            terrain_hight *= 2.0 * pow(c_mask, 1.0);
+        }else if(u_TerrainMask == 2){
+            terrain_hight *= (uv.x + uv.y) * 1.0;
+        }
+        //terrain_hight = test(uv) * 500.0;
+    }
 
 //    if(uv.x > 0.5)
 //    terrain_hight = (40.0 * (uv.x - 0.5));
