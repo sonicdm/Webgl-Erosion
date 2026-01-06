@@ -4,28 +4,42 @@ export function rayCast(
     ro: vec3,
     rd: vec3,
     simres: number,
-    HightMapCpuBuf: Float32Array
-): vec2 {
-    let res = vec2.fromValues(-10.0, -10.0);
+    HightMapCpuBuf: Float32Array,
+    out: vec2
+): void {
+    out[0] = -10.0;
+    out[1] = -10.0;
     let cur = ro;
     let step = 0.01;
     
+    // Reusable temporary vectors to avoid allocations
+    const curTexSpace = vec2.create();
+    const scaledTexSpace = vec2.create();
+    const rdscaled = vec3.create();
+    
     for (let i = 0; i < 100; ++i) {
-        let curTexSpace = vec2.fromValues((cur[0] + 0.50) / 1.0, (cur[2] + 0.50) / 1.0);
-        let scaledTexSpace = vec2.fromValues(curTexSpace[0] * simres, curTexSpace[1] * simres);
+        curTexSpace[0] = (cur[0] + 0.50) / 1.0;
+        curTexSpace[1] = (cur[2] + 0.50) / 1.0;
+        scaledTexSpace[0] = curTexSpace[0] * simres;
+        scaledTexSpace[1] = curTexSpace[1] * simres;
         vec2.floor(scaledTexSpace, scaledTexSpace);
         let hvalcoordinate = scaledTexSpace[1] * simres * 4 + scaledTexSpace[0] * 4 + 0;
-        let hval = HightMapCpuBuf[hvalcoordinate];
         
-        if (cur[1] < hval / simres) {
-            res = curTexSpace;
-            break;
+        // Only access buffer if coordinate is valid
+        if (hvalcoordinate >= 0 && hvalcoordinate < HightMapCpuBuf.length) {
+            let hval = HightMapCpuBuf[hvalcoordinate];
+            
+            if (cur[1] < hval / simres) {
+                out[0] = curTexSpace[0];
+                out[1] = curTexSpace[1];
+                break;
+            }
         }
         
-        let rdscaled = vec3.fromValues(rd[0] * step, rd[1] * step, rd[2] * step);
+        rdscaled[0] = rd[0] * step;
+        rdscaled[1] = rd[1] * step;
+        rdscaled[2] = rd[2] * step;
         vec3.add(cur, cur, rdscaled);
     }
-    
-    return res;
 }
 

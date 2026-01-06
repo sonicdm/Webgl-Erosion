@@ -157,12 +157,14 @@ void main()
 
 
     vec3 addcol = vec3(0.0);
+    // Only calculate brush visualization if brush is active (brushType != 0)
+    // Note: We don't check u_BrushPressed here because we want to show the brush preview
+    // even when not actively painting, but we can optimize by checking brushType first
     if(u_BrushType != 0){
-        vec3 ro = u_MouseWorldPos.xyz;
-        vec3 rd = u_MouseWorldDir;
         vec2 pointOnPlane = u_BrushPos;
         float pdis2fragment = distance(pointOnPlane, fs_Uv);
-        if (pdis2fragment < 0.01 * u_BrushSize && pdis2fragment >= u_BrushSize * 0.01 - 0.003){
+        // Early exit: only do expensive calculations if fragment is within brush radius
+        if (pdis2fragment < 0.01 * u_BrushSize){
             float dens = (0.01 * u_BrushSize - pdis2fragment) / (0.01 * u_BrushSize);
 
             if(u_BrushType == 1){

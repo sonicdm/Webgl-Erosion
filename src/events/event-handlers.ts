@@ -1,0 +1,217 @@
+import { vec2 } from 'gl-matrix';
+import { 
+    getKeyAction, 
+    getMouseButtonAction, 
+    isBrushActivate, 
+    ControlsConfig, 
+    isModifierPressed 
+} from '../controls-config';
+import { 
+    handleBrushMouseDown, 
+    handleBrushMouseUp, 
+    BrushContext, 
+    BrushControls,
+    getOriginalBrushOperation,
+    setOriginalBrushOperation
+} from '../brush-handler';
+import { 
+    MAX_WATER_SOURCES,
+    addWaterSource,
+    removeNearestWaterSource,
+    clearAllWaterSources,
+    getWaterSourceCount
+} from '../utils/water-sources';
+import { simres, HightMapCpuBuf } from '../simulation/simulation-state';
+
+export interface Controls {
+    [key: string]: any;
+    brushPressed: number;
+    brushOperation: number;
+    brushSize: number;
+    brushStrenth: number;
+    brushType: number;
+    posTemp: vec2;
+    sourceCount: number;
+    flattenTargetHeight: number;
+    slopeStartPos: vec2;
+    slopeEndPos: vec2;
+    slopeActive: number;
+}
+
+export interface EventHandlers {
+    onKeyDown: (event: KeyboardEvent) => void;
+    onKeyUp: (event: KeyboardEvent) => void;
+    onMouseDown: (event: MouseEvent | PointerEvent) => void;
+    onMouseUp: (event: MouseEvent | PointerEvent) => void;
+}
+
+export function createEventHandlers(
+    controls: Controls,
+    controlsConfig: ControlsConfig
+): EventHandlers {
+    function onKeyDown(event: KeyboardEvent) {
+        const key = event.key.toLowerCase();
+        const action = getKeyAction(key, controlsConfig);
+        
+        // Check if this key is brushActivate (could be keyboard key OR mouse button string)
+        if (isBrushActivate(key, controlsConfig)) {
+            controls.brushPressed = 1;
+        } else if (action === 'brushActivate') {
+            controls.brushPressed = 1;
+        } else {
+            // Only reset if another key is pressed (not if mouse button is the activator)
+            if (controlsConfig.keys.brushActivate !== 'LEFT' && 
+                controlsConfig.keys.brushActivate !== 'MIDDLE' && 
+                controlsConfig.keys.brushActivate !== 'RIGHT') {
+                controls.brushPressed = 0;
+            }
+        }
+        
+        // If brush is active, check if modifier is pressed to invert operation
+        if (controls.brushPressed === 1) {
+            const invertModifier = controlsConfig.modifiers.brushInvert;
+            if (invertModifier) {
+                const modifierPressed = isModifierPressed(invertModifier, event);
+                
+                // Check if this is the modifier key being pressed
+                const isModifierKey = 
+                    (invertModifier === 'Ctrl' && (key === 'control' || key === 'meta')) ||
+                    (invertModifier === 'Shift' && key === 'shift') ||
+                    (invertModifier === 'Alt' && key === 'alt');
+                
+                if (isModifierKey && modifierPressed && getOriginalBrushOperation() === null) {
+                    // Modifier just pressed while brush is active - invert operation
+                    setOriginalBrushOperation(controls.brushOperation);
+                    controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
+                    console.log('[DEBUG] Brush operation inverted on modifier press to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
+                }
+            }
+        }
+
+        if (action === 'permanentWaterSource') {
+            // Check if Shift is held for removal
+            if (event.shiftKey) {
+                // Remove nearest source to cursor
+                if (removeNearestWaterSource(controls.posTemp)) {
+                    controls.sourceCount = getWaterSourceCount();
+                    console.log(`Removed water source. Remaining: ${getWaterSourceCount()}`);
+                }
+            } else {
+                // Add new source at cursor position
+                if (addWaterSource(controls.posTemp, controls.brushSize, controls.brushStrenth)) {
+                    controls.sourceCount = getWaterSourceCount();
+                    console.log(`Added water source at (${controls.posTemp[0].toFixed(3)}, ${controls.posTemp[1].toFixed(3)}). Total: ${getWaterSourceCount()}`);
+                } else {
+                    console.log(`Maximum ${MAX_WATER_SOURCES} water sources reached`);
+                }
+            }
+        }
+        
+        if (action === 'removePermanentSource') {
+            // Remove all sources
+            clearAllWaterSources();
+            controls.sourceCount = 0;
+            console.log('Removed all water sources');
+        }
+    }
+
+    function onKeyUp(event: KeyboardEvent) {
+        const key = event.key.toLowerCase();
+        const action = getKeyAction(key, controlsConfig);
+        
+        // Only deactivate if this key was the brush activator (not if mouse button is the activator)
+        if (isBrushActivate(key, controlsConfig) || action === 'brushActivate') {
+            controls.brushPressed = 0;
+        }
+        
+        // If brush is active and modifier is released, restore original operation
+        if (controls.brushPressed === 1) {
+            const invertModifier = controlsConfig.modifiers.brushInvert;
+            if (invertModifier) {
+                const isModifierKey = 
+                    (invertModifier === 'Ctrl' && (key === 'control' || key === 'meta')) ||
+                    (invertModifier === 'Shift' && key === 'shift') ||
+                    (invertModifier === 'Alt' && key === 'alt');
+                
+                if (isModifierKey && getOriginalBrushOperation() !== null) {
+                    const original = getOriginalBrushOperation();
+                    if (original !== null) {
+                        controls.brushOperation = original;
+                        setOriginalBrushOperation(null);
+                    }
+                    console.log('[DEBUG] Brush operation restored on modifier release to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
+                }
+            }
+        }
+    }
+
+    function onMouseDown(event: MouseEvent | PointerEvent) {
+        // ALWAYS log first thing - if this doesn't show, handler isn't being called
+        const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][event.button];
+        console.log('[DEBUG] onMouseDown CALLED - button:', event.button, 'buttonName:', buttonName, 'target:', event.target);
+        console.log('[DEBUG] Config - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
+        
+        const action = getMouseButtonAction(event.button, controlsConfig);
+        console.log('[DEBUG] onMouseDown - action:', action, 'brushType:', controls.brushType);
+        
+        if (action === 'brushActivate') {
+            const brushContext: BrushContext = {
+                controls: controls as BrushControls,
+                controlsConfig: controlsConfig,
+                simres: Number(simres), // Ensure it's a number, not a string
+                HightMapCpuBuf: HightMapCpuBuf
+            };
+            
+            const result = handleBrushMouseDown(event, brushContext);
+            
+            if (result.shouldActivate) {
+                controls.brushPressed = result.brushPressed;
+                // Prevent OrbitControls from handling this event
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                console.log('[DEBUG] brushPressed set to:', controls.brushPressed);
+                return; // Exit early to prevent other handlers
+            } else {
+                // Brush handler already prevented default and stopped propagation
+                return;
+            }
+        } else {
+            console.log('[DEBUG] Not a brush action - button:', event.button, 'buttonName:', buttonName);
+            console.log('[DEBUG] Expected - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
+        }
+    }
+
+    function onMouseUp(event: MouseEvent | PointerEvent) {
+        console.log('[DEBUG] onMouseUp CALLED - button:', event.button, 'target:', event.target);
+        const action = getMouseButtonAction(event.button, controlsConfig);
+        console.log('[DEBUG] onMouseUp - action:', action);
+        
+        if (action === 'brushActivate') {
+            console.log('[DEBUG] Deactivating brush - setting brushPressed = 0');
+            controls.brushPressed = 0;
+            
+            const brushContext: BrushContext = {
+                controls: controls as BrushControls,
+                controlsConfig: controlsConfig,
+                simres: Number(simres), // Ensure it's a number, not a string
+                HightMapCpuBuf: HightMapCpuBuf
+            };
+            
+            handleBrushMouseUp(event, brushContext);
+            
+            // Prevent OrbitControls from handling this event
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+        }
+    }
+
+    return {
+        onKeyDown,
+        onKeyUp,
+        onMouseDown,
+        onMouseUp
+    };
+}
+

@@ -9,14 +9,21 @@ export let speed = 3;
 export let SimFramecnt = 0;
 export let TerrainGeometryDirty = true;
 export let PauseGeneration = false;
-export let HightMapCpuBuf = new Float32Array(simresolution * simresolution * 4);
+// CPU buffer for raycasting - dynamically sized to match simulation resolution
+export let HightMapCpuBuf = new Float32Array(1024 * 1024 * 4); // Initial size, will be resized
 export let HightMapBufCounter = 0;
 
 export function incrementHightMapBufCounter(): void {
     HightMapBufCounter++;
 }
+// Read heightmap to CPU every 200 frames for raycasting
 export const MaxHightMapBufCounter = 200;
 export let simres: number = simresolution;
+
+export function resizeHightMapCpuBuf(newRes: number): void {
+    // Resize CPU buffer to match simulation resolution for accurate raycasting
+    HightMapCpuBuf = new Float32Array(newRes * newRes * 4);
+}
 
 // Global state
 export let clientWidth: number;

@@ -133,7 +133,9 @@ void main() {
       float currentHeight = cur.x;
       
       // normal water brush
-      if(u_BrushType != 0){
+      // Early exit: only do brush calculations if brush is active AND pressed
+      // This avoids expensive distance calculations when not brushing
+      if(u_BrushType != 0 && u_BrushPressed == 1){
             vec3 ro = u_MouseWorldPos.xyz;
             vec3 rd = u_MouseWorldDir;
             vec2 pointOnPlane = u_BrushPos;
@@ -142,19 +144,19 @@ void main() {
                   float dens = (0.01 * u_BrushSize - pdis2fragment * 0.5) / (0.01 * u_BrushSize);
                   dens = max(0.0, dens); // Clamp density
 
-                  if(u_BrushType == 1 && u_BrushPressed == 1){
+                  if(u_BrushType == 1){
                         // Shift Terrain - Elevate with primary button, lower with secondary (Alt+brush)
                         // u_BrushOperation: 0 = primary (elevate), 1 = secondary (lower)
                         addterrain =  amount * 1.0 * 280.0;
                         addterrain = u_BrushOperation == 0 ? addterrain : -addterrain;
-                  }else if(u_BrushType == 2 && u_BrushPressed == 1){
+                  }else if(u_BrushType == 2){
                         // Water brush
                         addwater =  amount * dens * 200.0;
                         addwater *= aw;
                         addwater = u_BrushOperation == 0 ? addwater : -addwater;
-                  }else if(u_BrushType == 3 && u_BrushPressed == 1){
+                  }else if(u_BrushType == 3){
                         // Rock brush - will be handled in output to set B channel
-                  }else if(u_BrushType == 4 && u_BrushPressed == 1){
+                  }else if(u_BrushType == 4){
                         // Soften Terrain - gentle smoothing (primary button only)
                         if (u_BrushOperation == 0) {
                               vec4 top = texture(readTerrain, curuv + vec2(0.0, div));
@@ -166,7 +168,7 @@ void main() {
                               float smoothAmount = dens * u_BrushStrength * 0.1; // Smoothing strength
                               addterrain = (avgHeight - currentHeight) * smoothAmount;
                         }
-                  }else if(u_BrushType == 5 && u_BrushPressed == 1){
+                  }else if(u_BrushType == 5){
                         // Flatten Terrain - secondary button (Alt) sets target, primary flattens
                         // Only flatten when primary button is pressed (brushOperation == 0)
                         // Alt+click (brushOperation == 1) should NOT flatten, just set target in JS
@@ -177,7 +179,7 @@ void main() {
                               addterrain = (targetHeight - currentHeight) * flattenAmount;
                         }
                         // When Alt is pressed (brushOperation == 1), don't do anything - JS will set target
-                  }else if(u_BrushType == 6 && u_BrushPressed == 1){
+                  }else if(u_BrushType == 6){
                         // Slope Terrain - click sets end point, Alt+click sets start point
                         // Once both points are set (u_SlopeActive == 2), create slope between them
                         // Only apply when brush is pressed AND near the slope line
@@ -309,7 +311,8 @@ void main() {
       float rockMaterial = cur.z;
       float baseRockSurfaceHeight = cur.w; // A channel stores base rock surface height
       
-      // Check for rock brush - handle it in the same brush check block for consistency
+      // Check for rock brush - handle it separately since it modifies the B channel
+      // Early exit: only do brush calculations if brush is active AND pressed
       if(u_BrushType == 3 && u_BrushPressed == 1){
             vec2 pointOnPlane = u_BrushPos;
             float pdis2fragment = distance(pointOnPlane, curuv);

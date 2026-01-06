@@ -10,17 +10,21 @@ import {gl, setGL} from './globals';
 import ShaderProgram, {Shader} from './rendering/gl/ShaderProgram';
 import {stat} from "fs";
 var mouseChange = require('mouse-change');
-import { getKeyAction, getMouseButtonAction, isBrushActivate, ControlsConfig, isModifierPressed } from './controls-config';
+import { ControlsConfig, getMouseButtonAction, isModifierPressed } from './controls-config';
 import { loadSettings } from './settings';
-import { initBrushPalette, updatePaletteSelection } from './brush-palette';
-import { handleBrushMouseDown, handleBrushMouseUp, updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
-import { MAX_WATER_SOURCES, waterSources, addWaterSource, removeNearestWaterSource, clearAllWaterSources, getWaterSourceCount } from './utils/water-sources';
+import { setupGUI, GUIControllers } from './gui/gui-setup';
+import { createEventHandlers } from './events/event-handlers';
+import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
+import { MAX_WATER_SOURCES, waterSources, getWaterSourceCount } from './utils/water-sources';
 import { rayCast } from './utils/raycast';
+import { createHeightMapLoader } from './utils/heightmap-loader';
+import { getCachedUniformLocation } from './utils/uniform-cache';
 import { 
     simres, shadowMapResolution, SimFramecnt, TerrainGeometryDirty, PauseGeneration, 
     HightMapCpuBuf, HightMapBufCounter, MaxHightMapBufCounter, setSimRes, setGlContext, 
     setClientDimensions, setLastMousePosition, clientWidth, clientHeight, lastX, lastY,
-    setPauseGeneration, setSimFramecnt, incrementSimFramecnt, setTerrainGeometryDirty
+    setPauseGeneration, setSimFramecnt, incrementSimFramecnt, setTerrainGeometryDirty,
+    resizeHightMapCpuBuf, incrementHightMapBufCounter
 } from './simulation/simulation-state';
 import {
     frame_buffer, shadowMap_frame_buffer, deferred_frame_buffer,
@@ -39,6 +43,7 @@ import {
     swapBilateralFilterTextures
 } from './simulation/texture-management';
 import { Render2Texture } from './rendering/render-utils';
+import { createShaders, Shaders } from './rendering/shader-factory';
 
 // Note: Most state variables are now imported from simulation-state.ts
 // Additional local variables
@@ -128,8 +133,8 @@ const controls = {
     'Pause/Resume' :StartGeneration,
     'ResetTerrain' : Reset,
     'setTerrainRandom':setTerrainRandom,
-    'Import Height Map': loadHeightMap,
-    'Clear Height Map': clearHeightMap,
+    'Import Height Map': () => {}, // Will be set in main() after gl_context is available
+    'Clear Height Map': () => {}, // Will be set in main() after gl_context is available
     SimulationSpeed : 3,
     TerrainBaseMap : 0,
     TerrainBaseType : 0,//0 ordinary fbm, 1 domain warping, 2 terrace, 3 voroni
@@ -206,8 +211,10 @@ function Reset(){
     setSimFramecnt(0);
     setTerrainGeometryDirty(true);
     if(controls.SimulationResolution!=simres){
-        setSimRes(controls.SimulationResolution);
-        resizeTextures4Simulation(gl_context, controls.SimulationResolution);
+        const newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
+        setSimRes(newRes);
+        resizeTextures4Simulation(gl_context, newRes);
+        resizeHightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
     }
     //PauseGeneration = true;
 }
@@ -215,88 +222,7 @@ function Reset(){
 function setTerrainRandom() {
 }
 
-// Function to load a height map image and convert it to a texture
-function loadHeightMap() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = (e: Event) => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (!file) return;
-        
-        const reader = new FileReader();
-        reader.onload = (event: ProgressEvent<FileReader>) => {
-            const img = new Image();
-            img.onload = () => {
-                // Create a canvas to process the image
-                const canvas = document.createElement('canvas');
-                canvas.width = simres;
-                canvas.height = simres;
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return;
-                
-                // Draw and scale the image to match simulation resolution
-                ctx.drawImage(img, 0, 0, simres, simres);
-                const imageData = ctx.getImageData(0, 0, simres, simres);
-                
-                // Convert image data to height map texture
-                // Use grayscale (red channel) as height, scale to terrain height range
-                const heightData = new Float32Array(simres * simres * 4);
-                const maxHeight = controls.TerrainHeight * 120.0;
-                
-                for (let i = 0; i < simres * simres; i++) {
-                    const r = imageData.data[i * 4];
-                    const g = imageData.data[i * 4 + 1];
-                    const b = imageData.data[i * 4 + 2];
-                    // Convert RGB to grayscale and normalize to 0-1, then scale
-                    const gray = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
-                    const height = gray * maxHeight;
-                    
-                    heightData[i * 4] = height;      // R: terrain height
-                    heightData[i * 4 + 1] = 0.0;   // G: water (start with no water)
-                    heightData[i * 4 + 2] = 0.0;   // B: rock material
-                    heightData[i * 4 + 3] = 1.0;   // A: alpha
-                }
-                
-                // Create or update height map texture
-                let heightmap_tex = getHeightMapTexture();
-                if (!heightmap_tex) {
-                    heightmap_tex = gl_context.createTexture();
-                }
-                
-                gl_context.bindTexture(gl_context.TEXTURE_2D, heightmap_tex);
-                gl_context.texImage2D(gl_context.TEXTURE_2D, 0, gl_context.RGBA32F, 
-                    simres, simres, 0, gl_context.RGBA, gl_context.FLOAT, heightData);
-                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.LINEAR);
-                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MAG_FILTER, gl_context.LINEAR);
-                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.CLAMP_TO_EDGE);
-                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_T, gl_context.CLAMP_TO_EDGE);
-                gl_context.bindTexture(gl_context.TEXTURE_2D, null);
-                
-                // Store the height map texture
-                setHeightMapTexture(heightmap_tex);
-                
-                // Mark terrain as dirty to regenerate
-                setTerrainGeometryDirty(true);
-                console.log('Height map loaded successfully');
-            };
-            img.src = event.target?.result as string;
-        };
-        reader.readAsDataURL(file);
-    };
-    input.click();
-}
-
-// Function to clear the height map and use procedural generation
-function clearHeightMap() {
-    const heightmap_tex = getHeightMapTexture();
-    if (heightmap_tex) {
-        gl_context.deleteTexture(heightmap_tex);
-        setHeightMapTexture(null);
-        setTerrainGeometryDirty(true);
-        console.log('Height map cleared, using procedural generation');
-    }
-}
+// Heightmap loading functions are now created via createHeightMapLoader in main()
 
 
 // Render2Texture is now imported from rendering/render-utils.ts
@@ -334,10 +260,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER,gl_context.DEPTH_ATTACHMENT,gl_context.RENDERBUFFER,render_buffer);
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-    let status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // let status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -351,16 +279,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(rains.prog,"readTerrain"),0);
-    gl_context.uniform1f(gl_context.getUniformLocation(rains.prog,'raindeg'),controls.RainDegree);
+    gl_context.uniform1i(getCachedUniformLocation(rains.prog,"readTerrain"),0);
+    gl_context.uniform1f(getCachedUniformLocation(rains.prog,'raindeg'),controls.RainDegree);
 
     renderer.render(camera,rains,[square]);
 
 
+    // Increment counter every simulation step
+    incrementHightMapBufCounter();
+    
     if(HightMapBufCounter % MaxHightMapBufCounter == 0) {
+        // Read full resolution for accurate raycasting
         gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
     }
-    // HightMapBufCounter is managed in simulation-state.ts
 
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
 
@@ -383,10 +314,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER,gl_context.DEPTH_ATTACHMENT,gl_context.RENDERBUFFER,render_buffer);
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -400,15 +333,15 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(shader.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(shader.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_flux_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(shader.prog,"readFlux"),1);
+    gl_context.uniform1i(getCachedUniformLocation(shader.prog,"readFlux"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_sediment_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(shader.prog,"readSedi"),2);
+    gl_context.uniform1i(getCachedUniformLocation(shader.prog,"readSedi"),2);
 
     renderer.render(camera,shader,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -434,10 +367,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0,gl_context.COLOR_ATTACHMENT1]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -451,19 +386,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(waterhight.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_flux_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(waterhight.prog,"readFlux"),1);
+    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog,"readFlux"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_sediment_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(waterhight.prog,"readSedi"),2);
+    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog,"readSedi"),2);
 
     gl_context.activeTexture(gl_context.TEXTURE3);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_vel_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(waterhight.prog,"readVel"),3);
+    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog,"readVel"),3);
 
 
 
@@ -510,7 +445,7 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     //
     // gl_context.activeTexture(gl_context.TEXTURE0);
     // gl_context.bindTexture(gl_context.TEXTURE_2D,read_vel_tex);
-    // gl_context.uniform1i(gl_context.getUniformLocation(veladvect.prog,"readVel"),0);
+    // gl_context.uniform1i(getCachedUniformLocation(veladvect.prog,"readVel"),0);
     //
     // renderer.render(camera,veladvect,[square]);
     // gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -537,10 +472,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0,gl_context.COLOR_ATTACHMENT1,gl_context.COLOR_ATTACHMENT2, gl_context.COLOR_ATTACHMENT3]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -554,15 +491,15 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(sedi.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(sedi.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_vel_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(sedi.prog,"readVelocity"),1);
+    gl_context.uniform1i(getCachedUniformLocation(sedi.prog,"readVelocity"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_sediment_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(sedi.prog,"readSediment"),2);
+    gl_context.uniform1i(getCachedUniformLocation(sedi.prog,"readSediment"),2);
 
     renderer.render(camera,sedi,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -593,10 +530,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
             gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2]);
 
-            status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-            if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-                console.log("frame buffer status:" + status.toString());
-            }
+            // Removed expensive checkFramebufferStatus call for performance
+            // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+            // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+            //     console.log("frame buffer status:" + status.toString());
+            // }
 
             gl_context.bindTexture(gl_context.TEXTURE_2D, null);
             gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
@@ -610,19 +548,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
             advect.use();
             gl_context.activeTexture(gl_context.TEXTURE0);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
-            gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "vel"), 0);
+            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
 
             gl_context.activeTexture(gl_context.TEXTURE1);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
-            gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "sedi"), 1);
+            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
 
             gl_context.activeTexture(gl_context.TEXTURE2);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_blend);
-            gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "sediBlend"), 2);
+            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
 
             gl_context.activeTexture(gl_context.TEXTURE3);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
-            gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "terrain"), 3);
+            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
 
             advect.setFloat(1, "unif_advectMultiplier");
 
@@ -641,10 +579,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
             gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2]);
 
-            status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-            if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-                console.log("frame buffer status:" + status.toString());
-            }
+            // Removed expensive checkFramebufferStatus call for performance
+            // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+            // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+            //     console.log("frame buffer status:" + status.toString());
+            // }
 
             gl_context.bindTexture(gl_context.TEXTURE_2D, null);
             gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
@@ -658,19 +597,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
             advect.use();
             gl_context.activeTexture(gl_context.TEXTURE0);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
-            gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "vel"), 0);
+            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
 
             gl_context.activeTexture(gl_context.TEXTURE1);
             gl_context.bindTexture(gl_context.TEXTURE_2D, sediment_advect_a);
-            gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "sedi"), 1);
+            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
 
             gl_context.activeTexture(gl_context.TEXTURE2);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_blend);
-            gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "sediBlend"), 2);
+            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
 
             gl_context.activeTexture(gl_context.TEXTURE3);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
-            gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "terrain"), 3);
+            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
 
             advect.setFloat(-1, "unif_advectMultiplier");
 
@@ -689,10 +628,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
             gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2]);
 
-            status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-            if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-                console.log("frame buffer status:" + status.toString());
-            }
+            // Removed expensive checkFramebufferStatus call for performance
+            // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+            // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+            //     console.log("frame buffer status:" + status.toString());
+            // }
 
             gl_context.bindTexture(gl_context.TEXTURE_2D, null);
             gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
@@ -706,19 +646,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
             macCormack.use();
             gl_context.activeTexture(gl_context.TEXTURE0);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
-            gl_context.uniform1i(gl_context.getUniformLocation(macCormack.prog, "vel"), 0);
+            gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "vel"), 0);
 
             gl_context.activeTexture(gl_context.TEXTURE1);
             gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
-            gl_context.uniform1i(gl_context.getUniformLocation(macCormack.prog, "sedi"), 1);
+            gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sedi"), 1);
 
             gl_context.activeTexture(gl_context.TEXTURE2);
             gl_context.bindTexture(gl_context.TEXTURE_2D, sediment_advect_a);
-            gl_context.uniform1i(gl_context.getUniformLocation(macCormack.prog, "sediadvecta"), 2);
+            gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sediadvecta"), 2);
 
             gl_context.activeTexture(gl_context.TEXTURE3);
             gl_context.bindTexture(gl_context.TEXTURE_2D, sediment_advect_b);
-            gl_context.uniform1i(gl_context.getUniformLocation(macCormack.prog, "sediadvectb"), 3);
+            gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sediadvectb"), 3);
 
 
             renderer.render(camera, macCormack, [square]);
@@ -736,10 +676,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
         gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2]);
 
-        status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-        if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-            console.log("frame buffer status:" + status.toString());
-        }
+        // Removed expensive checkFramebufferStatus call for performance
+        // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+        // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+        //     console.log("frame buffer status:" + status.toString());
+        // }
 
         gl_context.bindTexture(gl_context.TEXTURE_2D, null);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
@@ -753,19 +694,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
         advect.use();
         gl_context.activeTexture(gl_context.TEXTURE0);
         gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
-        gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "vel"), 0);
+        gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
 
         gl_context.activeTexture(gl_context.TEXTURE1);
         gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
-        gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "sedi"), 1);
+        gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
 
         gl_context.activeTexture(gl_context.TEXTURE2);
         gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_blend);
-        gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "sediBlend"), 2);
+        gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
 
         gl_context.activeTexture(gl_context.TEXTURE3);
         gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
-        gl_context.uniform1i(gl_context.getUniformLocation(advect.prog, "terrain"), 3);
+        gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
 
         advect.setFloat(1, "unif_advectMultiplier");
 
@@ -794,10 +735,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -811,7 +754,7 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     maxslippageheight.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(maxslippageheight.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(maxslippageheight.prog,"readTerrain"),0);
 
 
 
@@ -840,10 +783,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -857,11 +802,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     thermalterrainflux.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i( gl_context.getUniformLocation(thermalterrainflux.prog,"readTerrain"),0);
+    gl_context.uniform1i( getCachedUniformLocation(thermalterrainflux.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_maxslippage_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(thermalterrainflux.prog,"readMaxSlippage"),1);
+    gl_context.uniform1i(getCachedUniformLocation(thermalterrainflux.prog,"readMaxSlippage"),1);
 
 
     renderer.render(camera,thermalterrainflux,[square]);
@@ -887,10 +832,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -904,11 +851,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     thermalapply.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_flux_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(thermalapply.prog,"readTerrainFlux"),0);
+    gl_context.uniform1i(getCachedUniformLocation(thermalapply.prog,"readTerrainFlux"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(thermalapply.prog,"readTerrain"),1);
+    gl_context.uniform1i(getCachedUniformLocation(thermalapply.prog,"readTerrain"),1);
 
 
     renderer.render(camera,thermalapply,[square]);
@@ -932,10 +879,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -949,8 +898,8 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(eva.prog,"terrain"),0);
-    gl_context.uniform1f(gl_context.getUniformLocation(eva.prog,'evapod'),controls.EvaporationConstant);
+    gl_context.uniform1i(getCachedUniformLocation(eva.prog,"terrain"),0);
+    gl_context.uniform1f(getCachedUniformLocation(eva.prog,'evapod'),controls.EvaporationConstant);
 
     renderer.render(camera,eva,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -974,10 +923,12 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0,gl_context.COLOR_ATTACHMENT1]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log( "frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D,null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -988,11 +939,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     ave.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(ave.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(ave.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_sediment_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(ave.prog,"readSedi"),1);
+    gl_context.uniform1i(getCachedUniformLocation(ave.prog,"readSedi"),1);
 
     renderer.render(camera,ave,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -1037,166 +988,6 @@ function handleInteraction (buttons : number, x : number, y : number){
 // controlsConfig will be loaded from settings in main() function
 let controlsConfig: ControlsConfig;
 
-function onKeyDown(event : KeyboardEvent){
-    const key = event.key.toLowerCase();
-    const action = getKeyAction(key, controlsConfig);
-    
-    // Check if this key is brushActivate (could be keyboard key OR mouse button string)
-    if (isBrushActivate(key, controlsConfig)) {
-        controls.brushPressed = 1;
-    } else if (action === 'brushActivate') {
-        controls.brushPressed = 1;
-    } else {
-        // Only reset if another key is pressed (not if mouse button is the activator)
-        if (controlsConfig.keys.brushActivate !== 'LEFT' && 
-            controlsConfig.keys.brushActivate !== 'MIDDLE' && 
-            controlsConfig.keys.brushActivate !== 'RIGHT') {
-            controls.brushPressed = 0;
-        }
-    }
-    
-    // If brush is active, check if modifier is pressed to invert operation
-    if (controls.brushPressed === 1) {
-        const invertModifier = controlsConfig.modifiers.brushInvert;
-        if (invertModifier) {
-            const modifierPressed = isModifierPressed(invertModifier, event);
-            
-            // Check if this is the modifier key being pressed
-            const isModifierKey = 
-                (invertModifier === 'Ctrl' && (key === 'control' || key === 'meta')) ||
-                (invertModifier === 'Shift' && key === 'shift') ||
-                (invertModifier === 'Alt' && key === 'alt');
-            
-            if (isModifierKey && modifierPressed && getOriginalBrushOperation() === null) {
-                // Modifier just pressed while brush is active - invert operation
-                setOriginalBrushOperation(controls.brushOperation);
-                controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
-                console.log('[DEBUG] Brush operation inverted on modifier press to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
-            }
-        }
-    }
-
-    if (action === 'permanentWaterSource') {
-        // Check if Shift is held for removal
-        if (event.shiftKey) {
-            // Remove nearest source to cursor
-            if (removeNearestWaterSource(controls.posTemp)) {
-                controls.sourceCount = getWaterSourceCount();
-                console.log(`Removed water source. Remaining: ${getWaterSourceCount()}`);
-            }
-        } else {
-            // Add new source at cursor position
-            if (addWaterSource(controls.posTemp, controls.brushSize, controls.brushStrenth)) {
-                controls.sourceCount = getWaterSourceCount();
-                console.log(`Added water source at (${controls.posTemp[0].toFixed(3)}, ${controls.posTemp[1].toFixed(3)}). Total: ${getWaterSourceCount()}`);
-            } else {
-                console.log(`Maximum ${MAX_WATER_SOURCES} water sources reached`);
-            }
-        }
-    }
-    
-    if (action === 'removePermanentSource') {
-        // Remove all sources
-        clearAllWaterSources();
-        controls.sourceCount = 0;
-        console.log('Removed all water sources');
-    }
-}
-
-function onKeyUp(event : KeyboardEvent){
-    const key = event.key.toLowerCase();
-    const action = getKeyAction(key, controlsConfig);
-    
-    // Only deactivate if this key was the brush activator (not if mouse button is the activator)
-    if (isBrushActivate(key, controlsConfig) || action === 'brushActivate') {
-        controls.brushPressed = 0;
-    }
-    
-    // If brush is active and modifier is released, restore original operation
-    if (controls.brushPressed === 1) {
-        const invertModifier = controlsConfig.modifiers.brushInvert;
-        if (invertModifier) {
-            const isModifierKey = 
-                (invertModifier === 'Ctrl' && (key === 'control' || key === 'meta')) ||
-                (invertModifier === 'Shift' && key === 'shift') ||
-                (invertModifier === 'Alt' && key === 'alt');
-            
-            if (isModifierKey && getOriginalBrushOperation() !== null) {
-                const original = getOriginalBrushOperation();
-                if (original !== null) {
-                    controls.brushOperation = original;
-                    setOriginalBrushOperation(null);
-                }
-                console.log('[DEBUG] Brush operation restored on modifier release to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
-            }
-        }
-    }
-}
-
-function onMouseDown(event : MouseEvent | PointerEvent){
-    // ALWAYS log first thing - if this doesn't show, handler isn't being called
-    const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][event.button];
-    console.log('[DEBUG] onMouseDown CALLED - button:', event.button, 'buttonName:', buttonName, 'target:', event.target);
-    console.log('[DEBUG] Config - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
-    
-    const action = getMouseButtonAction(event.button, controlsConfig);
-    console.log('[DEBUG] onMouseDown - action:', action, 'brushType:', controls.brushType);
-    
-    if (action === 'brushActivate') {
-        const brushContext: BrushContext = {
-            controls: controls as BrushControls,
-            controlsConfig: controlsConfig,
-            simres: simres,
-            HightMapCpuBuf: HightMapCpuBuf
-        };
-        
-        const result = handleBrushMouseDown(event, brushContext);
-        
-        if (result.shouldActivate) {
-            controls.brushPressed = result.brushPressed;
-            // Prevent OrbitControls from handling this event
-            event.preventDefault();
-            event.stopPropagation();
-            event.stopImmediatePropagation();
-            console.log('[DEBUG] brushPressed set to:', controls.brushPressed);
-            return; // Exit early to prevent other handlers
-        } else {
-            // Brush handler already prevented default and stopped propagation
-            return;
-        }
-    } else {
-        console.log('[DEBUG] Not a brush action - button:', event.button, 'buttonName:', buttonName);
-        console.log('[DEBUG] Expected - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
-    }
-}
-
-function onMouseUp(event : MouseEvent | PointerEvent){
-    console.log('[DEBUG] onMouseUp CALLED - button:', event.button, 'target:', event.target);
-    const action = getMouseButtonAction(event.button, controlsConfig);
-    console.log('[DEBUG] onMouseUp - action:', action);
-    
-    if (action === 'brushActivate') {
-        console.log('[DEBUG] Deactivating brush - setting brushPressed = 0');
-        controls.brushPressed = 0;
-        
-        const brushContext: BrushContext = {
-            controls: controls as BrushControls,
-            controlsConfig: controlsConfig,
-            simres: simres,
-            HightMapCpuBuf: HightMapCpuBuf
-        };
-        
-        handleBrushMouseUp(event, brushContext);
-        
-        // Prevent OrbitControls from handling this event
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-    }
-}
-
-// These functions are no longer needed - we handle pointer events directly in the listeners above
-
 function main() {
 
   // Initial display for framerate
@@ -1211,134 +1002,27 @@ function main() {
 
     //HightMapCpuBuf = new Float32Array(simresolution * simresolution * 4);
 
-  // Add controls to the gui
-  const gui = new DAT.GUI();
-    var simcontrols = gui.addFolder('Simulation Controls');
-    simcontrols.add(controls,'Pause/Resume');
-    simcontrols.add(controls,'SimulationSpeed',{fast:3,medium : 2, slow : 1});
-    simcontrols.open();
-    var terrainParameters = gui.addFolder('Terrain Parameters');
-    terrainParameters.add(controls,'SimulationResolution',{256 : 256 , 512 : 512, 1024 : 1024, 2048 : 2048, 4096 : 4096} );
-    terrainParameters.add(controls,'TerrainScale', 0.1, 4.0);
-    terrainParameters.add(controls,'TerrainHeight', 1.0, 5.0);
-    terrainParameters.add(controls,'TerrainMask',{OFF : 0 ,Sphere : 1, slope : 2});
-    terrainParameters.add(controls,'TerrainBaseType', {ordinaryFBM : 0, domainWarp : 1, terrace : 2, voroni : 3, ridgeNoise : 4});
-    terrainParameters.add(controls,'ResetTerrain');
-    terrainParameters.add(controls,'Import Height Map');
-    terrainParameters.add(controls,'Clear Height Map');
-    terrainParameters.open();
-    var erosionpara = gui.addFolder('Erosion Parameters');
-    var RainErosionPara = erosionpara.addFolder('Rain Erosion Parameters');
-    RainErosionPara.add(controls,'RainErosion');
-    RainErosionPara.add(controls, 'RainErosionStrength', 0.1,3.0);
-    RainErosionPara.add(controls,'RainErosionDropSize', 0.1, 3.0);
-    RainErosionPara.close();
-    erosionpara.add(controls, 'ErosionMode', {RiverMode : 0, MountainMode : 1, PolygonalMode : 2});
-    erosionpara.add(controls, 'VelocityAdvectionMag', 0.0, 0.5);
-    erosionpara.add(controls, 'EvaporationConstant', 0.0001, 0.08);
-    erosionpara.add(controls,'Kc', 0.01,0.5);
-    erosionpara.add(controls,'Ks', 0.001,0.2);
-    erosionpara.add(controls,'Kd', 0.0001,0.1);
-    //erosionpara.add(controls,'AdvectionSpeedScaling', 0.1, 1.0);
-    erosionpara.add(controls, 'TerrainDebug', {noDebugView : 0, sediment : 1, velocity : 2, velocityHeatmap : 9, terrain : 3, flux : 4, terrainflux : 5, maxslippage : 6, flowMap : 7, spikeDiffusion : 8, rockMaterial : 10});
-    erosionpara.add(controls, 'AdvectionMethod', {Semilagrangian : 0, MacCormack : 1});
-    erosionpara.add(controls, 'VelocityMultiplier',1.0,5.0);
-    erosionpara.open();
-    var thermalerosionpara = gui.addFolder("Thermal Erosion Parameters");
-    thermalerosionpara.add(controls, 'thermalTalusAngleScale', 1.0, 10.0);
-    thermalerosionpara.add(controls,'thermalErosionScale',0.0, 5.0 );
-    //thermalerosionpara.open();
-    var terraineditor = gui.addFolder('Terrain Editor');
-    const brushTypeController = terraineditor.add(controls,'brushType',{NoBrush : 0, TerrainBrush : 1, WaterBrush : 2, RockBrush : 3, SmoothBrush : 4, FlattenBrush : 5, SlopeBrush : 6});
-    brushTypeController.onChange((value: number) => {
-        // Reset slope state when switching brush types
-        if (value !== 6) {
-            controls.slopeActive = 0;
-        }
-        // Update brush palette to reflect change
-        if ((window as any).brushPalette) {
-            updatePaletteSelection((window as any).brushPalette, controls);
-        }
-    });
-    terraineditor.add(controls,'flattenTargetHeight', 0.0, 500.0);
-    terraineditor.add(controls,'rockErosionResistance', 0.0, 1.0);
-    const brushSizeController = terraineditor.add(controls,'brushSize',0.1, 20.0);
-    const brushStrengthController = terraineditor.add(controls,'brushStrenth',0.1,2.0);
-    const brushOperationController = terraineditor.add(controls,'brushOperation', {Add : 0, Subtract : 1});
-    terraineditor.open();
-    
-    // Initialize brush palette UI (floating palette for quick brush selection)
-    const brushPalette = initBrushPalette(
-        controls,
-        (brushType: number) => {
-            controls.brushType = brushType;
-            // Reset slope state when switching brush types
-            if (brushType !== 6) {
-                controls.slopeActive = 0;
-            }
-            // Update dat-gui to reflect the change
-            brushTypeController.updateDisplay();
-        },
-        (size: number) => {
-            controls.brushSize = size;
-            brushSizeController.updateDisplay();
-        },
-        (strength: number) => {
-            controls.brushStrenth = strength;
-        },
-        (operation: number) => {
-            controls.brushOperation = operation;
-            brushOperationController.updateDisplay();
-        }
-    );
-    (window as any).brushPalette = brushPalette; // Store reference for updates
-    
-    // Store brushSize controller reference for updating UI when changed via Ctrl+Scroll
-    (window as any).brushSizeController = brushSizeController;
-    
-    // Update palette when controls change from dat-gui
-    brushTypeController.onChange(() => {
-        if ((window as any).brushPalette) {
-            updatePaletteSelection((window as any).brushPalette, controls);
-        }
-    });
-    brushSizeController.onChange(() => {
-        if ((window as any).brushPalette) {
-            updatePaletteSelection((window as any).brushPalette, controls);
-        }
-    });
-    brushStrengthController.onChange(() => {
-        if ((window as any).brushPalette) {
-            updatePaletteSelection((window as any).brushPalette, controls);
-        }
-    });
-    brushOperationController.onChange(() => {
-        if ((window as any).brushPalette) {
-            updatePaletteSelection((window as any).brushPalette, controls);
-        }
-    });
-    var renderingpara = gui.addFolder('Rendering Parameters');
-    renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);
-    renderingpara.add(controls, 'TerrainPlatte', {AlpineMtn : 0, Desert : 1, Jungle : 2});
-    renderingpara.add(controls, 'SnowRange', 0.0, 100.0);
-    renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
-    renderingpara.add(controls,'ShowFlowTrace');
-    renderingpara.add(controls,'SedimentTrace');
-    renderingpara.add(controls,'showScattering');
-    renderingpara.add(controls,'enableBilateralBlur');
-    var renderingparalightpos = renderingpara.addFolder('sunPos/Dir');
-    renderingparalightpos.add(controls,'lightPosX',-1.0,1.0);
-    renderingparalightpos.add(controls,'lightPosY',0.0,1.0);
-    renderingparalightpos.add(controls,'lightPosZ',-1.0,1.0);
-    renderingparalightpos.open();
-    renderingpara.open();
+  // Setup GUI
+  const { gui, controllers } = setupGUI(controls);
+  const { brushTypeController, brushSizeController, brushStrengthController, brushOperationController } = controllers;
 
   // get canvas and webgl context
   const canvas = <HTMLCanvasElement> document.getElementById('canvas');
   gl_context = <WebGL2RenderingContext> canvas.getContext('webgl2');
   setGlContext(gl_context);
   setClientDimensions(canvas.clientWidth, canvas.clientHeight);
+  
+  // Create heightmap loader functions
+  const { loadHeightMap, clearHeightMap } = createHeightMapLoader(gl_context, simres, controls);
+  controls['Import Height Map'] = loadHeightMap;
+  controls['Clear Height Map'] = clearHeightMap;
 
+  // Load settings (from localStorage or defaults) - must be done before creating event handlers
+  controlsConfig = loadSettings();
+  
+  // Create event handlers (must be done after controlsConfig is loaded)
+  const eventHandlers = createEventHandlers(controls, controlsConfig);
+  const { onKeyDown, onKeyUp, onMouseDown, onMouseUp } = eventHandlers;
 
   mouseChange(canvas, handleInteraction);
   document.addEventListener('keydown', onKeyDown, false);
@@ -1485,9 +1169,6 @@ function main() {
   // Initial call to load scene
   loadScene();
 
-  // Load settings (from localStorage or defaults)
-  controlsConfig = loadSettings();
-
   // Check if brush uses left click (either from mouse.brushActivate or keys.brushActivate)
   const brushUsesLeftClick = controlsConfig.mouse.brushActivate === 'LEFT' || 
                              (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
@@ -1497,116 +1178,16 @@ function main() {
   gl_context.enable(gl_context.DEPTH_TEST);
 
     setupFramebufferandtextures(gl_context, simres);
-    //=================================================================
-    //load in the shaders
-
-    const lambert = new ShaderProgram([
-    new Shader(gl_context.VERTEX_SHADER, require('./shaders/terrain-vert.glsl')),
-    new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/terrain-frag.glsl')),
-    ]);
-
-    const flat = new ShaderProgram([
-    new Shader(gl_context.VERTEX_SHADER, require('./shaders/flat-vert.glsl')),
-    new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/flat-frag.glsl')),
-    ]);
-
-    noiseterrain = new ShaderProgram([
-      new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-      new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/initial-frag.glsl')),
-    ]);
-
-    const flow = new ShaderProgram([
-      new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-      new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/flow-frag.glsl')),
-    ]);
-
-    const waterhight = new ShaderProgram([
-      new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-      new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/alterwaterhight-frag.glsl')),
-    ]);
-
-    const sediment = new ShaderProgram([
-      new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-      new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/sediment-frag.glsl')),
-    ]);
-
-    const sediadvect = new ShaderProgram([
-      new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-      new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/sediadvect-frag.glsl')),
-    ]);
-
-    const macCormack = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/maccormack-frag.glsl')),
-    ]);
-
-    const rains = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/rain-frag.glsl')),
-    ]);
-
-
-    const evaporation = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/eva-frag.glsl')),
-    ]);
-
-    const average = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/average-frag.glsl')),
-    ]);
-
-    const clean = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/clean-frag.glsl')),
-    ]);
-
-    const water = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/water-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/water-frag.glsl')),
-    ]);
-
-    const thermalterrainflux = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/thermalterrainflux-frag.glsl')),
-    ]);
-
-    const thermalapply = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/thermalapply-frag.glsl')),
-    ]);
-
-
-    const maxslippageheight = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/maxslippageheight-frag.glsl')),
-    ]);
-
-    const shadowMapShader = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/shadowmap-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/shadowmap-frag.glsl')),
-    ]);
-
-    const sceneDepthShader = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/terrain-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/sceneDepth-frag.glsl')),
-    ]);
-
-    const combinedShader = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/combine-frag.glsl')),
-    ]);
-
-    const bilateralBlur = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/bilateralBlur-frag.glsl')),
-    ]);
-
-    const veladvect = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('./shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('./shaders/veladvect-frag.glsl')),
-        ]
-    );
+    
+    // Create all shaders
+    const shaders = createShaders(gl_context);
+    const {
+        lambert, flat, flow, waterhight, sediment, sediadvect, macCormack,
+        rains, evaporation, average, clean, water, thermalterrainflux,
+        thermalapply, maxslippageheight, shadowMapShader, sceneDepthShader,
+        combinedShader, bilateralBlur, veladvect
+    } = shaders;
+    noiseterrain = shaders.noiseterrain;
 
 
     let timer = 0;
@@ -1632,6 +1213,24 @@ function main() {
 
     // rayCast is now imported from utils/raycast.ts
 
+  // Reusable objects to avoid allocations every frame
+  const reusableViewProj = mat4.create();
+  const reusableInvViewProj = mat4.create();
+  const reusableMousePoint = vec4.create();
+  const reusableMousePointEnd = vec4.create();
+  const reusableDir = vec3.create();
+  const reusableRo = vec3.create();
+  const reusablePos = vec2.create();
+  const reusableLightViewMat = mat4.create();
+  const reusableLightProjMat = mat4.create();
+  const reusableLightPos = vec3.create();
+  const reusableSpawnPos = vec2.create();
+  
+  // Reusable arrays for water sources (reused instead of creating new ones)
+  const reusableSourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
+  const reusableSourceSizes = new Float32Array(MAX_WATER_SOURCES);
+  const reusableSourceStrengths = new Float32Array(MAX_WATER_SOURCES);
+
   function tick() {
 
 
@@ -1644,26 +1243,34 @@ function main() {
     //console.log(screenMouseX + ' ' + screenMouseY);
 
       //console.log(clientHeight + ' ' + clientWidth);
-    let viewProj = mat4.create();
-    let invViewProj = mat4.create();
-    mat4.multiply(viewProj, camera.projectionMatrix, camera.viewMatrix);
-    mat4.invert(invViewProj,viewProj);
-    let mousePoint = vec4.fromValues(2.0 * screenMouseX - 1.0, 1.0 - 2.0 * screenMouseY, -1.0, 1.0);
-    let mousePointEnd = vec4.fromValues(2.0 * screenMouseX - 1.0, 1.0 - 2.0 * screenMouseY, -0.0, 1.0);
+    mat4.multiply(reusableViewProj, camera.projectionMatrix, camera.viewMatrix);
+    mat4.invert(reusableInvViewProj, reusableViewProj);
+    reusableMousePoint[0] = 2.0 * screenMouseX - 1.0;
+    reusableMousePoint[1] = 1.0 - 2.0 * screenMouseY;
+    reusableMousePoint[2] = -1.0;
+    reusableMousePoint[3] = 1.0;
+    reusableMousePointEnd[0] = 2.0 * screenMouseX - 1.0;
+    reusableMousePointEnd[1] = 1.0 - 2.0 * screenMouseY;
+    reusableMousePointEnd[2] = -0.0;
+    reusableMousePointEnd[3] = 1.0;
 
-    vec4.transformMat4(mousePoint,mousePoint,invViewProj);
-    vec4.transformMat4(mousePointEnd,mousePointEnd,invViewProj);
-    mousePoint[0] /= mousePoint[3];
-    mousePoint[1] /= mousePoint[3];
-    mousePoint[2] /= mousePoint[3];
-    mousePoint[3] /= mousePoint[3];
-    mousePointEnd[0] /= mousePointEnd[3];
-    mousePointEnd[1] /= mousePointEnd[3];
-    mousePointEnd[2] /= mousePointEnd[3];
-    mousePointEnd[3] /= mousePointEnd[3];
-    let dir = vec3.fromValues(mousePointEnd[0] - mousePoint[0], mousePointEnd[1] - mousePoint[1], mousePointEnd[2] - mousePoint[2]);
-    vec3.normalize(dir,dir);
-    let ro = vec3.fromValues(mousePoint[0], mousePoint[1], mousePoint[2]);
+    vec4.transformMat4(reusableMousePoint, reusableMousePoint, reusableInvViewProj);
+    vec4.transformMat4(reusableMousePointEnd, reusableMousePointEnd, reusableInvViewProj);
+    reusableMousePoint[0] /= reusableMousePoint[3];
+    reusableMousePoint[1] /= reusableMousePoint[3];
+    reusableMousePoint[2] /= reusableMousePoint[3];
+    reusableMousePoint[3] /= reusableMousePoint[3];
+    reusableMousePointEnd[0] /= reusableMousePointEnd[3];
+    reusableMousePointEnd[1] /= reusableMousePointEnd[3];
+    reusableMousePointEnd[2] /= reusableMousePointEnd[3];
+    reusableMousePointEnd[3] /= reusableMousePointEnd[3];
+    reusableDir[0] = reusableMousePointEnd[0] - reusableMousePoint[0];
+    reusableDir[1] = reusableMousePointEnd[1] - reusableMousePoint[1];
+    reusableDir[2] = reusableMousePointEnd[2] - reusableMousePoint[2];
+    vec3.normalize(reusableDir, reusableDir);
+    reusableRo[0] = reusableMousePoint[0];
+    reusableRo[1] = reusableMousePoint[1];
+    reusableRo[2] = reusableMousePoint[2];
 
 
     //==========set initial terrain uniforms=================
@@ -1672,7 +1279,7 @@ function main() {
     noiseterrain.setTerrainHeight(controls.TerrainHeight);
     noiseterrain.setTerrainScale(controls.TerrainScale);
     noiseterrain.setInt(controls.TerrainMask,"u_TerrainMask");
-    gl_context.uniform1i(gl_context.getUniformLocation(noiseterrain.prog,"u_terrainBaseType"),controls.TerrainBaseType);
+    gl_context.uniform1i(getCachedUniformLocation(noiseterrain.prog,"u_terrainBaseType"),controls.TerrainBaseType);
 
 
     if(TerrainGeometryDirty){
@@ -1687,68 +1294,71 @@ function main() {
     }
 
     //ray cast happens here
-    let pos = vec2.fromValues(0.0, 0.0);
-    pos = rayCast(ro, dir, simres, HightMapCpuBuf);
-    controls.posTemp = pos;
+    reusablePos[0] = 0.0;
+    reusablePos[1] = 0.0;
+    // Use full simulation resolution for accurate raycasting
+    rayCast(reusableRo, reusableDir, simres, HightMapCpuBuf, reusablePos);
+    controls.posTemp = reusablePos;
 
     //===================per tick uniforms==================
 
 
     flat.setTime(timer);
 
-    gl_context.uniform1f(gl_context.getUniformLocation(flat.prog,"u_far"),camera.far);
-    gl_context.uniform1f(gl_context.getUniformLocation(flat.prog,"u_near"),camera.near);
-    gl_context.uniform3fv(gl_context.getUniformLocation(flat.prog,"unif_LightPos"),vec3.fromValues(controls.lightPosX,controls.lightPosY,controls.lightPosZ));
+    gl_context.uniform1f(getCachedUniformLocation(flat.prog,"u_far"),camera.far);
+    gl_context.uniform1f(getCachedUniformLocation(flat.prog,"u_near"),camera.near);
+    reusableLightPos[0] = controls.lightPosX;
+    reusableLightPos[1] = controls.lightPosY;
+    reusableLightPos[2] = controls.lightPosZ;
+    gl_context.uniform3fv(getCachedUniformLocation(flat.prog,"unif_LightPos"), reusableLightPos);
 
     water.setWaterTransparency(controls.WaterTransparency);
     water.setSimres(simres);
-    gl_context.uniform1f(gl_context.getUniformLocation(water.prog,"u_far"),camera.far);
-    gl_context.uniform1f(gl_context.getUniformLocation(water.prog,"u_near"),camera.near);
-    gl_context.uniform3fv(gl_context.getUniformLocation(water.prog,"unif_LightPos"),vec3.fromValues(controls.lightPosX,controls.lightPosY,controls.lightPosZ));
+    gl_context.uniform1f(getCachedUniformLocation(water.prog,"u_far"),camera.far);
+    gl_context.uniform1f(getCachedUniformLocation(water.prog,"u_near"),camera.near);
+    gl_context.uniform3fv(getCachedUniformLocation(water.prog,"unif_LightPos"), reusableLightPos);
 
     lambert.setTerrainDebug(controls.TerrainDebug);
-    lambert.setMouseWorldPos(mousePoint);
-    lambert.setMouseWorldDir(dir);
+    lambert.setMouseWorldPos(reusableMousePoint);
+    lambert.setMouseWorldDir(reusableDir);
     lambert.setBrushSize(controls.brushSize);
     lambert.setBrushType(controls.brushType);
-    lambert.setBrushPos(pos);
+    lambert.setBrushPos(reusablePos);
     lambert.setSimres(simres);
     lambert.setFloat(controls.SnowRange, "u_SnowRange");
     lambert.setFloat(controls.ForestRange, "u_ForestRange");
     lambert.setInt(controls.TerrainPlatte, "u_TerrainPlatte");
     lambert.setInt(controls.ShowFlowTrace ? 0 : 1,"u_FlowTrace");
     lambert.setInt(controls.SedimentTrace ? 0 : 1,"u_SedimentTrace");
-    // Create arrays for shader uniforms (water sources)
-    const sourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
-    const sourceSizes = new Float32Array(MAX_WATER_SOURCES);
-    const sourceStrengths = new Float32Array(MAX_WATER_SOURCES);
-
-    // Fill arrays with source data
+    // Fill reusable arrays with source data (reuse instead of creating new ones)
     for (let i = 0; i < MAX_WATER_SOURCES; i++) {
         if (i < waterSources.length) {
-            sourcePositions[i * 2] = waterSources[i].position[0];
-            sourcePositions[i * 2 + 1] = waterSources[i].position[1];
-            sourceSizes[i] = waterSources[i].size;
-            sourceStrengths[i] = waterSources[i].strength;
+            reusableSourcePositions[i * 2] = waterSources[i].position[0];
+            reusableSourcePositions[i * 2 + 1] = waterSources[i].position[1];
+            reusableSourceSizes[i] = waterSources[i].size;
+            reusableSourceStrengths[i] = waterSources[i].strength;
         } else {
             // Fill with zeros for inactive sources
-            sourcePositions[i * 2] = 0.0;
-            sourcePositions[i * 2 + 1] = 0.0;
-            sourceSizes[i] = 0.0;
-            sourceStrengths[i] = 0.0;
+            reusableSourcePositions[i * 2] = 0.0;
+            reusableSourcePositions[i * 2 + 1] = 0.0;
+            reusableSourceSizes[i] = 0.0;
+            reusableSourceStrengths[i] = 0.0;
         }
     }
 
     // Set source arrays for terrain shader (visualization)
     lambert.setSourceCount(getWaterSourceCount());
-    lambert.setSourcePositions(sourcePositions);
-    lambert.setSourceSizes(sourceSizes);
-    gl_context.uniform3fv(gl_context.getUniformLocation(lambert.prog,"unif_LightPos"),vec3.fromValues(controls.lightPosX,controls.lightPosY,controls.lightPosZ));
+    lambert.setSourcePositions(reusableSourcePositions);
+    lambert.setSourceSizes(reusableSourceSizes);
+    reusableLightPos[0] = controls.lightPosX;
+    reusableLightPos[1] = controls.lightPosY;
+    reusableLightPos[2] = controls.lightPosZ;
+    gl_context.uniform3fv(getCachedUniformLocation(lambert.prog,"unif_LightPos"), reusableLightPos);
 
     sceneDepthShader.setSimres(simres);
 
-    rains.setMouseWorldPos(mousePoint);
-    rains.setMouseWorldDir(dir);
+    rains.setMouseWorldPos(reusableMousePoint);
+    rains.setMouseWorldDir(reusableDir);
     rains.setBrushSize(controls.brushSize);
     rains.setBrushStrength(controls.brushStrenth);
     rains.setBrushType(controls.brushType);
@@ -1756,13 +1366,13 @@ function main() {
     rains.setSimres(simres);
     
     // Update brush state (flatten target height, slope end points, etc.)
-    const brushContext: BrushContext = {
-        controls: controls as BrushControls,
-        controlsConfig: controlsConfig,
-        simres: simres,
-        HightMapCpuBuf: HightMapCpuBuf
-    };
-    updateBrushState(pos, brushContext);
+        const brushContext: BrushContext = {
+            controls: controls as BrushControls,
+            controlsConfig: controlsConfig,
+            simres: Number(simres), // Ensure it's a number, not a string
+            HightMapCpuBuf: HightMapCpuBuf
+        };
+    updateBrushState(reusablePos, brushContext);
     
     // Set brush uniforms for shader
     rains.setFloat(controls.flattenTargetHeight, 'u_FlattenTargetHeight');
@@ -1771,15 +1381,17 @@ function main() {
     rains.setInt(controls.slopeActive, 'u_SlopeActive');
     // Set source arrays for rain shader (water emission)
     rains.setSourceCount(getWaterSourceCount());
-    rains.setSourcePositions(sourcePositions);
-    rains.setSourceSizes(sourceSizes);
-    rains.setSourceStrengths(sourceStrengths);
-    rains.setBrushPos(pos);
+    rains.setSourcePositions(reusableSourcePositions);
+    rains.setSourceSizes(reusableSourceSizes);
+    rains.setSourceStrengths(reusableSourceStrengths);
+    rains.setBrushPos(reusablePos);
     // Set brush operation - this determines add vs subtract mode
     rains.setBrushOperation(controls.brushOperation);
-    rains.setSpawnPos(vec2.fromValues(controls.spawnposx, controls.spawnposy));
+    reusableSpawnPos[0] = controls.spawnposx;
+    reusableSpawnPos[1] = controls.spawnposy;
+    rains.setSpawnPos(reusableSpawnPos);
     rains.setTime(timer);
-    gl_context.uniform1i(gl_context.getUniformLocation(rains.prog,"u_RainErosion"),controls.RainErosion ? 1 : 0);
+    gl_context.uniform1i(getCachedUniformLocation(rains.prog,"u_RainErosion"),controls.RainErosion ? 1 : 0);
     rains.setFloat(controls.RainErosionStrength,'u_RainErosionStrength');
     rains.setFloat(controls.RainErosionDropSize,'u_RainErosionDropSize');
 
@@ -1832,13 +1444,13 @@ function main() {
     thermalterrainflux.setPipeLen(controls.pipelen);
     thermalterrainflux.setTimestep(controls.timestep);
     thermalterrainflux.setPipeArea(controls.pipeAra);
-    gl_context.uniform1f(gl_context.getUniformLocation(thermalterrainflux.prog,"unif_thermalRate"),controls.thermalRate);
+    gl_context.uniform1f(getCachedUniformLocation(thermalterrainflux.prog,"unif_thermalRate"),controls.thermalRate);
 
     thermalapply.setSimres(simres);
     thermalapply.setPipeLen(controls.pipelen);
     thermalapply.setTimestep(controls.timestep);
     thermalapply.setPipeArea(controls.pipeAra);
-    gl_context.uniform1f(gl_context.getUniformLocation(thermalapply.prog,"unif_thermalErosionScale"),controls.thermalErosionScale);
+    gl_context.uniform1f(getCachedUniformLocation(thermalapply.prog,"unif_thermalErosionScale"),controls.thermalErosionScale);
 
     maxslippageheight.setSimres(simres);
     maxslippageheight.setPipeLen(controls.pipelen);
@@ -1882,10 +1494,11 @@ function main() {
 
       gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-      let status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-      if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-          console.log( "frame buffer status:" + status.toString());
-      }
+      // Removed expensive checkFramebufferStatus call for performance
+      // let status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+      // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+      //     console.log( "frame buffer status:" + status.toString());
+      // }
 
       gl_context.bindTexture(gl_context.TEXTURE_2D,null);
       gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -1898,19 +1511,20 @@ function main() {
 
       gl_context.activeTexture(gl_context.TEXTURE0);
       gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-      gl_context.uniform1i(gl_context.getUniformLocation(shadowMapShader.prog,"hightmap"),0);
+      gl_context.uniform1i(getCachedUniformLocation(shadowMapShader.prog,"hightmap"),0);
 
       gl_context.activeTexture(gl_context.TEXTURE1);
       gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
-      gl_context.uniform1i(gl_context.getUniformLocation(shadowMapShader.prog, "sedimap"), 1);
+      gl_context.uniform1i(getCachedUniformLocation(shadowMapShader.prog, "sedimap"), 1);
 
-      let lightViewMat = mat4.create();
-      let lightProjMat = mat4.create();
-      lightProjMat = mat4.ortho(lightProjMat,-1.6,1.6,-1.6,1.6,0,100);
-      lightViewMat = mat4.lookAt(lightViewMat, [controls.lightPosX,controls.lightPosY,controls.lightPosZ],[0,0,0],[0,1,0]);
+      mat4.ortho(reusableLightProjMat, -1.6, 1.6, -1.6, 1.6, 0, 100);
+      reusableLightPos[0] = controls.lightPosX;
+      reusableLightPos[1] = controls.lightPosY;
+      reusableLightPos[2] = controls.lightPosZ;
+      mat4.lookAt(reusableLightViewMat, reusableLightPos, [0,0,0], [0,1,0]);
 
-      gl_context.uniformMatrix4fv(gl_context.getUniformLocation(shadowMapShader.prog,'u_proj'),false,lightProjMat);
-      gl_context.uniformMatrix4fv(gl_context.getUniformLocation(shadowMapShader.prog,'u_view'),false,lightViewMat);
+      gl_context.uniformMatrix4fv(getCachedUniformLocation(shadowMapShader.prog,'u_proj'),false,reusableLightProjMat);
+      gl_context.uniformMatrix4fv(getCachedUniformLocation(shadowMapShader.prog,'u_view'),false,reusableLightViewMat);
       shadowMapShader.setSimres(simres);
 
       renderer.render(camera,shadowMapShader,[plane]);
@@ -1925,10 +1539,11 @@ function main() {
 
       gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-      status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-      if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-          console.log( "frame buffer status:" + status.toString());
-      }
+      // Removed expensive checkFramebufferStatus call for performance
+      // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+      // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+      //     console.log( "frame buffer status:" + status.toString());
+      // }
 
       renderer.clear();// clear when attached to scene depth map
       gl_context.viewport(0,0,window.innerWidth, window.innerHeight);
@@ -1946,10 +1561,11 @@ function main() {
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-      console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //   console.log( "frame buffer status:" + status.toString());
+    // }
     renderer.clear();
 
     lambert.use();
@@ -1957,54 +1573,54 @@ function main() {
     //plane.setDrawMode(gl_context.LINE_STRIP);
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    let PingUniform = gl_context.getUniformLocation(lambert.prog,"hightmap");
+    let PingUniform = getCachedUniformLocation(lambert.prog,"hightmap");
     gl_context.uniform1i(PingUniform,0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,terrain_nor);
-    let norUniform = gl_context.getUniformLocation(lambert.prog,"normap");
+    let norUniform = getCachedUniformLocation(lambert.prog,"normap");
     gl_context.uniform1i(norUniform,1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
-    let sediUniform = gl_context.getUniformLocation(lambert.prog, "sedimap");
+    let sediUniform = getCachedUniformLocation(lambert.prog, "sedimap");
     gl_context.uniform1i(sediUniform, 2);
 
     gl_context.activeTexture(gl_context.TEXTURE3);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
-    let velUniform = gl_context.getUniformLocation(lambert.prog, "velmap");
+    let velUniform = getCachedUniformLocation(lambert.prog, "velmap");
     gl_context.uniform1i(velUniform, 3);
 
     gl_context.activeTexture(gl_context.TEXTURE4);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_flux_tex);
-    let fluxUniform = gl_context.getUniformLocation(lambert.prog, "fluxmap");
+    let fluxUniform = getCachedUniformLocation(lambert.prog, "fluxmap");
     gl_context.uniform1i(fluxUniform, 4);
 
     gl_context.activeTexture(gl_context.TEXTURE5);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_flux_tex);
-    let terrainfluxUniform = gl_context.getUniformLocation(lambert.prog, "terrainfluxmap");
+    let terrainfluxUniform = getCachedUniformLocation(lambert.prog, "terrainfluxmap");
     gl_context.uniform1i(terrainfluxUniform, 5);
 
     gl_context.activeTexture(gl_context.TEXTURE6);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_maxslippage_tex);
-    let terrainslippageUniform = gl_context.getUniformLocation(lambert.prog, "maxslippagemap");
+    let terrainslippageUniform = getCachedUniformLocation(lambert.prog, "maxslippagemap");
     gl_context.uniform1i(terrainslippageUniform, 6);
 
     gl_context.activeTexture(gl_context.TEXTURE7);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_blend);
-    gl_context.uniform1i(gl_context.getUniformLocation(lambert.prog, "sediBlend"), 7);
+    gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "sediBlend"), 7);
 
 
     gl_context.activeTexture(gl_context.TEXTURE8);
     gl_context.bindTexture(gl_context.TEXTURE_2D, shadowMap_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(lambert.prog, "shadowMap"), 8);
+    gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "shadowMap"), 8);
 
     gl_context.activeTexture(gl_context.TEXTURE9);
     gl_context.bindTexture(gl_context.TEXTURE_2D, scene_depth_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(lambert.prog, "sceneDepth"), 9);
+    gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "sceneDepth"), 9);
 
-    gl_context.uniformMatrix4fv(gl_context.getUniformLocation(lambert.prog,'u_sproj'),false,lightProjMat);
-    gl_context.uniformMatrix4fv(gl_context.getUniformLocation(lambert.prog,'u_sview'),false,lightViewMat);
+    gl_context.uniformMatrix4fv(getCachedUniformLocation(lambert.prog,'u_sproj'),false,reusableLightProjMat);
+    gl_context.uniformMatrix4fv(getCachedUniformLocation(lambert.prog,'u_sview'),false,reusableLightViewMat);
 
 
       renderer.render(camera, lambert, [
@@ -2017,26 +1633,26 @@ function main() {
     water.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
-    PingUniform = gl_context.getUniformLocation(water.prog,"hightmap");
+    PingUniform = getCachedUniformLocation(water.prog,"hightmap");
     gl_context.uniform1i(PingUniform,0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,terrain_nor);
-    norUniform = gl_context.getUniformLocation(water.prog,"normap");
+    norUniform = getCachedUniformLocation(water.prog,"normap");
     gl_context.uniform1i(norUniform,1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_sediment_tex);
-    sediUniform = gl_context.getUniformLocation(water.prog,"sedimap");
+    sediUniform = getCachedUniformLocation(water.prog,"sedimap");
     gl_context.uniform1i(sediUniform,2);
 
     gl_context.activeTexture(gl_context.TEXTURE3);
     gl_context.bindTexture(gl_context.TEXTURE_2D,scene_depth_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(water.prog,"sceneDepth"),3);
+    gl_context.uniform1i(getCachedUniformLocation(water.prog,"sceneDepth"),3);
 
     gl_context.activeTexture(gl_context.TEXTURE4);
     gl_context.bindTexture(gl_context.TEXTURE_2D,color_pass_reflection_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(water.prog,"colorReflection"),4);
+    gl_context.uniform1i(getCachedUniformLocation(water.prog,"colorReflection"),4);
 
 
       renderer.render(camera, water, [
@@ -2056,10 +1672,11 @@ function main() {
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-    status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-      console.log( "frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //   console.log( "frame buffer status:" + status.toString());
+    // }
 
     renderer.clear();// clear when attached to scene depth map
     gl_context.viewport(0,0,window.innerWidth, window.innerHeight);
@@ -2073,19 +1690,19 @@ function main() {
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(flat.prog,"hightmap"),0);
+    gl_context.uniform1i(getCachedUniformLocation(flat.prog,"hightmap"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D, scene_depth_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(flat.prog,"sceneDepth"),1);
+    gl_context.uniform1i(getCachedUniformLocation(flat.prog,"sceneDepth"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D, shadowMap_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(flat.prog,"shadowMap"),2);
+    gl_context.uniform1i(getCachedUniformLocation(flat.prog,"shadowMap"),2);
 
-    gl_context.uniformMatrix4fv(gl_context.getUniformLocation(flat.prog,'u_sproj'),false,lightProjMat);
-    gl_context.uniformMatrix4fv(gl_context.getUniformLocation(flat.prog,'u_sview'),false,lightViewMat);
-    gl_context.uniform1i(gl_context.getUniformLocation(flat.prog,"u_showScattering"),controls.showScattering ? 1 : 0);
+    gl_context.uniformMatrix4fv(getCachedUniformLocation(flat.prog,'u_sproj'),false,reusableLightProjMat);
+    gl_context.uniformMatrix4fv(getCachedUniformLocation(flat.prog,'u_sview'),false,reusableLightViewMat);
+    gl_context.uniform1i(getCachedUniformLocation(flat.prog,"u_showScattering"),controls.showScattering ? 1 : 0);
 
     renderer.render(camera, flat, [
       square,
@@ -2104,10 +1721,11 @@ function main() {
 
               gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-              status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-              if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-                  console.log("frame buffer status:" + status.toString());
-              }
+              // Removed expensive checkFramebufferStatus call for performance
+              // status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+              // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+              //     console.log("frame buffer status:" + status.toString());
+              // }
 
               renderer.clear();// clear when attached to scene depth map
 
@@ -2118,16 +1736,16 @@ function main() {
               } else {
                   gl_context.bindTexture(gl_context.TEXTURE_2D, bilateral_filter_vertical_tex);
               }
-              gl_context.uniform1i(gl_context.getUniformLocation(bilateralBlur.prog, "scatter_tex"), 0);
+              gl_context.uniform1i(getCachedUniformLocation(bilateralBlur.prog, "scatter_tex"), 0);
 
               gl_context.activeTexture(gl_context.TEXTURE1);
               gl_context.bindTexture(gl_context.TEXTURE_2D, scene_depth_tex);
-              gl_context.uniform1i(gl_context.getUniformLocation(bilateralBlur.prog, "scene_depth"), 1);
+              gl_context.uniform1i(getCachedUniformLocation(bilateralBlur.prog, "scene_depth"), 1);
 
-              gl_context.uniform1f(gl_context.getUniformLocation(bilateralBlur.prog, "u_far"), camera.far);
-              gl_context.uniform1f(gl_context.getUniformLocation(bilateralBlur.prog, "u_near"), camera.near);
+              gl_context.uniform1f(getCachedUniformLocation(bilateralBlur.prog, "u_far"), camera.far);
+              gl_context.uniform1f(getCachedUniformLocation(bilateralBlur.prog, "u_near"), camera.near);
 
-              gl_context.uniform1i(gl_context.getUniformLocation(bilateralBlur.prog, "u_isHorizontal"), i % 2);
+              gl_context.uniform1i(getCachedUniformLocation(bilateralBlur.prog, "u_isHorizontal"), i % 2);
 
 
               renderer.render(camera, bilateralBlur, [
@@ -2145,18 +1763,18 @@ function main() {
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D, color_pass_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(combinedShader.prog,"color_tex"),0);
+    gl_context.uniform1i(getCachedUniformLocation(combinedShader.prog,"color_tex"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     if(controls.enableBilateralBlur)
         gl_context.bindTexture(gl_context.TEXTURE_2D, bilateral_filter_horizontal_tex);
     else
         gl_context.bindTexture(gl_context.TEXTURE_2D, scatter_pass_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(combinedShader.prog,"bi_tex"),1);
+    gl_context.uniform1i(getCachedUniformLocation(combinedShader.prog,"bi_tex"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D, scene_depth_tex);
-    gl_context.uniform1i(gl_context.getUniformLocation(combinedShader.prog,"sceneDepth_tex"),2);
+    gl_context.uniform1i(getCachedUniformLocation(combinedShader.prog,"sceneDepth_tex"),2);
 
     renderer.clear();
     renderer.render(camera, combinedShader, [

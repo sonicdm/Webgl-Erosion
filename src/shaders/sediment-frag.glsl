@@ -108,9 +108,11 @@ void main() {
   
   // Rock should maintain constant resistance until fully converted to soil
   // Use binary check: if rock material exists, apply full resistance
+  // u_RockErosionResistance: 0.0 = no resistance (erodes normally), 1.0 = maximum resistance (doesn't erode)
+  // So we invert it: rockFactor = 1.0 - resistance (higher resistance = lower factor = less erosion)
   float rockMaterialValue = curTerrain.z;
   bool hasRock = rockMaterialValue > 0.1; // Threshold for "still rock"
-  float rockFactor = hasRock ? u_RockErosionResistance : 1.0;
+  float rockFactor = hasRock ? (1.0 - u_RockErosionResistance) : 1.0;
   
   // Check if there's sediment on top of rock
   // If current height is above base rock surface, there's sediment on top
@@ -159,7 +161,9 @@ void main() {
   float effectiveCapacityRockFactor = hasSedimentOnRock ? 1.0 : rockFactor;
   
   // Boost erosion in non-rock areas adjacent to rock to create crevices
-  Ks *= rockFactor * neighborRockFactor; // Reduce for rock, boost for non-rock near rock
+  // NOTE: Don't apply rockFactor here - it's applied later in the erosion calculation (line 232)
+  // to avoid applying it twice. Only apply neighborRockFactor for soil between rock.
+  Ks *= neighborRockFactor; // Boost for non-rock near rock (rockFactor applied later)
   Kc *= capacityBoost; // Boost capacity for soil between rock so it erodes faster
   // IMPORTANT: Reduce sediment capacity for rock proportionally to erosion resistance
   // Rock produces less fine sediment when it erodes, scaled by the same factor as erosion resistance

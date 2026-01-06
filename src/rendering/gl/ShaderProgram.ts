@@ -68,6 +68,9 @@ class ShaderProgram {
   unifBrushPressed : WebGLUniformLocation;
   unifBrusPos : WebGLUniformLocation;
 
+  // Cache for uniform locations to avoid expensive getUniformLocation calls
+  private uniformLocationCache: Map<string, WebGLUniformLocation> = new Map();
+
   constructor(shaders: Array<Shader>) {
     this.prog = gl.createProgram();
 
@@ -149,21 +152,35 @@ class ShaderProgram {
       gl.uniformMatrix4fv(this.unifViewProj, false, vp);
     }
   }
+  // Get uniform location with caching
+  private getUniformLocation(name: string): WebGLUniformLocation | null {
+    if (!this.uniformLocationCache.has(name)) {
+      const loc = gl.getUniformLocation(this.prog, name);
+      this.uniformLocationCache.set(name, loc);
+      return loc;
+    }
+    return this.uniformLocationCache.get(name)!;
+  }
+
   setInt(f : number, name : string){
     this.use();
-    let newf = gl.getUniformLocation(this.prog,name);
-    gl.uniform1i(newf,f);
+    const loc = this.getUniformLocation(name);
+    if (loc !== null && loc !== -1) {
+      gl.uniform1i(loc, f);
+    }
   }
 
   setFloat(f : number, name : string){
     this.use();
-    let newf = gl.getUniformLocation(this.prog,name);
-    gl.uniform1f(newf,f);
+    const loc = this.getUniformLocation(name);
+    if (loc !== null && loc !== -1) {
+      gl.uniform1f(loc, f);
+    }
   }
   setVec2(v : vec2, name : string){
     this.use();
-    const loc = gl.getUniformLocation(this.prog, name);
-    if (loc !== -1) {
+    const loc = this.getUniformLocation(name);
+    if (loc !== null && loc !== -1) {
       gl.uniform2fv(loc, v);
     }
   }
@@ -225,31 +242,31 @@ class ShaderProgram {
 
   setSourceCount(count: number) {
     this.use();
-    const loc = gl.getUniformLocation(this.prog, "u_SourceCount");
-    if (loc !== -1) {
+    const loc = this.getUniformLocation("u_SourceCount");
+    if (loc !== null && loc !== -1) {
       gl.uniform1i(loc, count);
     }
   }
 
   setSourcePositions(positions: Float32Array) {
     this.use();
-    const loc = gl.getUniformLocation(this.prog, "u_SourcePositions");
-    if (loc !== -1) {
+    const loc = this.getUniformLocation("u_SourcePositions");
+    if (loc !== null && loc !== -1) {
       gl.uniform2fv(loc, positions);
     }
   }
 
   setSourceSizes(sizes: Float32Array) {
     this.use();
-    const loc = gl.getUniformLocation(this.prog, "u_SourceSizes");
-    if (loc !== -1) {
+    const loc = this.getUniformLocation("u_SourceSizes");
+    if (loc !== null && loc !== -1) {
       gl.uniform1fv(loc, sizes);
     }
   }
 
   setSourceStrengths(strengths: Float32Array) {
     this.use();
-    const loc = gl.getUniformLocation(this.prog, "u_SourceStrengths");
+    const loc = this.getUniformLocation("u_SourceStrengths");
     if (loc !== -1) {
       gl.uniform1fv(loc, strengths);
     }
