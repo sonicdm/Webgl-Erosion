@@ -22,6 +22,7 @@ import {
     getWaterSourceCount
 } from '../utils/water-sources';
 import { simres, HightMapCpuBuf } from '../simulation/simulation-state';
+import Camera from '../Camera';
 
 export interface Controls {
     [key: string]: any;
@@ -47,11 +48,32 @@ export interface EventHandlers {
 
 export function createEventHandlers(
     controls: Controls,
-    controlsConfig: ControlsConfig
+    controlsConfig: ControlsConfig,
+    camera: Camera
 ): EventHandlers {
     function onKeyDown(event: KeyboardEvent) {
         const key = event.key.toLowerCase();
         const action = getKeyAction(key, controlsConfig);
+        
+        // Track WASD movement keys (don't interfere with brush controls)
+        if (controlsConfig.camera.movement.enableWASD) {
+            if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+                camera.addMovementKey(key);
+            }
+            // Space for up movement
+            if (key === ' ' && controlsConfig.camera.movement.enableVerticalMovement) {
+                camera.addMovementKey(' ');
+            }
+            // Shift for down movement (only if not used as brush modifier)
+            if (key === 'shift' && controlsConfig.camera.movement.enableVerticalMovement) {
+                // Only add if Shift is not being used as a brush modifier
+                if (controlsConfig.modifiers.brushInvert !== 'Shift' && 
+                    controlsConfig.modifiers.brushSizeScroll !== 'Shift' &&
+                    controlsConfig.modifiers.brushSecondary !== 'Shift') {
+                    camera.addMovementKey('shift');
+                }
+            }
+        }
         
         // Check if this key is brushActivate (could be keyboard key OR mouse button string)
         if (isBrushActivate(key, controlsConfig)) {
@@ -118,6 +140,21 @@ export function createEventHandlers(
     function onKeyUp(event: KeyboardEvent) {
         const key = event.key.toLowerCase();
         const action = getKeyAction(key, controlsConfig);
+        
+        // Remove WASD movement keys
+        if (controlsConfig.camera.movement.enableWASD) {
+            if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+                camera.removeMovementKey(key);
+            }
+            // Space for up movement
+            if (key === ' ') {
+                camera.removeMovementKey(' ');
+            }
+            // Shift for down movement
+            if (key === 'shift') {
+                camera.removeMovementKey('shift');
+            }
+        }
         
         // Only deactivate if this key was the brush activator (not if mouse button is the activator)
         if (isBrushActivate(key, controlsConfig) || action === 'brushActivate') {

@@ -15,6 +15,7 @@ import { loadSettings } from './settings';
 import { setupGUI, GUIControllers } from './gui/gui-setup';
 import { createEventHandlers } from './events/event-handlers';
 import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
+import { updatePaletteSelection } from './brush-palette';
 import { MAX_WATER_SOURCES, waterSources, getWaterSourceCount } from './utils/water-sources';
 import { rayCast } from './utils/raycast';
 import { createHeightMapLoader } from './utils/heightmap-loader';
@@ -1020,8 +1021,13 @@ function main() {
   // Load settings (from localStorage or defaults) - must be done before creating event handlers
   controlsConfig = loadSettings();
   
-  // Create event handlers (must be done after controlsConfig is loaded)
-  const eventHandlers = createEventHandlers(controls, controlsConfig);
+  // Create camera first (needed for event handlers)
+  const brushUsesLeftClickForCamera = controlsConfig.mouse.brushActivate === 'LEFT' || 
+                                       (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
+  const camera = new Camera(vec3.fromValues(-0.18, 0.3, 0.6), vec3.fromValues(0, 0, 0), controlsConfig.camera, brushUsesLeftClickForCamera);
+  
+  // Create event handlers (must be done after controlsConfig and camera are loaded)
+  const eventHandlers = createEventHandlers(controls, controlsConfig, camera);
   const { onKeyDown, onKeyUp, onMouseDown, onMouseUp } = eventHandlers;
 
   mouseChange(canvas, handleInteraction);
@@ -1131,7 +1137,7 @@ function main() {
       // Adjust brush size based on scroll direction with very fine granularity
       // deltaY > 0 means scrolling down (decrease size), < 0 means scrolling up (increase size)
       const scrollDelta = e.deltaY;
-      const sizeChange = scrollDelta * 0.01; // Much more granular: 0.01 per scroll unit
+      const sizeChange = scrollDelta * 0.002; // Even more granular: 0.002 per scroll unit (reduced from 0.01)
       const newSize = controls.brushSize - sizeChange; // Invert because scroll down should decrease
       
       // Clamp to valid range (0.1 to 20.0) and round to 2 decimal places for cleaner values
@@ -1141,6 +1147,12 @@ function main() {
       const brushSizeController = (window as any).brushSizeController;
       if (brushSizeController) {
         brushSizeController.updateDisplay();
+      }
+      
+      // Update brush palette slider and label
+      const brushPalette = (window as any).brushPalette;
+      if (brushPalette) {
+        updatePaletteSelection(brushPalette, controls);
       }
     }
     // If modifier is not pressed, do nothing - let OrbitControls handle zoom normally
@@ -1169,10 +1181,9 @@ function main() {
   // Initial call to load scene
   loadScene();
 
-  // Check if brush uses left click (either from mouse.brushActivate or keys.brushActivate)
+  // Camera is already created above, just check brushUsesLeftClick here for reference
   const brushUsesLeftClick = controlsConfig.mouse.brushActivate === 'LEFT' || 
                              (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
-  const camera = new Camera(vec3.fromValues(-0.18, 0.3, 0.6), vec3.fromValues(0, 0, 0), controlsConfig.camera, brushUsesLeftClick);
   const renderer = new OpenGLRenderer(canvas);
   renderer.setClearColor(0.0, 0.0, 0.0, 0);
   gl_context.enable(gl_context.DEPTH_TEST);
@@ -1471,7 +1482,7 @@ function main() {
         average.setInt(0,'unif_rainMode');
     }
 
-    camera.update();
+    camera.update(controlsConfig.camera);
     stats.begin();
 
       //==========================  we begin simulation from now ===========================================

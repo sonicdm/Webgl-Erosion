@@ -96,6 +96,12 @@ function mergeWithDefaults(loaded: any): ControlsConfig {
             enableZoom: loaded.camera?.enableZoom ?? defaultControlsConfig.camera.enableZoom,
             enableDamping: loaded.camera?.enableDamping ?? defaultControlsConfig.camera.enableDamping,
             dampingFactor: loaded.camera?.dampingFactor ?? defaultControlsConfig.camera.dampingFactor,
+            movement: {
+                enableWASD: loaded.camera?.movement?.enableWASD ?? defaultControlsConfig.camera.movement.enableWASD,
+                moveSpeed: loaded.camera?.movement?.moveSpeed ?? defaultControlsConfig.camera.movement.moveSpeed,
+                fastMoveMultiplier: loaded.camera?.movement?.fastMoveMultiplier ?? defaultControlsConfig.camera.movement.fastMoveMultiplier,
+                enableVerticalMovement: loaded.camera?.movement?.enableVerticalMovement ?? defaultControlsConfig.camera.movement.enableVerticalMovement,
+            },
         },
     };
     

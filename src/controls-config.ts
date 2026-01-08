@@ -28,6 +28,13 @@ export interface ControlsConfig {
         // Damping settings
         enableDamping: boolean;
         dampingFactor: number;
+        // WASD movement settings
+        movement: {
+            enableWASD: boolean;           // Enable WASD movement
+            moveSpeed: number;              // Base movement speed (units per second)
+            fastMoveMultiplier: number;     // Speed multiplier when Shift is held
+            enableVerticalMovement: boolean; // Enable Space/Shift for up/down movement
+        };
     };
 }
 
@@ -61,6 +68,12 @@ export const defaultControlsConfig: ControlsConfig = {
         enableZoom: true,                 // Enable zoom (scroll wheel)
         enableDamping: true,              // Enable smooth damping
         dampingFactor: 0.08,             // Damping factor (0.0 to 1.0)
+        movement: {
+            enableWASD: true,             // Enable WASD movement
+            moveSpeed: 0.3,                // Base speed: 0.3 units/second (reduced from 2.0)
+            fastMoveMultiplier: 3.0,       // 3x speed with Shift
+            enableVerticalMovement: true,   // Space = up, Shift = down
+        },
     },
 };
 
