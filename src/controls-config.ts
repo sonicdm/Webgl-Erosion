@@ -36,6 +36,10 @@ export interface ControlsConfig {
             enableVerticalMovement: boolean; // Enable Space/Shift for up/down movement
         };
     };
+    // Raycasting settings
+    raycast: {
+        method: 'heightmap' | 'bvh'; // Raycast method: 'heightmap' or 'bvh'
+    };
 }
 
 // Default key bindings - modify these to rebind controls
@@ -74,6 +78,9 @@ export const defaultControlsConfig: ControlsConfig = {
             fastMoveMultiplier: 3.0,       // 3x speed with Shift
             enableVerticalMovement: true,   // Space = up, Shift = down
         },
+    },
+    raycast: {
+        method: 'bvh',                     // Default raycast method: 'bvh' for better accuracy
     },
 };
 

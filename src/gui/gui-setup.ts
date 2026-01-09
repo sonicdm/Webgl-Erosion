@@ -1,5 +1,6 @@
 import * as DAT from 'dat-gui';
 import { updatePaletteSelection, initBrushPalette } from '../brush-palette';
+import { loadSettings, saveSettings } from '../settings';
 
 export interface Controls {
     [key: string]: any;
@@ -66,6 +67,10 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     var terraineditor = gui.addFolder('Terrain Editor');
     terraineditor.add(controls, 'raycastMethod', { Heightmap: 'heightmap', BVH: 'bvh' }).onChange((value: string) => {
         console.log('[Raycast] Method changed to:', value);
+        // Save to settings
+        const config = loadSettings();
+        config.raycast.method = value as 'heightmap' | 'bvh';
+        saveSettings(config);
     });
     const brushTypeController = terraineditor.add(controls, 'brushType', { NoBrush: 0, TerrainBrush: 1, WaterBrush: 2, RockBrush: 3, SmoothBrush: 4, FlattenBrush: 5, SlopeBrush: 6 });
     brushTypeController.onChange((value: number) => {

@@ -103,6 +103,9 @@ function mergeWithDefaults(loaded: any): ControlsConfig {
                 enableVerticalMovement: loaded.camera?.movement?.enableVerticalMovement ?? defaultControlsConfig.camera.movement.enableVerticalMovement,
             },
         },
+        raycast: {
+            method: loaded.raycast?.method ?? defaultControlsConfig.raycast.method,
+        },
     };
     
     return merged;

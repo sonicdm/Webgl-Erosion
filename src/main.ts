@@ -159,7 +159,7 @@ const controls = {
     brushStrenth : 0.25,
     brushOperation : 0, // 0 : add, 1 : subtract
     brushPressed : 0, // 0 : not pressed, 1 : pressed
-    raycastMethod : 'bvh' as 'heightmap' | 'bvh', // Raycast method: 'heightmap' or 'bvh' for A/B testing
+    raycastMethod : 'bvh' as 'heightmap' | 'bvh', // Raycast method: 'heightmap' or 'bvh' (will be overridden by settings)
     flattenTargetHeight : 0.0, // Target height for flatten brush (will be set to center height on Alt+click)
     slopeStartPos : vec2.fromValues(0.0, 0.0), // Start position for slope brush
     slopeEndPos : vec2.fromValues(0.0, 0.0), // End position for slope brush
@@ -1039,6 +1039,9 @@ function main() {
 
   // Load settings (from localStorage or defaults) - must be done before creating event handlers
   controlsConfig = loadSettings();
+  
+  // Apply raycast method from settings
+  controls.raycastMethod = controlsConfig.raycast.method;
   
   // Heightfield raycasting uses the CPU heightmap buffer
   
