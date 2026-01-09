@@ -88,3 +88,7 @@ typings/
 
 # Build output
 dist/
+
+# Deploy keys (sensitive - never commit)
+deploy_key
+deploy_key.pub
