@@ -40,6 +40,9 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 ![](screenshot/scatter1.PNG)
 
 ## Note : MacOS currently unsupported, Recommended GPU is GTX 1060 and above
+## update 12/2024 : 
+- Added automated deployment via GitHub Actions to `sonicdm.github.io/webgl-erosion-enhanced`
+- Project now automatically builds and deploys on pushes to master branch
 ## update 12/8/2021 : 
 - Algorithm update/fix : added basic(semi-lagrangian) advection for velocity field generation, you can change magnitude of it under "Erosion Parameters" -> "VelocityAdvectionMag", this means that momentum is possible for water, we can have larger/better scale meandering/delta effects
 ## update 10/1/2021 : 
