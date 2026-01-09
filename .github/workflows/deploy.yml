@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     
     steps:
@@ -27,15 +27,44 @@ jobs:
       - name: Build project
         run: npm run build
         
-      - name: Deploy to sonicdm.github.io
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          deploy_key: ${{ secrets.DEPLOY_KEY }}
-          external_repository: sonicdm/sonicdm.github.io
-          publish_dir: ./dist
-          destination_dir: webgl-erosion-enhanced
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'Deploy WebGL Erosion from ${{ github.sha }}'
-          keep_files: false
+          name: dist-files
+          path: ./dist
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: sonicdm/sonicdm.github.io
+          token: ${{ secrets.PAT_TOKEN }}
+          path: pages-repo
+          
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-files
+          path: ./dist
+          
+      - name: Copy files to destination
+        run: |
+          mkdir -p pages-repo/webgl-erosion-enhanced
+          cp -r dist/* pages-repo/webgl-erosion-enhanced/
+          
+      - name: Commit and push
+        working-directory: pages-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add webgl-erosion-enhanced/
+          git commit -m "Deploy WebGL Erosion from ${{ github.repository }}@${{ github.sha }}" || exit 0
+          git push
 
