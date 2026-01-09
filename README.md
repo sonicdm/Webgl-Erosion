@@ -40,9 +40,56 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 ![](screenshot/scatter1.PNG)
 
 ## Note : MacOS currently unsupported, Recommended GPU is GTX 1060 and above
+
+## Enhanced Version Updates (Since Fork)
+
 ## update 12/2024 : 
-- Added automated deployment via GitHub Actions to `sonicdm.github.io/webgl-erosion-enhanced`
-- Project now automatically builds and deploys on pushes to master branch
+- **Deployment & Build System**
+  - Added automated deployment via GitHub Actions to `sonicdm.github.io/webgl-erosion-enhanced`
+  - Project now automatically builds and deploys on pushes to master branch
+  - Migrated from Webpack to Vite for faster builds and better development experience
+  - Optimized bundle splitting with separate vendor chunks for Three.js, gl-matrix, and UI libraries
+
+- **Raycasting Improvements**
+  - Implemented BVH (Bounding Volume Hierarchy) raycasting using three-mesh-bvh for improved accuracy and performance
+  - Added adaptive raycasting with binary search refinement for precise terrain intersection
+  - Improved brush interaction accuracy with better height sampling using bilinear interpolation
+  - Added toggle between heightmap and BVH raycast methods for A/B testing
+
+- **Brush System Enhancements**
+  - Added comprehensive brush palette UI with quick access to brush types (Terrain, Water, Rock, Smooth, Flatten, Slope)
+  - Improved brush size granularity with better slider controls
+  - Enhanced slope brush behavior with two-point slope creation
+  - Added keyboard shortcuts (1-6) for quick brush type switching
+  - Fixed brush operation modes and improved brush palette synchronization
+
+- **Rock Material System**
+  - Implemented rock material with erosion resistance properties
+  - Added visual blending between rock and terrain materials
+  - Improved rock erosion with faster water flow and material conservation
+  - Enhanced water visibility on rock surfaces
+  - Added sediment deposition on rock with base surface tracking
+
+- **Terrain Import/Export**
+  - Added height map import functionality - load external height maps as PNG images
+  - Added clear height map option to return to procedural generation
+  - Height maps are properly integrated into the erosion simulation
+
+- **Multiple Water Sources**
+  - Implemented system for placing multiple permanent water sources
+  - Each water source can be individually configured with size and strength
+
+- **Code Architecture**
+  - Major refactoring: broke down monolithic main.ts into manageable modules
+  - Separated concerns: brush handling, settings, controls, rendering, simulation state
+  - Improved code organization with dedicated modules for geometry, shaders, and utilities
+  - Added configurable controls system with pointer events support
+
+- **Performance & Quality**
+  - Optimized heightmap readback frequency based on brush activity
+  - Improved raycast accuracy with full-resolution height reads
+  - Better terrain geometry building with proper bilinear interpolation matching
+
 ## update 12/8/2021 : 
 - Algorithm update/fix : added basic(semi-lagrangian) advection for velocity field generation, you can change magnitude of it under "Erosion Parameters" -> "VelocityAdvectionMag", this means that momentum is possible for water, we can have larger/better scale meandering/delta effects
 ## update 10/1/2021 : 
@@ -87,14 +134,14 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 
 
 ### Future Plans:
-- Image(height map) I/O 
-- muti-layered(rock/sand/etc) erosion
-- PBR 
-- adaptive simulation utilizing quadtree(or just tiles) for sim optimization
+- ~~Image(height map) I/O~~ ✅ **Completed** - Height map import/export functionality added
+- ~~muti-layered(rock/sand/etc) erosion~~ ✅ **Partially Completed** - Rock material system with erosion resistance implemented
+- PBR (Physically Based Rendering)
+- Adaptive simulation utilizing quadtree(or just tiles) for sim optimization
 - Depth upsampling/downsampling for volumetric rendering optimization
-- Better GUI & Visulization
-- Terrain features like instaced tree placements
-- other postprocessing effects (ray marched cloud for example, since ray marched Mie scattering is done, cloud should be fairly simple to work based on it)
+- Better GUI & Visualization (ongoing improvements)
+- Terrain features like instanced tree placements
+- Other postprocessing effects (ray marched cloud for example, since ray marched Mie scattering is done, cloud should be fairly simple to work based on it)
 - Biomes
 - Eventual goal : Erosion based games, "FROM DUST" would be a good example
 
