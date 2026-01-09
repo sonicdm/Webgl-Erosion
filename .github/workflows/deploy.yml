@@ -64,10 +64,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "Error: PAT_TOKEN secret is not set!"
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Get the current branch name (usually 'main' for .github.io repos)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "Current branch: $BRANCH"
+          # Set remote URL with token embedded
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/sonicdm/sonicdm.github.io.git
+          # Verify remote is set correctly
+          git remote -v
           git add webgl-erosion-enhanced/
           git commit -m "Deploy WebGL Erosion from ${{ github.repository }}@${{ github.sha }}" || exit 0
-          git push origin HEAD
+          git push origin ${BRANCH}
 
