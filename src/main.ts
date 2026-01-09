@@ -159,7 +159,7 @@ const controls = {
     brushStrenth : 0.25,
     brushOperation : 0, // 0 : add, 1 : subtract
     brushPressed : 0, // 0 : not pressed, 1 : pressed
-    raycastMethod : 'heightmap' as 'heightmap' | 'bvh', // Raycast method: 'heightmap' or 'bvh' for A/B testing
+    raycastMethod : 'bvh' as 'heightmap' | 'bvh', // Raycast method: 'heightmap' or 'bvh' for A/B testing
     flattenTargetHeight : 0.0, // Target height for flatten brush (will be set to center height on Alt+click)
     slopeStartPos : vec2.fromValues(0.0, 0.0), // Start position for slope brush
     slopeEndPos : vec2.fromValues(0.0, 0.0), // End position for slope brush
