@@ -2,10 +2,60 @@ import {vec2, vec3} from 'gl-matrix';
 
 // Configuration constants for adaptive raycasting
 const INITIAL_STEP_SIZE = 0.05;              // Larger step for initial traversal
-const REFINEMENT_STEP_SIZE = 0.001;         // Smaller step near terrain
+const REFINEMENT_STEP_SIZE = 0.0005;        // Smaller step near terrain (reduced from 0.001 for better precision)
+const ULTRA_REFINEMENT_STEP_SIZE = 0.00025; // Ultra-small step when very close to terrain
 const TERRAIN_PROXIMITY_THRESHOLD = 0.02;   // Distance threshold to switch to refinement
-const MAX_RAY_DISTANCE = 2.0;                // Maximum distance to search
+const MAX_RAY_DISTANCE = 10.0;               // Maximum distance to search (increased from 2.0 to prevent missed hits)
 const MAX_ITERATIONS = 200;                  // Maximum iterations (increased from 100)
+const BINARY_SEARCH_ITERATIONS = 12;        // Number of binary search iterations for precise intersection (balanced for performance)
+const BINARY_SEARCH_CONVERGENCE_THRESHOLD = 0.0001; // Early exit threshold when binary search positions are close enough
+
+/**
+ * Get height value from buffer at integer texel coordinates
+ */
+function getHeightAt(x: number, y: number, simres: number, buffer: Float32Array): number {
+    // Clamp coordinates to valid range
+    const clampedX = Math.max(0, Math.min(simres - 1, Math.floor(x)));
+    const clampedY = Math.max(0, Math.min(simres - 1, Math.floor(y)));
+    const index = clampedY * simres * 4 + clampedX * 4 + 0;
+    if (index >= 0 && index < buffer.length) {
+        return buffer[index];
+    }
+    return 0;
+}
+
+/**
+ * Sample height using bilinear interpolation for smooth height values
+ * Clamps UV to [0, 1] and texel indices to [0, simres - 1] to prevent out-of-bounds
+ */
+export function sampleHeightBilinear(uv: vec2, simres: number, buffer: Float32Array): number {
+    // Clamp UV to [0, 1]
+    const clampedU = Math.max(0, Math.min(1, uv[0]));
+    const clampedV = Math.max(0, Math.min(1, uv[1]));
+    
+    // Calculate texel coordinates
+    const x = clampedU * simres;
+    const y = clampedV * simres;
+    
+    // Get integer and fractional parts
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const x1 = Math.min(x0 + 1, simres - 1);
+    const y1 = Math.min(y0 + 1, simres - 1);
+    const fx = x - x0;
+    const fy = y - y0;
+    
+    // Sample 4 corners
+    const h00 = getHeightAt(x0, y0, simres, buffer);
+    const h10 = getHeightAt(x1, y0, simres, buffer);
+    const h01 = getHeightAt(x0, y1, simres, buffer);
+    const h11 = getHeightAt(x1, y1, simres, buffer);
+    
+    // Bilinear interpolation
+    const h0 = h00 * (1 - fx) + h10 * fx;
+    const h1 = h01 * (1 - fx) + h11 * fx;
+    return h0 * (1 - fy) + h1 * fy;
+}
 
 export function rayCast(
     ro: vec3,
@@ -40,20 +90,14 @@ export function rayCast(
     startTexSpace[1] = (ro[2] + 0.50) / 1.0;
     if (startTexSpace[0] >= 0.0 && startTexSpace[0] <= 1.0 && 
         startTexSpace[1] >= 0.0 && startTexSpace[1] <= 1.0) {
-        let startScaledTexSpace = vec2.create();
-        startScaledTexSpace[0] = startTexSpace[0] * simres;
-        startScaledTexSpace[1] = startTexSpace[1] * simres;
-        vec2.floor(startScaledTexSpace, startScaledTexSpace);
-        let startHvalcoordinate = startScaledTexSpace[1] * simres * 4 + startScaledTexSpace[0] * 4 + 0;
-        if (startHvalcoordinate >= 0 && startHvalcoordinate < HightMapCpuBuf.length) {
-            let startHval = HightMapCpuBuf[startHvalcoordinate];
-            let startTerrainHeight = startHval / simres;
-            if (ro[1] <= startTerrainHeight) {
-                // Ray starts at or below terrain, return current position
-                out[0] = startTexSpace[0];
-                out[1] = startTexSpace[1];
-                return;
-            }
+        // Use bilinear sampling for smooth height
+        let startHval = sampleHeightBilinear(startTexSpace, simres, HightMapCpuBuf);
+        let startTerrainHeight = startHval / simres;
+        if (ro[1] <= startTerrainHeight) {
+            // Ray starts at or below terrain, return current position
+            out[0] = startTexSpace[0];
+            out[1] = startTexSpace[1];
+            return;
         }
     }
     
@@ -64,7 +108,7 @@ export function rayCast(
             break;
         }
         
-        // Convert current position to texture space
+        // Convert current position to texture space (unclamped for bounds checks)
         curTexSpace[0] = (cur[0] + 0.50) / 1.0;
         curTexSpace[1] = (cur[2] + 0.50) / 1.0;
         
@@ -84,104 +128,105 @@ export function rayCast(
             }
         }
         
-        // Calculate buffer index
-        scaledTexSpace[0] = curTexSpace[0] * simres;
-        scaledTexSpace[1] = curTexSpace[1] * simres;
-        vec2.floor(scaledTexSpace, scaledTexSpace);
-        let hvalcoordinate = scaledTexSpace[1] * simres * 4 + scaledTexSpace[0] * 4 + 0;
+        // Use bilinear sampling for smooth height values
+        let hval = sampleHeightBilinear(curTexSpace, simres, HightMapCpuBuf);
+        let terrainHeight = hval / simres;
         
-        // Only access buffer if coordinate is valid
-        if (hvalcoordinate >= 0 && hvalcoordinate < HightMapCpuBuf.length) {
-            let hval = HightMapCpuBuf[hvalcoordinate];
-            let terrainHeight = hval / simres;
+        // Check if we've hit the terrain (first hit detection)
+        if (cur[1] < terrainHeight) {
+            // First hit detected - store position for binary search
+            vec3.copy(hitPosition, cur);
+            vec3.copy(binarySearchStart, prev);
+            vec3.copy(binarySearchEnd, cur);
+            foundHit = true;
             
-            // Check if we've hit the terrain (first hit detection)
-            if (cur[1] < terrainHeight) {
-                // First hit detected - store position for binary search
-                vec3.copy(hitPosition, cur);
-                vec3.copy(binarySearchStart, prev);
-                vec3.copy(binarySearchEnd, cur);
-                foundHit = true;
-                
-                // Binary search refinement for precise intersection
-                for (let j = 0; j < 10; ++j) {
-                    vec3.lerp(binarySearchMid, binarySearchStart, binarySearchEnd, 0.5);
-                    
-                    // Check height at midpoint
-                    let midTexSpace = vec2.create();
-                    midTexSpace[0] = (binarySearchMid[0] + 0.50) / 1.0;
-                    midTexSpace[1] = (binarySearchMid[2] + 0.50) / 1.0;
-                    
-                    if (midTexSpace[0] < 0.0 || midTexSpace[0] > 1.0 || 
-                        midTexSpace[1] < 0.0 || midTexSpace[1] > 1.0) {
-                        break;
-                    }
-                    
-                    let midScaledTexSpace = vec2.create();
-                    midScaledTexSpace[0] = midTexSpace[0] * simres;
-                    midScaledTexSpace[1] = midTexSpace[1] * simres;
-                    vec2.floor(midScaledTexSpace, midScaledTexSpace);
-                    let midHvalcoordinate = midScaledTexSpace[1] * simres * 4 + midScaledTexSpace[0] * 4 + 0;
-                    
-                    if (midHvalcoordinate >= 0 && midHvalcoordinate < HightMapCpuBuf.length) {
-                        let midHval = HightMapCpuBuf[midHvalcoordinate];
-                        let midTerrainHeight = midHval / simres;
-                        
-                        if (binarySearchMid[1] < midTerrainHeight) {
-                            // Still below terrain, move start forward
-                            vec3.copy(binarySearchStart, binarySearchMid);
-                        } else {
-                            // Above terrain, move end back
-                            vec3.copy(binarySearchEnd, binarySearchMid);
-                        }
-                    } else {
-                        break;
-                    }
+            // Binary search refinement for precise intersection
+            // Track best position found during search (closest to terrain surface)
+            const bestPosition = vec3.create();
+            let bestDistanceToSurface = Infinity;
+            vec3.copy(bestPosition, binarySearchEnd);
+            
+            for (let j = 0; j < BINARY_SEARCH_ITERATIONS; ++j) {
+                // Check convergence - if positions are very close, we're done
+                const searchRange = vec3.distance(binarySearchStart, binarySearchEnd);
+                if (searchRange < BINARY_SEARCH_CONVERGENCE_THRESHOLD) {
+                    break; // Converged
                 }
                 
-                // Use refined position, but ensure it's still valid
-                vec3.copy(hitPosition, binarySearchEnd);
+                vec3.lerp(binarySearchMid, binarySearchStart, binarySearchEnd, 0.5);
                 
-                // Verify the final position is still valid (within bounds and below/at terrain)
-                let finalTexSpace = vec2.create();
-                finalTexSpace[0] = (hitPosition[0] + 0.50) / 1.0;
-                finalTexSpace[1] = (hitPosition[2] + 0.50) / 1.0;
+                // Check height at midpoint using bilinear sampling
+                let midTexSpace = vec2.create();
+                midTexSpace[0] = (binarySearchMid[0] + 0.50) / 1.0;
+                midTexSpace[1] = (binarySearchMid[2] + 0.50) / 1.0;
                 
-                if (finalTexSpace[0] >= 0.0 && finalTexSpace[0] <= 1.0 && 
-                    finalTexSpace[1] >= 0.0 && finalTexSpace[1] <= 1.0) {
-                    let finalScaledTexSpace = vec2.create();
-                    finalScaledTexSpace[0] = finalTexSpace[0] * simres;
-                    finalScaledTexSpace[1] = finalTexSpace[1] * simres;
-                    vec2.floor(finalScaledTexSpace, finalScaledTexSpace);
-                    let finalHvalcoordinate = finalScaledTexSpace[1] * simres * 4 + finalScaledTexSpace[0] * 4 + 0;
-                    
-                    if (finalHvalcoordinate >= 0 && finalHvalcoordinate < HightMapCpuBuf.length) {
-                        let finalHval = HightMapCpuBuf[finalHvalcoordinate];
-                        let finalTerrainHeight = finalHval / simres;
-                        
-                        // If binary search moved us above terrain, use the previous position instead
-                        if (hitPosition[1] > finalTerrainHeight + 0.001) {
-                            vec3.copy(hitPosition, prev);
-                        }
-                    }
+                if (midTexSpace[0] < 0.0 || midTexSpace[0] > 1.0 || 
+                    midTexSpace[1] < 0.0 || midTexSpace[1] > 1.0) {
+                    break;
                 }
                 
-                // Convert to texture coordinates
-                out[0] = (hitPosition[0] + 0.50) / 1.0;
-                out[1] = (hitPosition[2] + 0.50) / 1.0;
-                break;
+                // Use bilinear sampling for smooth height
+                let midHval = sampleHeightBilinear(midTexSpace, simres, HightMapCpuBuf);
+                let midTerrainHeight = midHval / simres;
+                
+                // Track distance to surface for best position selection
+                const distanceToSurface = Math.abs(binarySearchMid[1] - midTerrainHeight);
+                if (distanceToSurface < bestDistanceToSurface) {
+                    bestDistanceToSurface = distanceToSurface;
+                    vec3.copy(bestPosition, binarySearchMid);
+                }
+                
+                if (binarySearchMid[1] < midTerrainHeight) {
+                    // Still below terrain, move start forward
+                    vec3.copy(binarySearchStart, binarySearchMid);
+                } else {
+                    // Above terrain, move end back
+                    vec3.copy(binarySearchEnd, binarySearchMid);
+                }
             }
             
-            // Adaptive step sizing: use smaller steps when approaching terrain
-            let distanceToTerrain = Math.abs(cur[1] - terrainHeight);
-            if (distanceToTerrain < TERRAIN_PROXIMITY_THRESHOLD) {
-                step = REFINEMENT_STEP_SIZE;
-            } else if (distanceToTerrain < TERRAIN_PROXIMITY_THRESHOLD * 2) {
-                // Medium step size for intermediate distances
-                step = INITIAL_STEP_SIZE * 0.5;
-            } else {
-                step = INITIAL_STEP_SIZE;
+            // Use the best position found during binary search (already tracked for minimal distance to surface)
+            // This avoids expensive candidate sampling while maintaining accuracy
+            vec3.copy(hitPosition, bestPosition);
+            
+            // Simple validation: if position is significantly above terrain, fall back to previous position
+            // This avoids expensive refinement passes while maintaining reasonable accuracy
+            let finalTexSpace = vec2.create();
+            finalTexSpace[0] = (hitPosition[0] + 0.50) / 1.0;
+            finalTexSpace[1] = (hitPosition[2] + 0.50) / 1.0;
+            
+            if (finalTexSpace[0] >= 0.0 && finalTexSpace[0] <= 1.0 && 
+                finalTexSpace[1] >= 0.0 && finalTexSpace[1] <= 1.0) {
+                let finalHval = sampleHeightBilinear(finalTexSpace, simres, HightMapCpuBuf);
+                let finalTerrainHeight = finalHval / simres;
+                
+                // Use resolution-dependent threshold for better precision at high resolutions
+                const threshold = 0.001 * (1024 / simres);
+                
+                // If significantly above terrain, fall back to previous position
+                if (hitPosition[1] > finalTerrainHeight + threshold * 2) {
+                    vec3.copy(hitPosition, prev);
+                }
             }
+            
+            // Convert to texture coordinates
+            out[0] = (hitPosition[0] + 0.50) / 1.0;
+            out[1] = (hitPosition[2] + 0.50) / 1.0;
+            break;
+        }
+        
+        // Adaptive step sizing: use smaller steps when approaching terrain
+        let distanceToTerrain = Math.abs(cur[1] - terrainHeight);
+        if (distanceToTerrain < TERRAIN_PROXIMITY_THRESHOLD * 0.5) {
+            // Ultra-refinement tier: very small steps when extremely close to terrain
+            step = ULTRA_REFINEMENT_STEP_SIZE;
+        } else if (distanceToTerrain < TERRAIN_PROXIMITY_THRESHOLD) {
+            step = REFINEMENT_STEP_SIZE;
+        } else if (distanceToTerrain < TERRAIN_PROXIMITY_THRESHOLD * 2) {
+            // Medium step size for intermediate distances
+            step = INITIAL_STEP_SIZE * 0.5;
+        } else {
+            step = INITIAL_STEP_SIZE;
         }
         
         // Store previous position before stepping

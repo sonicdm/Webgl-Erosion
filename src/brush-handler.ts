@@ -1,5 +1,6 @@
 import { vec2 } from "gl-matrix";
 import { ControlsConfig, getMouseButtonAction, isModifierPressed } from "./controls-config";
+import { sampleHeightBilinear } from "./utils/raycast";
 
 // Store original brushOperation when modifier is held (for restoration on release)
 // This is module-level state that persists across calls
@@ -68,14 +69,12 @@ export function handleBrushMouseDown(
             }
             controls.brushOperation = 1; // Secondary button (temporary override)
             
-            // Read height from current brush position
-            const brushX = Math.floor(controls.posTemp[0] * context.simres);
-            const brushY = Math.floor(controls.posTemp[1] * context.simres);
-            const pixelIndex = (brushY * context.simres + brushX) * 4;
+            // Read height from current brush position using bilinear interpolation
+            const brushUV = vec2.fromValues(controls.posTemp[0], controls.posTemp[1]);
+            const rawHeight = sampleHeightBilinear(brushUV, context.simres, context.HightMapCpuBuf);
+            const heightValue = rawHeight / context.simres; // Normalize height value
             
-            
-            if (pixelIndex >= 0 && pixelIndex < context.HightMapCpuBuf.length) {
-                const heightValue = context.HightMapCpuBuf[pixelIndex]; // R channel = height
+            if (heightValue !== undefined && !isNaN(heightValue)) {
                 
                 // Update the controls object
                 controls.flattenTargetHeight = heightValue;
@@ -225,13 +224,12 @@ export function updateBrushState(
     
     // Handle flatten brush target height setting (secondary modifier+click sets target to center height)
     if (brushTypeNum === 5 && controls.brushPressed === 1 && controls.brushOperation === 1) {
-        // Secondary modifier is pressed - read target height from CPU buffer at brush center
-        const brushX = Math.floor(pos[0] * context.simres);
-        const brushY = Math.floor(pos[1] * context.simres);
-        const pixelIndex = (brushY * context.simres + brushX) * 4;
+        // Secondary modifier is pressed - read target height from CPU buffer at brush center using bilinear interpolation
+        const brushUV = vec2.fromValues(pos[0], pos[1]);
+        const rawHeight = sampleHeightBilinear(brushUV, context.simres, context.HightMapCpuBuf);
+        const heightValue = rawHeight / context.simres; // Normalize height value
         
-        if (pixelIndex >= 0 && pixelIndex < context.HightMapCpuBuf.length) {
-            const heightValue = context.HightMapCpuBuf[pixelIndex]; // R channel = height
+        if (heightValue !== undefined && !isNaN(heightValue)) {
             // Set the value on the controls object
             controls.flattenTargetHeight = heightValue;
             

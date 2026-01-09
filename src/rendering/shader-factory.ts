@@ -1,5 +1,33 @@
 import ShaderProgram, { Shader } from './gl/ShaderProgram';
 
+// GLSL shader imports
+import terrainVert from '../shaders/terrain-vert.glsl?raw';
+import terrainFrag from '../shaders/terrain-frag.glsl?raw';
+import flatVert from '../shaders/flat-vert.glsl?raw';
+import flatFrag from '../shaders/flat-frag.glsl?raw';
+import quadVert from '../shaders/quad-vert.glsl?raw';
+import initialFrag from '../shaders/initial-frag.glsl?raw';
+import flowFrag from '../shaders/flow-frag.glsl?raw';
+import alterwaterhightFrag from '../shaders/alterwaterhight-frag.glsl?raw';
+import sedimentFrag from '../shaders/sediment-frag.glsl?raw';
+import sediadvectFrag from '../shaders/sediadvect-frag.glsl?raw';
+import maccormackFrag from '../shaders/maccormack-frag.glsl?raw';
+import rainFrag from '../shaders/rain-frag.glsl?raw';
+import evaFrag from '../shaders/eva-frag.glsl?raw';
+import averageFrag from '../shaders/average-frag.glsl?raw';
+import cleanFrag from '../shaders/clean-frag.glsl?raw';
+import waterVert from '../shaders/water-vert.glsl?raw';
+import waterFrag from '../shaders/water-frag.glsl?raw';
+import thermalterrainfluxFrag from '../shaders/thermalterrainflux-frag.glsl?raw';
+import thermalapplyFrag from '../shaders/thermalapply-frag.glsl?raw';
+import maxslippageheightFrag from '../shaders/maxslippageheight-frag.glsl?raw';
+import shadowmapVert from '../shaders/shadowmap-vert.glsl?raw';
+import shadowmapFrag from '../shaders/shadowmap-frag.glsl?raw';
+import sceneDepthFrag from '../shaders/sceneDepth-frag.glsl?raw';
+import combineFrag from '../shaders/combine-frag.glsl?raw';
+import bilateralBlurFrag from '../shaders/bilateralBlur-frag.glsl?raw';
+import veladvectFrag from '../shaders/veladvect-frag.glsl?raw';
+
 export interface Shaders {
     lambert: ShaderProgram;
     flat: ShaderProgram;
@@ -26,108 +54,108 @@ export interface Shaders {
 
 export function createShaders(gl_context: any): Shaders {
     const lambert = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/terrain-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/terrain-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, terrainVert),
+        new Shader(gl_context.FRAGMENT_SHADER, terrainFrag),
     ]);
 
     const flat = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/flat-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/flat-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, flatVert),
+        new Shader(gl_context.FRAGMENT_SHADER, flatFrag),
     ]);
 
     const noiseterrain = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/initial-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, initialFrag),
     ]);
 
     const flow = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/flow-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, flowFrag),
     ]);
 
     const waterhight = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/alterwaterhight-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, alterwaterhightFrag),
     ]);
 
     const sediment = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/sediment-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, sedimentFrag),
     ]);
 
     const sediadvect = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/sediadvect-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, sediadvectFrag),
     ]);
 
     const macCormack = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/maccormack-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, maccormackFrag),
     ]);
 
     const rains = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/rain-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, rainFrag),
     ]);
 
     const evaporation = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/eva-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, evaFrag),
     ]);
 
     const average = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/average-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, averageFrag),
     ]);
 
     const clean = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/clean-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, cleanFrag),
     ]);
 
     const water = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/water-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/water-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, waterVert),
+        new Shader(gl_context.FRAGMENT_SHADER, waterFrag),
     ]);
 
     const thermalterrainflux = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/thermalterrainflux-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, thermalterrainfluxFrag),
     ]);
 
     const thermalapply = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/thermalapply-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, thermalapplyFrag),
     ]);
 
     const maxslippageheight = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/maxslippageheight-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, maxslippageheightFrag),
     ]);
 
     const shadowMapShader = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/shadowmap-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/shadowmap-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, shadowmapVert),
+        new Shader(gl_context.FRAGMENT_SHADER, shadowmapFrag),
     ]);
 
     const sceneDepthShader = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/terrain-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/sceneDepth-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, terrainVert),
+        new Shader(gl_context.FRAGMENT_SHADER, sceneDepthFrag),
     ]);
 
     const combinedShader = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/combine-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, combineFrag),
     ]);
 
     const bilateralBlur = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/bilateralBlur-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, bilateralBlurFrag),
     ]);
 
     const veladvect = new ShaderProgram([
-        new Shader(gl_context.VERTEX_SHADER, require('../shaders/quad-vert.glsl')),
-        new Shader(gl_context.FRAGMENT_SHADER, require('../shaders/veladvect-frag.glsl')),
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, veladvectFrag),
     ]);
 
     return {

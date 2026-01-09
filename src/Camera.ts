@@ -172,9 +172,6 @@ class Camera {
       return;
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/30926e19-9dea-4929-a30d-c4e00eb5bce0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Camera.ts:166',message:'updateMovement entry',data:{deltaTime:deltaTime.toFixed(6),velocityBefore:[this.velocity[0].toFixed(4),this.velocity[1].toFixed(4),this.velocity[2].toFixed(4)]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
 
     // Acceleration and deceleration constants (reduced for smoother movement at high frame rates)
     // Further reduced for smoother movement at variable frame rates
@@ -323,11 +320,6 @@ class Camera {
       vec3.scale(velocityChange, this.velocity, -Math.min(decelRate, 1.0));
     }
 
-    // #region agent log
-    const velocityBefore = vec3.create();
-    vec3.copy(velocityBefore, this.velocity);
-    // #endregion
-
     // Update velocity
     vec3.add(this.velocity, this.velocity, velocityChange);
 
@@ -337,18 +329,12 @@ class Camera {
       vec3.scale(this.velocity, this.velocity, currentMaxSpeed / currentSpeed);
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/30926e19-9dea-4929-a30d-c4e00eb5bce0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Camera.ts:332',message:'velocity updated',data:{velocityBefore:[velocityBefore[0].toFixed(6),velocityBefore[1].toFixed(6),velocityBefore[2].toFixed(6)],velocityAfter:[this.velocity[0].toFixed(6),this.velocity[1].toFixed(6),this.velocity[2].toFixed(6)],velocityChange:[velocityChange[0].toFixed(6),velocityChange[1].toFixed(6),velocityChange[2].toFixed(6)],accelRate:(acceleration * deltaTime).toFixed(6),decelRate:(deceleration * deltaTime).toFixed(6),hasInput:vec3.length(desiredDirection) > 0.001},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'F'})}).catch(()=>{});
-    // #endregion
 
     // Apply velocity to both camera position AND target to maintain orbit relationship
     // This is the key: move both together so the camera maintains its relative position
     const movementDelta = vec3.create();
     vec3.scale(movementDelta, this.velocity, deltaTime);
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/30926e19-9dea-4929-a30d-c4e00eb5bce0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Camera.ts:308',message:'movementDelta calculated',data:{velocity:[this.velocity[0].toFixed(4),this.velocity[1].toFixed(4),this.velocity[2].toFixed(4)],movementDelta:[movementDelta[0].toFixed(6),movementDelta[1].toFixed(6),movementDelta[2].toFixed(6)],deltaTime:deltaTime.toFixed(6),forward:[forward[0].toFixed(4),forward[1].toFixed(4),forward[2].toFixed(4)],right:[right[0].toFixed(4),right[1].toFixed(4),right[2].toFixed(4)]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     
     // Move both camera and target together
     this.threeCamera.position.x += movementDelta[0];
@@ -359,9 +345,6 @@ class Camera {
     this.threeControls.target.y += movementDelta[1];
     this.threeControls.target.z += movementDelta[2];
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/30926e19-9dea-4929-a30d-c4e00eb5bce0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Camera.ts:320',message:'positions updated',data:{cameraPos:[this.threeCamera.position.x.toFixed(4),this.threeCamera.position.y.toFixed(4),this.threeCamera.position.z.toFixed(4)],targetPos:[this.threeControls.target.x.toFixed(4),this.threeControls.target.y.toFixed(4),this.threeControls.target.z.toFixed(4)]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
   }
 
   update(cameraConfig?: ControlsConfig['camera']) {
@@ -382,10 +365,6 @@ class Camera {
     // Use smoothed deltaTime for movement calculations
     const deltaTime = this.smoothedDeltaTime;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/30926e19-9dea-4929-a30d-c4e00eb5bce0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Camera.ts:303',message:'camera.update entry',data:{rawDeltaTime:rawDeltaTime.toFixed(6),smoothedDeltaTime:deltaTime.toFixed(6),cameraPosBefore:[this.threeCamera.position.x.toFixed(4),this.threeCamera.position.y.toFixed(4),this.threeCamera.position.z.toFixed(4)],targetPosBefore:[this.threeControls.target.x.toFixed(4),this.threeControls.target.y.toFixed(4),this.threeControls.target.z.toFixed(4)]},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-
     // Update movement before OrbitControls (so movement happens first)
     if (cameraConfig) {
       this.updateMovement(deltaTime, cameraConfig);
@@ -394,9 +373,6 @@ class Camera {
     // Update OrbitControls AFTER movement to ensure it respects the new positions
     this.threeControls.update();
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/30926e19-9dea-4929-a30d-c4e00eb5bce0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Camera.ts:315',message:'after OrbitControls.update',data:{cameraPosAfter:[this.threeCamera.position.x.toFixed(4),this.threeCamera.position.y.toFixed(4),this.threeCamera.position.z.toFixed(4)],targetPosAfter:[this.threeControls.target.x.toFixed(4),this.threeControls.target.y.toFixed(4),this.threeControls.target.z.toFixed(4)]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
     this.threeCamera.updateMatrixWorld();
 
     let wd = new Vector3();

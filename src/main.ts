@@ -1,6 +1,6 @@
 import {mat4, vec2, vec3, vec4} from 'gl-matrix';
 // @ts-ignore
-import * as Stats from 'stats-js';
+import Stats from 'stats-js';
 import * as DAT from 'dat-gui';
 import Square from './geometry/Square';
 import Plane from './geometry/Plane';
@@ -9,7 +9,7 @@ import Camera from './Camera';
 import {gl, setGL} from './globals';
 import ShaderProgram, {Shader} from './rendering/gl/ShaderProgram';
 import {stat} from "fs";
-var mouseChange = require('mouse-change');
+import mouseChange from 'mouse-change';
 import { ControlsConfig, getMouseButtonAction, isModifierPressed } from './controls-config';
 import { loadSettings } from './settings';
 import { setupGUI, GUIControllers } from './gui/gui-setup';
@@ -22,10 +22,10 @@ import { createHeightMapLoader } from './utils/heightmap-loader';
 import { getCachedUniformLocation } from './utils/uniform-cache';
 import { 
     simres, shadowMapResolution, SimFramecnt, TerrainGeometryDirty, PauseGeneration, 
-    HightMapCpuBuf, HightMapBufCounter, MaxHightMapBufCounter, setSimRes, setGlContext, 
+    HightMapCpuBuf, HightMapBufCounter, MaxHightMapBufCounter, shouldReadHeightmap, setSimRes, setGlContext, 
     setClientDimensions, setLastMousePosition, clientWidth, clientHeight, lastX, lastY,
     setPauseGeneration, setSimFramecnt, incrementSimFramecnt, setTerrainGeometryDirty,
-    resizeHightMapCpuBuf, incrementHightMapBufCounter
+    resizeHightMapCpuBuf, incrementHightMapBufCounter, resetHightMapBufCounter
 } from './simulation/simulation-state';
 import {
     frame_buffer, shadowMap_frame_buffer, deferred_frame_buffer,
@@ -190,7 +190,6 @@ let waterPlane : Plane;
 // Reference to the initial terrain shader (set in main function)
 let noiseterrain: ShaderProgram | null = null;
 
-
 // ================ dat gui button call backs ============
 // =============================================================
 
@@ -285,14 +284,6 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     renderer.render(camera,rains,[square]);
 
-
-    // Increment counter every simulation step
-    incrementHightMapBufCounter();
-    
-    if(HightMapBufCounter % MaxHightMapBufCounter == 0) {
-        // Read full resolution for accurate raycasting
-        gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
-    }
 
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
 
@@ -980,8 +971,31 @@ function SimulationStep(curstep:number,
     return false;
 }
 
+// Unified coordinate normalization function
+// Converts viewport coordinates (clientX/clientY) to canvas-relative normalized coordinates [0, 1]
+function normalizeMousePosition(canvas: HTMLCanvasElement, clientX: number, clientY: number): {x: number, y: number} {
+    if (!canvas) {
+        return {x: 0, y: 0};
+    }
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+        return {x: 0, y: 0};
+    }
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+    return {x, y};
+}
+
 function handleInteraction (buttons : number, x : number, y : number){
-    setLastMousePosition(x, y);
+    // mouseChange provides element-local coordinates (relative to canvas)
+    // Convert to client coordinates so normalization happens in tick()
+    const canvas = document.getElementById('canvas') as HTMLCanvasElement;
+    if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+            setLastMousePosition(rect.left + x, rect.top + y);
+        }
+    }
     //console.log(x + ' ' + y);
 }
 
@@ -1021,6 +1035,8 @@ function main() {
   // Load settings (from localStorage or defaults) - must be done before creating event handlers
   controlsConfig = loadSettings();
   
+  // Heightfield raycasting uses the CPU heightmap buffer
+  
   // Create camera first (needed for event handlers)
   const brushUsesLeftClickForCamera = controlsConfig.mouse.brushActivate === 'LEFT' || 
                                        (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
@@ -1047,7 +1063,7 @@ function main() {
       const action = getMouseButtonAction(e.button, controlsConfig);
       if (action === 'brushActivate') {
         console.log('[DEBUG] WINDOW pointerdown - BRUSH ACTION, stopping propagation immediately');
-        // Update mouse position for ray casting
+        // Update mouse position for ray casting (store client coordinates)
         setLastMousePosition(e.clientX, e.clientY);
         // Stop propagation IMMEDIATELY to prevent OrbitControls from seeing it
         e.preventDefault();
@@ -1081,7 +1097,7 @@ function main() {
       const target = e.target as HTMLElement;
       const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
         if (isCanvas) {
-        // Update mouse position for ray casting
+        // Update mouse position for ray casting (store client coordinates)
         setLastMousePosition(e.clientX, e.clientY);
         
         // Continuously check modifier state while brush is active
@@ -1242,15 +1258,21 @@ function main() {
   const reusableSourceSizes = new Float32Array(MAX_WATER_SOURCES);
   const reusableSourceStrengths = new Float32Array(MAX_WATER_SOURCES);
 
+  // Track brush state transitions for heightmap readback
+  let lastBrushPressed = 0;
+  let lastReadMouseX = -1;
+  let lastReadMouseY = -1;
+
   function tick() {
 
+    // Update camera before raycasting so matrices are in sync with rendered view
+    camera.update(controlsConfig.camera);
 
     // ================ ray casting ===================
     //===================================================
-    let iclientWidth = window.innerWidth;
-    let iclientHeight = window.innerHeight;
-    var screenMouseX = lastX / iclientWidth;
-    var screenMouseY = lastY / iclientHeight;
+    const normalizedMouse = normalizeMousePosition(canvas, lastX, lastY);
+    var screenMouseX = normalizedMouse.x;
+    var screenMouseY = normalizedMouse.y;
     //console.log(screenMouseX + ' ' + screenMouseY);
 
       //console.log(clientHeight + ' ' + clientWidth);
@@ -1307,7 +1329,6 @@ function main() {
     //ray cast happens here
     reusablePos[0] = 0.0;
     reusablePos[1] = 0.0;
-    // Use full simulation resolution for accurate raycasting
     rayCast(reusableRo, reusableDir, simres, HightMapCpuBuf, reusablePos);
     controls.posTemp = reusablePos;
 
@@ -1482,7 +1503,10 @@ function main() {
         average.setInt(0,'unif_rainMode');
     }
 
-    camera.update(controlsConfig.camera);
+    const brushPressed = controls.brushPressed === 1;
+    const brushVisible = Number(controls.brushType) !== 0;
+    const justPressed = brushPressed && lastBrushPressed === 0;
+    incrementHightMapBufCounter();
     stats.begin();
 
       //==========================  we begin simulation from now ===========================================
@@ -1491,6 +1515,24 @@ function main() {
         SimulationStep(SimFramecnt, flow, waterhight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, renderer, gl_context, camera);
         incrementSimFramecnt();
     }
+
+    const mouseMoved = (lastReadMouseX < 0 || lastReadMouseY < 0) ||
+        (Math.abs(lastX - lastReadMouseX) + Math.abs(lastY - lastReadMouseY) > 1);
+    if ((justPressed || mouseMoved) && shouldReadHeightmap(brushPressed, brushVisible, simres)) {
+        // Read full resolution for accurate raycasting
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, read_terrain_tex, 0);
+        gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
+        gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
+        lastReadMouseX = lastX;
+        lastReadMouseY = lastY;
+        if (!brushPressed && !brushVisible && HightMapBufCounter >= MaxHightMapBufCounter) {
+            resetHightMapBufCounter();
+        }
+    }
+
+    lastBrushPressed = brushPressed ? 1 : 0;
 
     gl_context.viewport(0, 0, window.innerWidth, window.innerHeight);
     renderer.clear();
