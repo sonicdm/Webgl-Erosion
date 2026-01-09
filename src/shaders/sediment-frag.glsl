@@ -125,7 +125,8 @@ void main() {
   float capacityBoost = 1.0; // Boost sediment capacity for soil between rock
   
   // Check if this was recently rock (to prevent boosting recently converted soil)
-  bool wasRecentlyRock = curTerrain.z > 0.1;
+  // Use a lower threshold to catch more recently converted soil
+  bool wasRecentlyRock = curTerrain.z > 0.05; // Lower threshold to prevent boosting recently converted soil
   
   if (!isRock && !wasRecentlyRock) {
     // Sample neighboring cells to see if any are rock
@@ -142,14 +143,14 @@ void main() {
     if (bottomTerrain.z > 0.5) rockNeighbors++;
     if (leftTerrain.z > 0.5) rockNeighbors++;
     
-    // MUCH stronger boost for soil between rock to create deep crevices
+    // Moderate boost for soil between rock to create crevices
     // The more rock neighbors, the faster the soil should erode away
     // BUT: Only apply to soil that was never rock, not recently converted soil
     if (rockNeighbors > 0) {
-      // Very aggressive erosion boost - soil between rock should erode much faster
-      neighborRockFactor = 1.0 + float(rockNeighbors) * 3.0; // 4x to 13x erosion rate
-      // Also boost capacity significantly so more material can be picked up
-      capacityBoost = 1.0 + float(rockNeighbors) * 2.0; // 3x to 9x capacity boost
+      // Moderate erosion boost - soil between rock should erode faster but not excessively
+      neighborRockFactor = 1.0 + float(rockNeighbors) * 0.5; // 1.5x to 3x erosion rate (reduced from 4x-13x)
+      // Also boost capacity moderately so more material can be picked up
+      capacityBoost = 1.0 + float(rockNeighbors) * 0.3; // 1.3x to 2.2x capacity boost (reduced from 3x-9x)
     }
   }
   
@@ -245,7 +246,11 @@ void main() {
       }
       
       // water = water + (sedicap-cursedi)*Ks;
-      outsedi = outsedi + changesedi;
+      // IMPORTANT: Rock produces less sediment when it erodes
+      // Apply additional reduction to sediment output for rock erosion
+      // Rock is harder and produces less fine sediment than soil
+      float sedimentOutputFactor = erodingSedimentLayer ? 1.0 : effectiveCapacityRockFactor;
+      outsedi = outsedi + changesedi * sedimentOutputFactor;
       
       // When rock erodes, gradually convert it to regular soil
       // Rock should erode into normal sediment, but conversion should be very slow so rock resistance actually matters
