@@ -61,10 +61,13 @@ jobs:
           
       - name: Commit and push
         working-directory: pages-repo
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/sonicdm/sonicdm.github.io.git
           git add webgl-erosion-enhanced/
           git commit -m "Deploy WebGL Erosion from ${{ github.repository }}@${{ github.sha }}" || exit 0
-          git push
+          git push origin HEAD
 
