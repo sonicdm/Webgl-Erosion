@@ -18,9 +18,18 @@
 - use the dropdown to check the debug views
 - press right mouse button to rotate camera, press left mouse button to translate camera, use middle mouse to scale...
 
-## [**PLAY LIVE** (Chrome Recommended)]( https://lanlou123.github.io/Webgl-Erosion/)
+## [**PLAY LIVE** (Chrome Recommended)]( https://sonicdm.github.io/webgl-erosion-enhanced/)
 
 ## [**Demo Video showing sandbox feature**](https://youtu.be/Qly5emyyR_s)
+
+## Deployment
+
+This project is automatically deployed to GitHub Pages via GitHub Actions. The workflow:
+- Triggers on pushes to the `master` branch
+- Builds the project using Vite
+- Deploys to `sonicdm.github.io/webgl-erosion-enhanced`
+
+To deploy manually, you can also trigger the workflow from the Actions tab in GitHub.
 
 ![](screenshot/dd.PNG)
 
