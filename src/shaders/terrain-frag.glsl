@@ -149,9 +149,10 @@ void main()
     vec3 permanentCol = vec3(0.8,0.1,0.2);
     vec3 obsidian = vec3(0.2);
 
-    vec3 rock1 = vec3(0.4,0.4,0.4);
-    vec3 rock2 = vec3(0.2,0.2,0.2);
-    vec3 rock3 = vec3(0.1,0.1,0.1);
+    // Rock colors - distinct bluish-gray to clearly differentiate from soil
+    vec3 rock1 = vec3(0.35, 0.38, 0.45);  // Light bluish-gray
+    vec3 rock2 = vec3(0.25, 0.28, 0.35);  // Medium bluish-gray
+    vec3 rock3 = vec3(0.15, 0.18, 0.25);   // Dark bluish-gray
 
 
 
@@ -172,7 +173,8 @@ void main()
             }else if(u_BrushType == 2){
                 addcol = watercol * 0.8;
             }else if(u_BrushType == 3){
-                addcol = rock1 * 0.8;
+                // Rock brush preview - use the new bluish-gray rock color
+                addcol = vec3(0.35, 0.38, 0.45) * 0.8;
             }else if(u_BrushType == 4){
                 // Smooth brush - light blue
                 addcol = vec3(0.5, 0.8, 1.0) * 0.8;
@@ -249,10 +251,10 @@ void main()
         finalcol = mix(dirtcol,finalcol,pow(abs(nor.y)/0.75,u_SnowRange));
     }
 
-    // Apply rock material color (rock is darker than regular terrain)
+    // Apply rock material color - make rock clearly distinct from soil
     if(rockVal > 0.1){
-        // Use darker rock colors - mix between rock3 (darkest) and rock2 based on rock value
-        vec3 rockCol = mix(rock3, rock2, clamp((rockVal - 0.1) / 0.9, 0.0, 1.0));
+        // Use distinct bluish-gray rock colors - mix between rock3 (darkest) and rock1 (lightest) based on rock value
+        vec3 rockCol = mix(rock3, rock1, clamp((rockVal - 0.1) / 0.9, 0.0, 1.0));
         
         // Check if there's sediment on top of rock
         float baseRockHeight = fH.w;
@@ -278,14 +280,16 @@ void main()
         // Blend between rock color and dirt color based on sediment coverage
         vec3 surfaceCol = mix(rockCol, dirtcol, sedimentBlendFactor);
         
-        // Apply the blended color - reduce rock color influence when there's sediment on top
+        // Apply the blended color - make rock much more visible and distinct
         // When sedimentBlendFactor is high, apply dirt color directly to look like normal dirt
         if(sedimentBlendFactor > 0.8){
             // Mostly covered with sediment - apply dirt color directly, no rock color
             finalcol = mix(finalcol, dirtcol, 0.9);
         } else {
-            // Partially covered or no sediment - apply blended rock/sediment color
-            float rockColorStrength = min(rockVal * 1.5, 1.0) * (1.0 - sedimentBlendFactor * 0.7);
+            // Partially covered or no sediment - apply rock color strongly to make it clearly visible
+            // Increase rock color strength significantly - rock should override base terrain color
+            float rockColorStrength = clamp(rockVal * 2.0, 0.7, 1.0) * (1.0 - sedimentBlendFactor * 0.5);
+            // Use a stronger mix - rock color should dominate when there's no sediment
             finalcol = mix(finalcol, surfaceCol, rockColorStrength);
         }
     }
