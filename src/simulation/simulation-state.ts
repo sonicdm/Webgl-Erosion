@@ -1,4 +1,6 @@
 import {vec2} from 'gl-matrix';
+import { BufferGeometry } from 'three';
+import { MeshBVH } from 'three-mesh-bvh';
 
 // Simulation state variables
 export const simresolution = 1024;
@@ -96,5 +98,17 @@ export function incrementSimFramecnt(): void {
 
 export function setTerrainGeometryDirty(value: boolean): void {
     TerrainGeometryDirty = value;
+}
+
+// BVH and terrain geometry state (secondary mesh for raycasting)
+export let terrainGeometry: BufferGeometry | null = null;
+export let terrainBVH: MeshBVH | null = null;
+
+export function setTerrainGeometry(geometry: BufferGeometry | null): void {
+    terrainGeometry = geometry;
+}
+
+export function setTerrainBVH(bvh: MeshBVH | null): void {
+    terrainBVH = bvh;
 }
 

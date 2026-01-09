@@ -18,6 +18,9 @@ import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperatio
 import { updatePaletteSelection } from './brush-palette';
 import { MAX_WATER_SOURCES, waterSources, getWaterSourceCount } from './utils/water-sources';
 import { rayCast } from './utils/raycast';
+import { rayCastBVH } from './utils/bvh-raycast';
+import { createTerrainGeometry, updateTerrainGeometry } from './utils/terrain-geometry-builder';
+import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { createHeightMapLoader } from './utils/heightmap-loader';
 import { getCachedUniformLocation } from './utils/uniform-cache';
 import { 
@@ -25,7 +28,8 @@ import {
     HightMapCpuBuf, HightMapBufCounter, MaxHightMapBufCounter, shouldReadHeightmap, setSimRes, setGlContext, 
     setClientDimensions, setLastMousePosition, clientWidth, clientHeight, lastX, lastY,
     setPauseGeneration, setSimFramecnt, incrementSimFramecnt, setTerrainGeometryDirty,
-    resizeHightMapCpuBuf, incrementHightMapBufCounter, resetHightMapBufCounter
+    resizeHightMapCpuBuf, incrementHightMapBufCounter, resetHightMapBufCounter,
+    terrainGeometry, terrainBVH, setTerrainGeometry, setTerrainBVH
 } from './simulation/simulation-state';
 import {
     frame_buffer, shadowMap_frame_buffer, deferred_frame_buffer,
@@ -155,6 +159,7 @@ const controls = {
     brushStrenth : 0.25,
     brushOperation : 0, // 0 : add, 1 : subtract
     brushPressed : 0, // 0 : not pressed, 1 : pressed
+    raycastMethod : 'heightmap' as 'heightmap' | 'bvh', // Raycast method: 'heightmap' or 'bvh' for A/B testing
     flattenTargetHeight : 0.0, // Target height for flatten brush (will be set to center height on Alt+click)
     slopeStartPos : vec2.fromValues(0.0, 0.0), // Start position for slope brush
     slopeEndPos : vec2.fromValues(0.0, 0.0), // End position for slope brush
@@ -1323,13 +1328,111 @@ function main() {
         Render2Texture(renderer,gl_context,camera,noiseterrain,read_terrain_tex,square,noiseterrain);
         Render2Texture(renderer,gl_context,camera,noiseterrain,write_terrain_tex,square,noiseterrain);
 
+        //=============rebuild secondary terrain mesh and BVH for raycasting===================
+        // Dispose old BVH and geometry if they exist
+        if (terrainBVH) {
+            // BVH doesn't have explicit dispose, but we'll null the reference
+            setTerrainBVH(null);
+        }
+        if (terrainGeometry) {
+            terrainGeometry.dispose();
+            setTerrainGeometry(null);
+        }
+        
+        // Create new terrain geometry from heightmap
+        // Note: HightMapCpuBuf might not be populated yet on first frame
+        // The BVH will be built when the buffer is available (next frame or when heightmap is read)
+        // Check if buffer has actual data (not all zeros) before creating geometry
+        if (HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
+            // Check if buffer has non-zero height data (sample a few points)
+            let hasData = false;
+            const sampleCount = Math.min(100, simres * simres);
+            for (let i = 0; i < sampleCount; i++) {
+                const idx = Math.floor(Math.random() * simres * simres) * 4;
+                if (HightMapCpuBuf[idx] !== 0) {
+                    hasData = true;
+                    break;
+                }
+            }
+            
+            if (hasData) {
+                try {
+                    const newGeometry = createTerrainGeometry(simres, HightMapCpuBuf, 1.0);
+                setTerrainGeometry(newGeometry);
+                
+                // Build BVH from geometry
+                const bvh = new MeshBVH(newGeometry, {
+                    strategy: SAH, // Surface Area Heuristic for best performance (use constant, not string)
+                    maxDepth: 40,    // Reasonable depth limit
+                    indirect: false   // Direct indexed geometry
+                });
+                setTerrainBVH(bvh);
+                    console.log('[BVH] Terrain BVH built successfully');
+                } catch (error) {
+                    console.warn('[BVH] Failed to build BVH (heightmap may not be ready yet):', error);
+                }
+            } else {
+                console.log('[BVH] Heightmap buffer exists but has no data yet, will build when populated');
+            }
+        } else {
+            console.log('[BVH] Heightmap buffer not ready yet, BVH will be built when available');
+        }
+
         setTerrainGeometryDirty(false);
+    }
+    
+    // Build BVH if it doesn't exist but heightmap buffer is available
+    // This handles the case where terrain was dirty but buffer wasn't ready yet
+    if (!terrainBVH && !terrainGeometry && HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
+        // Check if buffer has actual data (not all zeros)
+        let hasData = false;
+        const sampleCount = Math.min(100, simres * simres);
+        for (let i = 0; i < sampleCount; i++) {
+            const idx = Math.floor(Math.random() * simres * simres) * 4;
+            if (HightMapCpuBuf[idx] !== 0) {
+                hasData = true;
+                break;
+            }
+        }
+        
+        if (hasData) {
+            try {
+                const newGeometry = createTerrainGeometry(simres, HightMapCpuBuf, 1.0);
+                setTerrainGeometry(newGeometry);
+                
+                const bvh = new MeshBVH(newGeometry, {
+                    strategy: SAH,
+                    maxDepth: 40,
+                    indirect: false
+                });
+                setTerrainBVH(bvh);
+                console.log('[BVH] Terrain BVH built (delayed initialization)');
+            } catch (error) {
+                console.warn('[BVH] Failed to build BVH:', error);
+            }
+        }
     }
 
     //ray cast happens here
     reusablePos[0] = 0.0;
     reusablePos[1] = 0.0;
-    rayCast(reusableRo, reusableDir, simres, HightMapCpuBuf, reusablePos);
+    
+    // Toggle between heightmap and BVH raycast methods for A/B testing
+    if (controls.raycastMethod === 'bvh' && terrainBVH && terrainGeometry) {
+        // Use BVH raycast
+        const hit = rayCastBVH(reusableRo, reusableDir, terrainBVH, terrainGeometry, reusablePos);
+        if (!hit) {
+            // Fallback to heightmap if BVH misses
+            const heightmapPos = vec2.create();
+            rayCast(reusableRo, reusableDir, simres, HightMapCpuBuf, heightmapPos);
+            reusablePos[0] = heightmapPos[0];
+            reusablePos[1] = heightmapPos[1];
+        }
+    } else {
+        // Use heightmap raycast (default)
+        rayCast(reusableRo, reusableDir, simres, HightMapCpuBuf, reusablePos);
+    }
+    
     controls.posTemp = reusablePos;
 
     //===================per tick uniforms==================

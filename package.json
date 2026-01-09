@@ -29,7 +29,8 @@
     "gl-matrix": "^2.4.0",
     "mouse-change": "^1.4.0",
     "stats-js": "^1.0.1",
-    "three": "^0.125.2",
+    "three": "^0.159.0",
+    "three-mesh-bvh": "^0.9.5",
     "three-orbitcontrols": "^2.110.3"
   }
 }

@@ -64,6 +64,9 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     
     // Terrain Editor
     var terraineditor = gui.addFolder('Terrain Editor');
+    terraineditor.add(controls, 'raycastMethod', { Heightmap: 'heightmap', BVH: 'bvh' }).onChange((value: string) => {
+        console.log('[Raycast] Method changed to:', value);
+    });
     const brushTypeController = terraineditor.add(controls, 'brushType', { NoBrush: 0, TerrainBrush: 1, WaterBrush: 2, RockBrush: 3, SmoothBrush: 4, FlattenBrush: 5, SlopeBrush: 6 });
     brushTypeController.onChange((value: number) => {
         // Reset slope state when switching brush types
