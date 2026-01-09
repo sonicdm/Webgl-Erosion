@@ -30,42 +30,82 @@ export function rayCastBVH(
     }
     
     // Convert gl-matrix vectors to Three.js vectors
-    const origin = new Vector3(rayOrigin[0], rayOrigin[1], rayOrigin[2]);
-    const direction = new Vector3(rayDirection[0], rayDirection[1], rayDirection[2]).normalize();
+    let origin = new Vector3(rayOrigin[0], rayOrigin[1], rayOrigin[2]);
+    const direction = new Vector3(rayDirection[0], rayDirection[1], rayDirection[2]);
     
-    // Create a Three.js Ray object
-    const ray = new Ray(origin, direction);
+    // Ensure direction is normalized (should already be, but double-check for precision)
+    const dirLength = direction.length();
+    if (dirLength > 0.0001) {
+        direction.normalize();
+    } else {
+        // Invalid direction, return false
+        return false;
+    }
     
-    // Use BVH's raycastFirst for fast single-hit raycasting
-    // Second parameter is max distance - increased for better accuracy at distance
-    const hit = bvh.raycastFirst(ray, 100.0);
+    // Check if ray is nearly parallel to Y plane (flat terrain case)
+    // If the Y component of direction is very small, the ray is nearly horizontal
+    const isNearlyHorizontal = Math.abs(direction.y) < 0.05;
     
-    if (hit) {
+    // For nearly horizontal rays, use a more robust approach
+    // Try multiple ray origins slightly offset to improve hit rate on flat surfaces
+    let hit: any = null;
+    const maxDistance = isNearlyHorizontal ? 5000.0 : 1000.0; // Much longer for nearly horizontal rays
+    
+    // For nearly horizontal rays, try a slight upward offset to improve hit reliability
+    // This helps when the ray is nearly parallel to flat terrain
+    if (isNearlyHorizontal) {
+        // Try with a small upward offset first (most reliable for flat terrain)
+        const offsetOrigin = origin.clone().addScaledVector(new Vector3(0, 1, 0), 0.001);
+        const offsetRay = new Ray(offsetOrigin, direction);
+        hit = bvh.raycastFirst(offsetRay, maxDistance);
+        
+        // If offset ray didn't hit, try original
+        if (!hit || hit.distance < 0) {
+            const ray = new Ray(origin, direction);
+            hit = bvh.raycastFirst(ray, maxDistance);
+        }
+    } else {
+        // For normal rays, use standard approach
+        const ray = new Ray(origin, direction);
+        hit = bvh.raycastFirst(ray, maxDistance);
+    }
+    
+    if (hit && hit.distance >= 0) {
         // hit.point contains the intersection point in world space
         // hit.faceIndex contains the triangle index
+        // hit.distance contains the distance along the ray
         
-        // Use getTriangleHitPointInfo to get accurate UV coordinates from triangle interpolation
-        // This is more accurate than converting from world position
-        const hitInfo = getTriangleHitPointInfo(hit.point, geometry, hit.faceIndex, {});
+        // For stability, always use world position to calculate UV coordinates
+        // This is more consistent than triangle interpolation, especially for flat terrain
+        // Terrain spans from -0.5 to 0.5 in X and Z (scale = 1.0)
+        const worldX = hit.point.x;
+        const worldZ = hit.point.z;
         
-        if (hitInfo && hitInfo.uv) {
-            // Use interpolated UV from triangle (most accurate)
-            out[0] = hitInfo.uv.x;
-            out[1] = hitInfo.uv.y;
+        // Convert to UV space [0, 1]
+        // Inverse of: worldX = (u - 0.5) * scale, so u = worldX / scale + 0.5
+        let u = worldX + 0.5;
+        let v = worldZ + 0.5;
+        
+        // Clamp to valid range [0, 1]
+        u = Math.max(0, Math.min(1, u));
+        v = Math.max(0, Math.min(1, v));
+        
+        // Validate UV coordinates are reasonable
+        // If they're way out of bounds, try triangle interpolation as fallback
+        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
+            out[0] = u;
+            out[1] = v;
         } else {
-            // Fallback: Convert world position to UV coordinates
-            // Terrain spans from -0.5 to 0.5 in X and Z (scale = 1.0)
-            const worldX = hit.point.x;
-            const worldZ = hit.point.z;
-            
-            // Convert to UV space [0, 1]
-            // Inverse of: worldX = (u - 0.5) * scale, so u = worldX / scale + 0.5
-            const u = worldX + 0.5;
-            const v = worldZ + 0.5;
-            
-            // Clamp to valid range [0, 1]
-            out[0] = Math.max(0, Math.min(1, u));
-            out[1] = Math.max(0, Math.min(1, v));
+            // Fallback to triangle interpolation if world position conversion fails
+            const hitInfo = getTriangleHitPointInfo(hit.point, geometry, hit.faceIndex, {});
+            if (hitInfo && hitInfo.uv) {
+                out[0] = Math.max(0, Math.min(1, hitInfo.uv.x));
+                out[1] = Math.max(0, Math.min(1, hitInfo.uv.y));
+            } else {
+                // Last resort: clamp the world position UV
+                out[0] = Math.max(0, Math.min(1, u));
+                out[1] = Math.max(0, Math.min(1, v));
+            }
         }
         
         return true;

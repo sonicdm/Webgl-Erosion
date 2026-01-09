@@ -57,7 +57,7 @@ void main() {
 
   // Check if this is rock material - rock surfaces are smoother, so water flows faster
   float rockVal = curTerrain.z;
-  bool isRock = rockVal > 0.5;
+  bool isRock = rockVal > 0.1; // Consistent with sediment shader threshold
   // Rock has lower roughness/friction, so water flows faster
   // Reduce effective pipe length on rock to simulate lower friction (smoother surface)
   // Rock typically has 2-3x lower roughness coefficient than soil

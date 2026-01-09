@@ -165,7 +165,7 @@ const controls = {
     slopeEndPos : vec2.fromValues(0.0, 0.0), // End position for slope brush
     slopeActive : 0, // 0 : not active, 1 : start set, 2 : end set
     sourceCount : 0, // Number of active water sources
-    rockErosionResistance : 0.1, // 0.0 = erodes normally, 1.0 = doesn't erode (multiplier for Ks/Kc)
+    rockErosionResistance : 0.8, // 0.0 = erodes normally, 1.0 = doesn't erode (multiplier for Ks/Kc) - increased default so rock actually erodes much slower
     thermalTalusAngleScale : 8.0,
     thermalRate : 0.5,
     thermalErosionScale : 1.0,

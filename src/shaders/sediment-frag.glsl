@@ -94,9 +94,10 @@ void main() {
   float Kd = u_Kd;
   float alpha = 5.0;
   
-  // Check if this is rock material (B channel > 0.5) and apply erosion resistance
+  // Check if this is rock material (B channel > 0.1) and apply erosion resistance
   vec4 curTerrain = texture(readTerrain,curuv);
-  bool isRock = curTerrain.z > 0.5;
+  float rockMaterialValue = curTerrain.z;
+  bool isRock = rockMaterialValue > 0.1; // Consistent threshold for rock detection
   
   // Track base rock surface height (A channel stores the height of the rock surface
   // before any sediment was deposited on top)
@@ -107,12 +108,11 @@ void main() {
   }
   
   // Rock should maintain constant resistance until fully converted to soil
-  // Use binary check: if rock material exists, apply full resistance
   // u_RockErosionResistance: 0.0 = no resistance (erodes normally), 1.0 = maximum resistance (doesn't erode)
   // So we invert it: rockFactor = 1.0 - resistance (higher resistance = lower factor = less erosion)
-  float rockMaterialValue = curTerrain.z;
-  bool hasRock = rockMaterialValue > 0.1; // Threshold for "still rock"
-  float rockFactor = hasRock ? (1.0 - u_RockErosionResistance) : 1.0;
+  // Apply resistance based on rock material value - stronger rock = more resistance
+  float rockStrength = clamp((rockMaterialValue - 0.1) / 0.9, 0.0, 1.0); // Normalize 0.1-1.0 to 0.0-1.0
+  float rockFactor = isRock ? (1.0 - u_RockErosionResistance * rockStrength) : 1.0;
   
   // Check if there's sediment on top of rock
   // If current height is above base rock surface, there's sediment on top
@@ -137,11 +137,11 @@ void main() {
     
     int rockNeighbors = 0;
     
-    // Check each neighbor for rock
-    if (topTerrain.z > 0.5) rockNeighbors++;
-    if (rightTerrain.z > 0.5) rockNeighbors++;
-    if (bottomTerrain.z > 0.5) rockNeighbors++;
-    if (leftTerrain.z > 0.5) rockNeighbors++;
+    // Check each neighbor for rock (use consistent threshold)
+    if (topTerrain.z > 0.1) rockNeighbors++;
+    if (rightTerrain.z > 0.1) rockNeighbors++;
+    if (bottomTerrain.z > 0.1) rockNeighbors++;
+    if (leftTerrain.z > 0.1) rockNeighbors++;
     
     // Moderate boost for soil between rock to create crevices
     // The more rock neighbors, the faster the soil should erode away
