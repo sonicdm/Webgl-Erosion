@@ -54,7 +54,9 @@ export function sampleHeightBilinear(uv: vec2, simres: number, buffer: Float32Ar
     // Bilinear interpolation
     const h0 = h00 * (1 - fx) + h10 * fx;
     const h1 = h01 * (1 - fx) + h11 * fx;
-    return h0 * (1 - fy) + h1 * fy;
+    const result = h0 * (1 - fy) + h1 * fy;
+    
+    return result;
 }
 
 export function rayCast(

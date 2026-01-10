@@ -1417,8 +1417,10 @@ function main() {
     }
 
     //ray cast happens here
-    reusablePos[0] = 0.0;
-    reusablePos[1] = 0.0;
+    // Initialize to invalid values so we can detect misses
+    reusablePos[0] = -10.0;
+    reusablePos[1] = -10.0;
+    
     
     // Toggle between heightmap and BVH raycast methods for A/B testing
     if (controls.raycastMethod === 'bvh' && terrainBVH && terrainGeometry) {
@@ -1435,6 +1437,7 @@ function main() {
         // Use heightmap raycast (default)
         rayCast(reusableRo, reusableDir, simres, HightMapCpuBuf, reusablePos);
     }
+    
     
     controls.posTemp = reusablePos;
 
@@ -1508,7 +1511,8 @@ function main() {
             controls: controls as BrushControls,
             controlsConfig: controlsConfig,
             simres: Number(simres), // Ensure it's a number, not a string
-            HightMapCpuBuf: HightMapCpuBuf
+            HightMapCpuBuf: HightMapCpuBuf,
+            camera: camera
         };
     updateBrushState(reusablePos, brushContext);
     

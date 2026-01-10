@@ -517,6 +517,7 @@ export function createBrushPalette(
             const value = parseFloat((e.target as HTMLInputElement).value);
             flattenLabel.textContent = `Target Height: ${value.toFixed(1)}`;
             if (controls.flattenTargetHeight !== undefined) {
+                // UI and shader both use 0-500 range
                 controls.flattenTargetHeight = value;
             }
         });

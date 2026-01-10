@@ -196,7 +196,8 @@ export function createEventHandlers(
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
                 simres: Number(simres), // Ensure it's a number, not a string
-                HightMapCpuBuf: HightMapCpuBuf
+                HightMapCpuBuf: HightMapCpuBuf,
+                camera: camera
             };
             
             const result = handleBrushMouseDown(event, brushContext);
@@ -232,7 +233,8 @@ export function createEventHandlers(
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
                 simres: Number(simres), // Ensure it's a number, not a string
-                HightMapCpuBuf: HightMapCpuBuf
+                HightMapCpuBuf: HightMapCpuBuf,
+                camera: camera
             };
             
             handleBrushMouseUp(event, brushContext);

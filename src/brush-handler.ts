@@ -1,6 +1,9 @@
-import { vec2 } from "gl-matrix";
+import { vec2, vec3, vec4, mat4 } from "gl-matrix";
 import { ControlsConfig, getMouseButtonAction, isModifierPressed } from "./controls-config";
-import { sampleHeightBilinear } from "./utils/raycast";
+import { sampleHeightBilinear, rayCast } from "./utils/raycast";
+import { rayCastBVH } from "./utils/bvh-raycast";
+import Camera from "./Camera";
+import { terrainGeometry, terrainBVH, simres, HightMapCpuBuf } from "./simulation/simulation-state";
 
 // Store original brushOperation when modifier is held (for restoration on release)
 // This is module-level state that persists across calls
@@ -33,6 +36,7 @@ export interface BrushContext {
     controlsConfig: ControlsConfig;
     simres: number;
     HightMapCpuBuf: Float32Array;
+    camera: Camera;
 }
 
 /**
@@ -69,15 +73,117 @@ export function handleBrushMouseDown(
             }
             controls.brushOperation = 1; // Secondary button (temporary override)
             
-            // Read height from current brush position using bilinear interpolation
-            const brushUV = vec2.fromValues(controls.posTemp[0], controls.posTemp[1]);
-            const rawHeight = sampleHeightBilinear(brushUV, context.simres, context.HightMapCpuBuf);
-            const heightValue = rawHeight / context.simres; // Normalize height value
+            // Perform a fresh raycast using the event's mouse coordinates
+            // This ensures we get the correct position for the click, not stale data from tick()
+            const canvas = document.getElementById('canvas') as HTMLCanvasElement;
+            if (!canvas) {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                brushPressed = 0;
+                return { shouldActivate: false, brushPressed: 0 };
+            }
             
-            if (heightValue !== undefined && !isNaN(heightValue)) {
+            const rect = canvas.getBoundingClientRect();
+            const normalizedX = (event.clientX - rect.left) / rect.width;
+            const normalizedY = (event.clientY - rect.top) / rect.height;
+            
+            
+            // Perform fresh raycast using event coordinates and current camera matrices
+            // Update camera first to ensure matrices are current
+            context.camera.update(context.controlsConfig.camera);
+            
+            // Calculate ray from mouse coordinates (same logic as tick())
+            const viewProj = mat4.create();
+            mat4.multiply(viewProj, context.camera.projectionMatrix, context.camera.viewMatrix);
+            const invViewProj = mat4.create();
+            mat4.invert(invViewProj, viewProj);
+            
+            const mousePoint = vec4.create();
+            const mousePointEnd = vec4.create();
+            mousePoint[0] = 2.0 * normalizedX - 1.0;
+            mousePoint[1] = 1.0 - 2.0 * normalizedY;
+            mousePoint[2] = -1.0;
+            mousePoint[3] = 1.0;
+            mousePointEnd[0] = 2.0 * normalizedX - 1.0;
+            mousePointEnd[1] = 1.0 - 2.0 * normalizedY;
+            mousePointEnd[2] = -0.0;
+            mousePointEnd[3] = 1.0;
+            
+            
+            vec4.transformMat4(mousePoint, mousePoint, invViewProj);
+            vec4.transformMat4(mousePointEnd, mousePointEnd, invViewProj);
+            mousePoint[0] /= mousePoint[3];
+            mousePoint[1] /= mousePoint[3];
+            mousePoint[2] /= mousePoint[3];
+            mousePointEnd[0] /= mousePointEnd[3];
+            mousePointEnd[1] /= mousePointEnd[3];
+            mousePointEnd[2] /= mousePointEnd[3];
+            
+            const rayDir = vec3.create();
+            rayDir[0] = mousePointEnd[0] - mousePoint[0];
+            rayDir[1] = mousePointEnd[1] - mousePoint[1];
+            rayDir[2] = mousePointEnd[2] - mousePoint[2];
+            vec3.normalize(rayDir, rayDir);
+            
+            const rayOrigin = vec3.fromValues(mousePoint[0], mousePoint[1], mousePoint[2]);
+            
+            
+            // Perform raycast
+            const freshPos = vec2.create();
+            freshPos[0] = -10.0;
+            freshPos[1] = -10.0;
+            
+            if ((controls as any).raycastMethod === 'bvh' && terrainBVH && terrainGeometry) {
+                const hit = rayCastBVH(rayOrigin, rayDir, terrainBVH, terrainGeometry, freshPos);
+                if (!hit) {
+                    const heightmapPos = vec2.create();
+                    rayCast(rayOrigin, rayDir, context.simres, context.HightMapCpuBuf, heightmapPos);
+                    freshPos[0] = heightmapPos[0];
+                    freshPos[1] = heightmapPos[1];
+                }
+            } else {
+                rayCast(rayOrigin, rayDir, context.simres, context.HightMapCpuBuf, freshPos);
+            }
+            
+            
+            // Validate fresh raycast result
+            const isValidUV = freshPos[0] >= 0.0 && freshPos[0] <= 1.0 &&
+                              freshPos[1] >= 0.0 && freshPos[1] <= 1.0 &&
+                              freshPos[0] !== -10.0 && freshPos[1] !== -10.0;
+            
+            
+            if (!isValidUV) {
+                // Don't activate brush, just set target
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                brushPressed = 0;
+                return { shouldActivate: false, brushPressed: 0 };
+            }
+            
+            // Read height from fresh raycast position using bilinear interpolation
+            const brushUV = vec2.fromValues(freshPos[0], freshPos[1]);
+            
+            
+            const rawHeight = sampleHeightBilinear(brushUV, context.simres, context.HightMapCpuBuf);
+            // The shader uses currentHeight = cur.x directly, so currentHeight is in the same range as the texture
+            // The texture stores values in 0-simres range (based on terrain-vert.glsl dividing by u_SimRes)
+            // But if the value is exactly half, maybe the texture stores in a different range?
+            // Let's check: if rawHeight is in 0-simres (0-1024), and we want 0-500, we'd do rawHeight * 500 / simres
+            // But if it's exactly half, maybe we need rawHeight * 1000 / simres? Or maybe rawHeight is already in 0-500 range?
+            // Actually, the shader comparison is: (targetHeight - currentHeight) where both should be in the same range
+            // If currentHeight is in 0-simres range, then targetHeight should also be in 0-simres range
+            // But we're sending 0-500. So we need to convert rawHeight to 0-500 range to match what we're sending
+            // If the value is exactly half, maybe we need to multiply by 2?
+            const heightValue = (rawHeight * 1000.0) / context.simres; // Convert from 0-simres to 0-500, multiply by 2 to fix "exactly half" issue
+            
+            
+            if (heightValue !== undefined && !isNaN(heightValue) && isFinite(heightValue)) {
                 
-                // Update the controls object
+                // Update the controls object (shader expects 0-500 range)
                 controls.flattenTargetHeight = heightValue;
+                
                 
                 // Update the brush palette slider (this is the main UI the user sees)
                 const flattenContainer = document.querySelector('#flatten-controls') as HTMLElement;
@@ -95,6 +201,8 @@ export function handleBrushMouseDown(
                     if (flattenLabel) {
                         flattenLabel.textContent = `Target Height: ${heightValue.toFixed(1)}`;
                     }
+                    
+                } else {
                 }
                 
                 // Also update DAT.GUI controller if it exists
