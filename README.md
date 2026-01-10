@@ -167,6 +167,21 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 
 ## Enhanced Version Updates (Since Fork)
 
+## update 01/2025 (Latest) :
+- **Terrain Mask System**
+  - Added 6 new terrain masks: Square, Ring, RadialGradient, Corner, Diagonal, Cross
+  - Total of 9 terrain mask options now available (OFF, Sphere, Slope, Square, Ring, RadialGradient, Corner, Diagonal, Cross)
+  - Each mask applies different height gradients to shape terrain generation
+
+- **Documentation Improvements**
+  - Added comprehensive parameter documentation for all erosion parameters (ErosionMode, VelocityAdvectionMag, AdvectionMethod, VelocityMultiplier, EvaporationConstant, SimulationSpeed, SimulationResolution)
+  - Documented Rain Erosion system (RainErosion, RainErosionStrength, RainErosionDropSize)
+  - Documented Thermal Erosion system (thermalTalusAngleScale, thermalErosionScale)
+  - Documented Rock Material System (rockErosionResistance)
+  - Added detailed explanations for all Terrain Generation parameters including all mask types
+  - Documented all Debug Views and visualization modes
+  - Improved user guidance with parameter ranges, formulas, and usage tips
+
 ## update 01/2025 : 
 - **Deployment & Build System**
   - Added automated deployment via GitHub Actions to `sonicdm.github.io/webgl-erosion-enhanced`
