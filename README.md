@@ -3,20 +3,66 @@
 ![](screenshot/tt.PNG)
 ![](screenshot/mtnn.PNG)
 
-## controls : 
+## Controls
 
-- press keyboard ```c``` to do terrain editions with brush, editions include : add/subtract for water and hight map for now, you can also adjust size of brush
-- press keyboard ```r``` to place permanent water source. (note : 1 . press ```r``` again to remove permanent water source, 2 . after it's placed you can see a red circle marking the location, 3 . the size and strength of permanent water is equal to the brush size and strength the moment permanent water source is placed)
-- press button ```Start/Resume``` to the right top corner to start or resume the erosion sim
-- press button ```Pause``` to pause the simulation
-- press button ```Reset``` to reset simulation and start with a new randomly generated base terrain
-- use ```WaterTrabsparancy``` slider to control alpha of water
-- use ```EvaporationDegree``` slider to control anomunt of evaporation you want each simulation step
-- use ```Kc``` slider to control Kc (erosion capacity constant)
-- use ```Ks``` slider to control Ks (erosion dissolvating constant)
-- use ```Kd``` slider to control Kc (erosion deposition constant)
-- use the dropdown to check the debug views
-- press right mouse button to rotate camera, press left mouse button to translate camera, use middle mouse to scale...
+### Brush System
+- **Brush Types** (Press number keys 1-6 or use brush palette):
+  - `1` - **Terrain Brush** ⛰️: Modify terrain height (elevate or lower)
+  - `2` - **Water Brush** 💧: Add or remove water
+  - `3` - **Rock Brush** 🪨: Place erosion-resistant rock material
+  - `4` - **Smooth Brush** ✨: Smooth terrain surface
+  - `5` - **Flatten Brush** 📐: Flatten terrain to a target height
+  - `6` - **Slope Brush** 📉: Create a slope between two points
+
+- **Brush Operations**:
+  - **Left Click**: Add mode (elevate terrain, add water, place rock, etc.)
+  - **Shift + Click**: Subtract mode (lower terrain, remove water, remove rock, etc.)
+  - **Alt + Click**: Secondary operation (varies by brush type - see below)
+
+- **Brush Modifiers**:
+  - **Ctrl + Scroll**: Adjust brush size
+  - **Shift**: Invert operation (Add ↔ Subtract)
+  - **Alt**: Secondary operation (see brush-specific instructions below)
+
+- **Flatten Brush** 📐:
+  - **Left Click**: Flatten terrain to target height
+  - **Alt + Click**: Set target height to clicked location's height
+  - Use the slider in the brush palette to manually set target height (0-500)
+
+- **Slope Brush** 📉:
+  - **Alt + Click (first)**: Set start point of slope
+  - **Alt + Click + Drag**: Paint to the start point of slope
+ 
+
+### Water Sources
+- Press `r` to place a permanent water source at cursor location
+- Press `Shift + r` to remove the nearest permanent water source
+- Press `p` to remove all permanent water sources
+- Red circle marks the location of permanent water sources
+- Size and strength match the brush size and strength when placed
+
+### Camera Controls
+- **Right Mouse Button**: Rotate camera
+- **Middle Mouse Button**: Pan camera
+- **Scroll Wheel**: Zoom in/out
+- **WASD**: Move camera (W=forward, S=backward, A=left, D=right)
+- **Space**: Move camera up
+
+### Simulation Controls
+- **Start/Resume Button**: Start or resume the erosion simulation
+- **Pause Button**: Pause the simulation
+- **Reset Button**: Reset simulation and generate new random terrain
+- **Water Transparency Slider**: Control water alpha/transparency
+- **Evaporation Degree Slider**: Control evaporation amount per simulation step
+- **Kc Slider**: Erosion capacity constant
+- **Ks Slider**: Erosion dissolving constant
+- **Kd Slider**: Erosion deposition constant
+- **Debug Views Dropdown**: Switch between different visualization modes
+
+### Terrain Generation
+- **Import Height Map**: Load external PNG height maps
+- **Clear Height Map**: Return to procedural terrain generation
+- **Terrain Parameters**: Adjust base type, scale, height, and mask settings
 
 ## [**PLAY LIVE** (Chrome Recommended)]( https://sonicdm.github.io/webgl-erosion-enhanced/)
 
@@ -43,7 +89,7 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 
 ## Enhanced Version Updates (Since Fork)
 
-## update 12/2024 : 
+## update 01/2025 : 
 - **Deployment & Build System**
   - Added automated deployment via GitHub Actions to `sonicdm.github.io/webgl-erosion-enhanced`
   - Project now automatically builds and deploys on pushes to master branch

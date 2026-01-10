@@ -42,8 +42,8 @@ export const BRUSH_TYPES: BrushType[] = [
     { id: 2, name: 'Water', icon: '💧', color: '#4A90E2', shortcut: '2', description: 'Add/remove water' },
     { id: 3, name: 'Rock', icon: '🪨', color: '#555', shortcut: '3', description: 'Place erosion-resistant rock' },
     { id: 4, name: 'Smooth', icon: '✨', color: '#9B59B6', shortcut: '4', description: 'Smooth terrain surface' },
-    { id: 5, name: 'Flatten', icon: '📐', color: '#F39C12', shortcut: '5', description: 'Flatten to target height' },
-    { id: 6, name: 'Slope', icon: '📉', color: '#27AE60', shortcut: '6', description: 'Create slope between two points' },
+    { id: 5, name: 'Flatten', icon: '📐', color: '#F39C12', shortcut: '5', description: 'Flatten to target height\n\nLeft Click: Flatten terrain to target height\nAlt+Click: Set target height to clicked location\nUse slider to manually set target height (0-500)' },
+    { id: 6, name: 'Slope', icon: '📉', color: '#27AE60', shortcut: '6', description: 'Create slope between two points\n\nAlt+Click (first): Set start point\nAlt+Click (second): Set end point\nLeft Click: Apply slope after both points are set' },
 ];
 
 // Brush size presets
@@ -149,6 +149,80 @@ export function createBrushPalette(
     `;
     header.appendChild(title);
     
+    // Controls help button
+    const controlsButton = document.createElement('button');
+    controlsButton.textContent = '🎮';
+    controlsButton.title = `CONTROLS HELP
+
+BRUSH TYPES:
+1 - Terrain ⛰️: Modify terrain height
+2 - Water 💧: Add/remove water
+3 - Rock 🪨: Place erosion-resistant rock
+4 - Smooth ✨: Smooth terrain surface
+5 - Flatten 📐: Flatten to target height
+6 - Slope 📉: Create slope between points
+
+BRUSH OPERATIONS:
+Left Click: Add mode
+Shift + Click: Subtract mode
+Alt + Click: Secondary operation
+
+BRUSH MODIFIERS:
+Ctrl + Scroll: Adjust brush size
+Shift: Invert operation (Add ↔ Subtract)
+Alt: Secondary operation
+
+FLATTEN BRUSH:
+Left Click: Flatten to target height
+Alt + Click: Set target height to clicked location
+Use slider to manually set target height (0-500)
+
+SLOPE BRUSH:
+Left Click (first): Set start point of slope
+Alt + Click + Drag: Paint to the start point of slope
+
+WATER SOURCES:
+r: Place permanent water source
+Shift + r: Remove nearest water source
+p: Remove all permanent water sources
+
+CAMERA:
+Right Mouse: Rotate
+Middle Mouse: Pan
+Scroll: Zoom
+WASD: Move camera
+Space: Move up
+
+OTHER:
+Start/Resume: Start/pause simulation
+Reset: Generate new terrain`;
+    controlsButton.style.cssText = `
+        background: transparent;
+        border: 1px solid #555;
+        color: #ccc;
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        cursor: help;
+        font-size: 14px;
+        line-height: 1;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 4px;
+        transition: all 0.2s;
+    `;
+    controlsButton.addEventListener('mouseenter', () => {
+        controlsButton.style.background = 'rgba(100, 100, 100, 0.5)';
+        controlsButton.style.transform = 'scale(1.1)';
+    });
+    controlsButton.addEventListener('mouseleave', () => {
+        controlsButton.style.background = 'transparent';
+        controlsButton.style.transform = 'scale(1)';
+    });
+    header.appendChild(controlsButton);
+    
     // Minimize/Maximize button
     const minimizeBtn = document.createElement('button');
     minimizeBtn.textContent = '−';
@@ -214,7 +288,14 @@ export function createBrushPalette(
         button.setAttribute('data-brush-id', brush.id.toString());
         const shortcutText = brush.shortcut ? ` [${brush.shortcut}]` : '';
         button.textContent = `${brush.icon || ''} ${brush.name}${shortcutText}`;
-        button.title = brush.description || brush.name; // Tooltip
+        // Enhanced tooltip for Flatten and Slope brushes
+        if (brush.id === 5) {
+            button.title = 'Flatten Brush 📐\n\nLeft Click: Flatten terrain to target height\nAlt+Click: Set target height to clicked location\nUse slider to manually set target height (0-500)';
+        } else if (brush.id === 6) {
+            button.title = 'Slope Brush 📉\n\nLeft Click (first): Set start point of slope\nAlt + Click + Drag: Paint to the start point of slope';
+        } else {
+            button.title = brush.description || brush.name; // Standard tooltip
+        }
         button.style.cssText = `
             padding: 8px 12px;
             border: 2px solid ${brush.color || '#666'};
