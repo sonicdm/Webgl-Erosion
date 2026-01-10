@@ -30,7 +30,7 @@
   - Use the slider in the brush palette to manually set target height (0-500)
 
 - **Slope Brush** 📉:
-  - **Alt + Click (first)**: Set start point of slope
+  - **Left Click (first)**: Set start point of slope
   - **Alt + Click + Drag**: Paint to the start point of slope
  
 
