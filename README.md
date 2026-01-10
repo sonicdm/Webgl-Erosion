@@ -1,4 +1,4 @@
-﻿## Terrain erosion sandbox in WebGl
+﻿## Terrain erosion sandbox in WebGL
 
 ![](screenshot/tt.PNG)
 ![](screenshot/mtnn.PNG)
@@ -32,7 +32,6 @@
 - **Slope Brush** 📉:
   - **Left Click (first)**: Set start point of slope
   - **Alt + Click + Drag**: Paint to the start point of slope
- 
 
 ### Water Sources
 - Press `r` to place a permanent water source at cursor location
@@ -53,7 +52,6 @@
 - **Pause Button**: Pause the simulation
 - **Reset Button**: Reset simulation and generate new random terrain
 - **Water Transparency Slider**: Control water alpha/transparency
-- **Evaporation Degree Slider**: Control evaporation amount per simulation step
 - **Kc Slider**: Erosion capacity constant - Controls how much sediment the water can carry. Higher values = water can carry more sediment = more potential erosion. Formula: `Sediment Capacity = Kc × Slope × Velocity`
 - **Ks Slider**: Erosion dissolving constant - Controls how fast terrain erodes when water has capacity to carry more sediment. Higher values = faster erosion. Formula: `Erosion Amount = (Capacity - Current Sediment) × Ks`
 - **Kd Slider**: Erosion deposition constant - Controls how fast sediment is deposited when water is overloaded. Higher values = faster deposition (creates deltas/floodplains). Formula: `Deposition Amount = (Current Sediment - Capacity) × Kd`
@@ -125,7 +123,7 @@
   - **ordinaryFBM (0)**: Standard Fractal Brownian Motion - smooth, natural-looking terrain
   - **domainWarp (1)**: Domain warping - creates more complex, twisted patterns
   - **terrace (2)**: Terrace/step-like terrain - creates flat plateaus with steep edges
-  - **voroni (3)**: Voronoi cells - creates cellular/polygonal patterns
+  - **Voronoi (3)**: Voronoi cells - creates cellular/polygonal patterns
   - **ridgeNoise (4)**: Ridge noise - creates sharp ridges and valleys
 - **TerrainMask**: Applies a mask to shape the terrain
   - **OFF (0)**: No mask applied
@@ -163,11 +161,11 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 
 ![](screenshot/scatter1.PNG)
 
-## Note : MacOS currently unsupported, Recommended GPU is GTX 1060 and above
+## Note: MacOS currently unsupported, Recommended GPU is GTX 1060 and above
 
 ## Enhanced Version Updates (Since Fork)
 
-## update 01/2025 (Latest) :
+## update 01/2025 (Latest):
 - **Terrain Mask System**
   - Added 6 new terrain masks: Square, Ring, RadialGradient, Corner, Diagonal, Cross
   - Total of 9 terrain mask options now available (OFF, Sphere, Slope, Square, Ring, RadialGradient, Corner, Diagonal, Cross)
@@ -182,7 +180,7 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
   - Documented all Debug Views and visualization modes
   - Improved user guidance with parameter ranges, formulas, and usage tips
 
-## update 01/2025 : 
+## update 01/2025:
 - **Deployment & Build System**
   - Added automated deployment via GitHub Actions to `sonicdm.github.io/webgl-erosion-enhanced`
   - Project now automatically builds and deploys on pushes to master branch
@@ -229,30 +227,30 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
   - Improved raycast accuracy with full-resolution height reads
   - Better terrain geometry building with proper bilinear interpolation matching
 
-## update 12/8/2021 : 
-- Algorithm update/fix : added basic(semi-lagrangian) advection for velocity field generation, you can change magnitude of it under "Erosion Parameters" -> "VelocityAdvectionMag", this means that momentum is possible for water, we can have larger/better scale meandering/delta effects
-## update 10/1/2021 : 
-- Algorithm update/fix : now erosion detail will be more accurate as I've choosen to disregard small water body's contribution to sediment advection, it used to create noises in sediment result because when water volume goes below numerical limitation of the sim, velocity will be contributing the same to advection regardless of water size...
-## update 9/24/2021 : 
+## update 12/8/2021:
+- Algorithm update/fix: added basic (semi-lagrangian) advection for velocity field generation, you can change magnitude of it under "Erosion Parameters" -> "VelocityAdvectionMag", this means that momentum is possible for water, we can have larger/better scale meandering/delta effects
+## update 10/1/2021:
+- Algorithm update/fix: now erosion detail will be more accurate as I've chosen to disregard small water body's contribution to sediment advection, it used to create noises in sediment result because when water volume goes below numerical limitation of the sim, velocity will be contributing the same to advection regardless of water size...
+## update 9/24/2021:
 - Added option to change simulation resolution
-## update 7/11/2021 : 
-- permanent water source is added, you can pressed ```r``` to place it, see controls for details 
-- added heatmeap for velocity magnitude in debug view, mapping color goes from blue to green then to red as the velocity size increases
+## update 7/11/2021:
+- permanent water source is added, you can press ```r``` to place it, see controls for details 
+- added heatmap for velocity magnitude in debug view, mapping color goes from blue to green then to red as the velocity size increases
 - added MacCormack advection scheme for sediment advection, resulting in less numerical diffusion (referencing : ShaderX7 Advanced Rendering Techniques - starting page 207), you can find and toggle it on/off under ```erosionParameters``` in gui
 
 
 
-### some screenshots
-- flow map and results after adding velocity advection, this will make sure water have momentum transfered from previous frame, making it more persistent and easier to form ravine/valley  
+### Some Screenshots
+- flow map and results after adding velocity advection, this will make sure water has momentum transferred from previous frame, making it more persistent and easier to form ravine/valley  
 ![](screenshot/velocityadvection.PNG)
 ![](screenshot/velocityadvection1.PNG)
 - velocity advection also enables better delta/flood plain : 
 ![](screenshot/delta0.PNG)
 ![](screenshot/delta1.PNG)
 
-- permanent water in a river vally
+- permanent water in a river valley
 ![](screenshot/riv.PNG)
-- river vally dries up after some erosion
+- river valley dries up after some erosion
 ![](screenshot/vally.PNG)
 - alluvial fan (or at least a similar one) formed at the mountain exit
 ![](screenshot/delta.PNG)
@@ -262,7 +260,7 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 
 
 
-### sediments advection in action 
+### Sediment Advection in Action 
 ![](screenshot/sedi.gif)
 
 
@@ -273,8 +271,8 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 
 
 ### Future Plans:
-- ~~Image(height map) I/O~~ ✅ **Completed** - Height map import/export functionality added
-- ~~muti-layered(rock/sand/etc) erosion~~ ✅ **Partially Completed** - Rock material system with erosion resistance implemented
+- ~~Image (height map) I/O~~ ✅ **Completed** - Height map import/export functionality added
+- ~~Multi-layered (rock/sand/etc) erosion~~ ✅ **Partially Completed** - Rock material system with erosion resistance implemented
 - PBR (Physically Based Rendering)
 - Adaptive simulation utilizing quadtree(or just tiles) for sim optimization
 - Depth upsampling/downsampling for volumetric rendering optimization
@@ -284,8 +282,8 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 - Biomes
 - Eventual goal : Erosion based games, "FROM DUST" would be a good example
 
-### limitations are there however for grid based method
-- mass conservation of sediment is not guranteed 
+### Limitations are there however for grid based method
+- mass conservation of sediment is not guaranteed 
 
 
 ### Reference

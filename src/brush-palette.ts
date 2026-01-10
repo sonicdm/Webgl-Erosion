@@ -223,6 +223,40 @@ Reset: Generate new terrain`;
     });
     header.appendChild(controlsButton);
     
+    // GitHub README link button
+    const readmeButton = document.createElement('button');
+    readmeButton.textContent = '📖';
+    readmeButton.title = 'View full documentation on GitHub';
+    readmeButton.style.cssText = `
+        background: transparent;
+        border: 1px solid #555;
+        color: #ccc;
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 4px;
+        transition: all 0.2s;
+    `;
+    readmeButton.addEventListener('mouseenter', () => {
+        readmeButton.style.background = 'rgba(100, 100, 100, 0.5)';
+        readmeButton.style.transform = 'scale(1.1)';
+    });
+    readmeButton.addEventListener('mouseleave', () => {
+        readmeButton.style.background = 'transparent';
+        readmeButton.style.transform = 'scale(1)';
+    });
+    readmeButton.addEventListener('click', () => {
+        window.open('https://github.com/sonicdm/Webgl-Erosion/blob/master/README.md', '_blank');
+    });
+    header.appendChild(readmeButton);
+    
     // Minimize/Maximize button
     const minimizeBtn = document.createElement('button');
     minimizeBtn.textContent = '−';
