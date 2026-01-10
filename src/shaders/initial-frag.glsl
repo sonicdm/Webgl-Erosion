@@ -140,6 +140,40 @@ float circle_mask(vec2 p){
     return max(0.5 - distance(p, vec2(0.5)), 0.0) ;
 }
 
+float square_mask(vec2 p){
+    vec2 center = vec2(0.5);
+    vec2 d = abs(p - center);
+    float size = 0.4;
+    return max(0.0, 1.0 - max(d.x, d.y) / size);
+}
+
+float ring_mask(vec2 p){
+    float dist = distance(p, vec2(0.5));
+    float inner = 0.2;
+    float outer = 0.4;
+    return smoothstep(outer, inner, dist) * smoothstep(inner - 0.1, inner, dist);
+}
+
+float radial_gradient_mask(vec2 p){
+    float dist = distance(p, vec2(0.5));
+    return 1.0 - smoothstep(0.0, 0.7, dist);
+}
+
+float corner_mask(vec2 p){
+    return (1.0 - p.x) * (1.0 - p.y);
+}
+
+float diagonal_mask(vec2 p){
+    return abs(p.x - p.y);
+}
+
+float cross_mask(vec2 p){
+    vec2 center = vec2(0.5);
+    vec2 d = abs(p - center);
+    float width = 0.15;
+    return max(smoothstep(width, 0.0, d.x), smoothstep(width, 0.0, d.y));
+}
+
 float ridgenoise(float p) {
     return 0.8 * (0.3 - abs(0.3 - p));
 }
@@ -187,9 +221,35 @@ void main() {
 
         terrain_hight *= u_TerrainHeight*120.0;
         if(u_TerrainMask == 1){
+            // Sphere mask - circular gradient from center
             terrain_hight *= 2.0 * pow(c_mask, 1.0);
         }else if(u_TerrainMask == 2){
+            // Slope mask - diagonal gradient
             terrain_hight *= (uv.x + uv.y) * 1.0;
+        }else if(u_TerrainMask == 3){
+            // Square mask - square gradient from center
+            float sq_mask = square_mask(uv);
+            terrain_hight *= 2.0 * pow(sq_mask, 1.0);
+        }else if(u_TerrainMask == 4){
+            // Ring mask - donut shape
+            float ring = ring_mask(uv);
+            terrain_hight *= 2.0 * ring;
+        }else if(u_TerrainMask == 5){
+            // Radial gradient - smooth falloff from center
+            float radial = radial_gradient_mask(uv);
+            terrain_hight *= 2.0 * radial;
+        }else if(u_TerrainMask == 6){
+            // Corner mask - highest in bottom-left corner
+            float corner = corner_mask(uv);
+            terrain_hight *= 2.0 * corner;
+        }else if(u_TerrainMask == 7){
+            // Diagonal mask - diagonal stripe pattern
+            float diag = diagonal_mask(uv);
+            terrain_hight *= 1.0 + diag * 0.5;
+        }else if(u_TerrainMask == 8){
+            // Cross mask - cross pattern from center
+            float cross = cross_mask(uv);
+            terrain_hight *= 1.0 + cross * 0.5;
         }
         //terrain_hight = test(uv) * 500.0;
     }

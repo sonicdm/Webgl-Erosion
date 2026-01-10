@@ -33,7 +33,17 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     terrainParameters.add(controls, 'SimulationResolution', { 256: 256, 512: 512, 1024: 1024, 2048: 2048, 4096: 4096 });
     terrainParameters.add(controls, 'TerrainScale', 0.1, 4.0);
     terrainParameters.add(controls, 'TerrainHeight', 1.0, 5.0);
-    terrainParameters.add(controls, 'TerrainMask', { OFF: 0, Sphere: 1, slope: 2 });
+    terrainParameters.add(controls, 'TerrainMask', { 
+        OFF: 0, 
+        Sphere: 1, 
+        Slope: 2, 
+        Square: 3, 
+        Ring: 4, 
+        RadialGradient: 5, 
+        Corner: 6, 
+        Diagonal: 7, 
+        Cross: 8 
+    });
     terrainParameters.add(controls, 'TerrainBaseType', { ordinaryFBM: 0, domainWarp: 1, terrace: 2, voroni: 3, ridgeNoise: 4 });
     terrainParameters.add(controls, 'ResetTerrain');
     terrainParameters.add(controls, 'Import Height Map');

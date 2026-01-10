@@ -54,15 +54,93 @@
 - **Reset Button**: Reset simulation and generate new random terrain
 - **Water Transparency Slider**: Control water alpha/transparency
 - **Evaporation Degree Slider**: Control evaporation amount per simulation step
-- **Kc Slider**: Erosion capacity constant
-- **Ks Slider**: Erosion dissolving constant
-- **Kd Slider**: Erosion deposition constant
+- **Kc Slider**: Erosion capacity constant - Controls how much sediment the water can carry. Higher values = water can carry more sediment = more potential erosion. Formula: `Sediment Capacity = Kc × Slope × Velocity`
+- **Ks Slider**: Erosion dissolving constant - Controls how fast terrain erodes when water has capacity to carry more sediment. Higher values = faster erosion. Formula: `Erosion Amount = (Capacity - Current Sediment) × Ks`
+- **Kd Slider**: Erosion deposition constant - Controls how fast sediment is deposited when water is overloaded. Higher values = faster deposition (creates deltas/floodplains). Formula: `Deposition Amount = (Current Sediment - Capacity) × Kd`
+
+**Erosion Parameter Tips:**
+- **Increase Kc** for more aggressive erosion (water carries more material)
+- **Increase Ks** for faster erosion (terrain erodes quicker)
+- **Increase Kd** for faster deposition (sediment drops out faster, creating deltas/floodplains)
+
+- **ErosionMode**: Erosion algorithm mode
+  - **RiverMode (0)**: Standard hydraulic erosion - best for river valleys and canyons
+  - **MountainMode (1)**: Optimized for mountain terrain - creates more dramatic peaks
+  - **PolygonalMode (2)**: Creates polygonal/geometric erosion patterns
+
+- **VelocityAdvectionMag** (0.0-0.5): Controls water momentum/persistence. Higher values create more meandering rivers, better deltas, and more persistent flow patterns. Enables momentum transfer between frames.
+
+- **AdvectionMethod**: Sediment transport algorithm
+  - **Semilagrangian (0)**: Basic advection - faster but more numerical diffusion
+  - **MacCormack (1)**: Higher quality advection - less numerical diffusion, better sediment transport detail
+
+- **VelocityMultiplier** (1.0-5.0): Multiplies water flow velocity. Higher values = faster water flow = faster erosion. Use to speed up or slow down the entire erosion process.
+
+- **EvaporationConstant** (0.0001-0.08): Controls how fast water evaporates. Higher values = water disappears faster. Lower values = water persists longer, creating more erosion over time.
+
+- **SimulationSpeed**: Number of simulation steps per frame
+  - **Fast (3)**: 3 steps per frame - fastest erosion but may be less stable
+  - **Medium (2)**: 2 steps per frame - balanced
+  - **Slow (1)**: 1 step per frame - most stable, smoothest results
+
+- **SimulationResolution**: Grid resolution for the simulation (256, 512, 1024, 2048, 4096)
+  - Higher resolution = more detail and accuracy but slower performance
+  - Lower resolution = faster performance but less detail
+  - Changing resolution resets the terrain
+
 - **Debug Views Dropdown**: Switch between different visualization modes
+  - **noDebugView (0)**: Normal terrain rendering
+  - **sediment (1)**: Visualize sediment concentration
+  - **velocity (2)**: Visualize water velocity vectors
+  - **velocityHeatmap (9)**: Color-coded velocity magnitude (blue→green→red)
+  - **terrain (3)**: Height map visualization
+  - **flux (4)**: Water flux visualization
+  - **terrainflux (5)**: Terrain flux visualization
+  - **maxslippage (6)**: Maximum slippage angle visualization
+  - **flowMap (7)**: Flow direction map
+  - **spikeDiffusion (8)**: Spike diffusion visualization
+  - **rockMaterial (10)**: Rock material visualization
+
+### Rain Erosion
+- **RainErosion** (toggle): Enables rain-based erosion that drops water randomly across the terrain
+- **RainErosionStrength** (0.1-3.0): Intensity of rain drops. Higher = more water per drop
+- **RainErosionDropSize** (0.1-3.0): Size of rain drop areas. Higher = larger drop zones
+
+### Thermal Erosion
+- **thermalTalusAngleScale** (1.0-10.0): Controls the talus angle (angle of repose). Higher values = steeper slopes can exist before material slides down. Lower values = material slides down gentler slopes, creating more stable terrain.
+- **thermalErosionScale** (0.0-5.0): Overall strength of thermal erosion. Higher = more material slides down slopes. Set to 0.0 to disable thermal erosion.
+
+### Rock Material System
+- **rockErosionResistance** (0.0-1.0): How resistant rock is to erosion
+  - **0.0**: Rock erodes at the same rate as normal terrain
+  - **1.0**: Rock doesn't erode (maximum resistance)
+  - **Default (0.8)**: Rock erodes much slower than soil, creating erosion-resistant features
 
 ### Terrain Generation
 - **Import Height Map**: Load external PNG height maps
 - **Clear Height Map**: Return to procedural terrain generation
-- **Terrain Parameters**: Adjust base type, scale, height, and mask settings
+- **TerrainScale** (0.1-4.0): Controls the scale/frequency of procedural noise. Higher = more detail, smaller features. Lower = larger, smoother features.
+- **TerrainHeight** (1.0-5.0): Controls the overall height multiplier of the terrain. Higher = taller mountains.
+- **TerrainBaseType**: Procedural generation algorithm
+  - **ordinaryFBM (0)**: Standard Fractal Brownian Motion - smooth, natural-looking terrain
+  - **domainWarp (1)**: Domain warping - creates more complex, twisted patterns
+  - **terrace (2)**: Terrace/step-like terrain - creates flat plateaus with steep edges
+  - **voroni (3)**: Voronoi cells - creates cellular/polygonal patterns
+  - **ridgeNoise (4)**: Ridge noise - creates sharp ridges and valleys
+- **TerrainMask**: Applies a mask to shape the terrain
+  - **OFF (0)**: No mask applied
+  - **Sphere (1)**: Circular gradient from center - creates dome/island shape
+  - **Slope (2)**: Diagonal gradient - creates a slope from one corner to another
+  - **Square (3)**: Square gradient from center - creates a square plateau
+  - **Ring (4)**: Donut/ring shape - creates a circular ridge
+  - **RadialGradient (5)**: Smooth radial falloff from center
+  - **Corner (6)**: Highest in bottom-left corner, fades to other corners
+  - **Diagonal (7)**: Diagonal stripe pattern
+  - **Cross (8)**: Cross pattern from center
+- **TerrainPlatte**: Color scheme/biome
+  - **Normal Alpine Mountain (0)**: Standard mountain colors
+  - **Desert (1)**: Desert color palette
+  - **Jungle (2)**: Jungle/forest color palette
 
 ## [**PLAY LIVE** (Chrome Recommended)]( https://sonicdm.github.io/webgl-erosion-enhanced/)
 
