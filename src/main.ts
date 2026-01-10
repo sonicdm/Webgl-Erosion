@@ -993,14 +993,15 @@ function normalizeMousePosition(canvas: HTMLCanvasElement, clientX: number, clie
 
 function handleInteraction (buttons : number, x : number, y : number){
     // mouseChange provides element-local coordinates (relative to canvas)
-    // Convert to client coordinates so normalization happens in tick()
-    const canvas = document.getElementById('canvas') as HTMLCanvasElement;
-    if (canvas) {
-        const rect = canvas.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-            setLastMousePosition(rect.left + x, rect.top + y);
-        }
-    }
+    // NOTE: This function may be interfering with pointer events
+    // Disabled to prevent coordinate conflicts - pointer events handle mouse position directly
+    // const canvas = document.getElementById('canvas') as HTMLCanvasElement;
+    // if (canvas) {
+    //     const rect = canvas.getBoundingClientRect();
+    //     if (rect.width > 0 && rect.height > 0) {
+    //         setLastMousePosition(rect.left + x, rect.top + y);
+    //     }
+    // }
     //console.log(x + ' ' + y);
 }
 
@@ -1054,7 +1055,9 @@ function main() {
   const eventHandlers = createEventHandlers(controls, controlsConfig, camera);
   const { onKeyDown, onKeyUp, onMouseDown, onMouseUp } = eventHandlers;
 
-  mouseChange(canvas, handleInteraction);
+  // Disabled mouseChange to prevent coordinate conflicts with pointer events
+  // Pointer events now handle all mouse position tracking directly
+  // mouseChange(canvas, handleInteraction);
   document.addEventListener('keydown', onKeyDown, false);
   document.addEventListener('keyup', onKeyUp, false);
   
@@ -1067,12 +1070,13 @@ function main() {
     const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
     console.log('[DEBUG] WINDOW pointerdown - isCanvas:', isCanvas, 'target:', target, 'canvas:', canvas);
     if (isCanvas) {
+      // Always update mouse position when clicking on canvas (needed for accurate brush positioning)
+      setLastMousePosition(e.clientX, e.clientY);
+      
       // Check if this is a brush action BEFORE calling handler
       const action = getMouseButtonAction(e.button, controlsConfig);
       if (action === 'brushActivate') {
         console.log('[DEBUG] WINDOW pointerdown - BRUSH ACTION, stopping propagation immediately');
-        // Update mouse position for ray casting (store client coordinates)
-        setLastMousePosition(e.clientX, e.clientY);
         // Stop propagation IMMEDIATELY to prevent OrbitControls from seeing it
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -1098,16 +1102,17 @@ function main() {
     }
   }, true);
   
-  // Handle pointermove to update brush position while brush is active
+  // Handle pointermove to update brush position (both when active and for preview)
   window.addEventListener('pointermove', (e) => {
-    if (controls.brushPressed === 1) {
-      // Update lastX and lastY for ray casting when brush is active
-      const target = e.target as HTMLElement;
-      const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
-        if (isCanvas) {
-        // Update mouse position for ray casting (store client coordinates)
-        setLastMousePosition(e.clientX, e.clientY);
-        
+    const target = e.target as HTMLElement;
+    const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
+    if (isCanvas) {
+      // Always update mouse position for ray casting (needed for brush preview circle)
+      // Store client coordinates directly
+      setLastMousePosition(e.clientX, e.clientY);
+      
+      // Only check modifier state when brush is actively pressed
+      if (controls.brushPressed === 1) {
         // Continuously check modifier state while brush is active
         const invertModifier = controlsConfig.modifiers.brushInvert;
         if (invertModifier) {
