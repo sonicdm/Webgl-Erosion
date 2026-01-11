@@ -125,6 +125,13 @@
   - **terrace (2)**: Terrace/step-like terrain - creates flat plateaus with steep edges
   - **Voronoi (3)**: Voronoi cells - creates cellular/polygonal patterns
   - **ridgeNoise (4)**: Ridge noise - creates sharp ridges and valleys
+  - **billowNoise (5)**: Puffy, cloud-like terrain with rounded peaks
+  - **turbulence (6)**: Chaotic, turbulent patterns
+  - **craters (7)**: Cratered terrain with impact basins
+  - **dunes (8)**: Sand dune patterns with wave-like ridges
+  - **canyons (9)**: Deep valley/canyon formations
+  - **mountains (10)**: Dramatic peaks with sharper features
+  - **billowyRidges (11)**: Hybrid of billow and ridge noise
 - **TerrainMask**: Applies a mask to shape the terrain
   - **OFF (0)**: No mask applied
   - **Sphere (1)**: Circular gradient from center - creates dome/island shape
@@ -135,6 +142,8 @@
   - **Corner (6)**: Highest in bottom-left corner, fades to other corners
   - **Diagonal (7)**: Diagonal stripe pattern
   - **Cross (8)**: Cross pattern from center
+  - **Craters (10)**: Adds impact crater basins
+  - **Dunes (11)**: Adds wind-aligned dune ridges
 - **TerrainPlatte**: Color scheme/biome
   - **Normal Alpine Mountain (0)**: Standard mountain colors
   - **Desert (1)**: Desert color palette

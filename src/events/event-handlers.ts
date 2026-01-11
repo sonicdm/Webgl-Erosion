@@ -105,7 +105,6 @@ export function createEventHandlers(
                     // Modifier just pressed while brush is active - invert operation
                     setOriginalBrushOperation(controls.brushOperation);
                     controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
-                    console.log('[DEBUG] Brush operation inverted on modifier press to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
                 }
             }
         }
@@ -176,20 +175,15 @@ export function createEventHandlers(
                         controls.brushOperation = original;
                         setOriginalBrushOperation(null);
                     }
-                    console.log('[DEBUG] Brush operation restored on modifier release to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
                 }
             }
         }
     }
 
     function onMouseDown(event: MouseEvent | PointerEvent) {
-        // ALWAYS log first thing - if this doesn't show, handler isn't being called
         const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][event.button];
-        console.log('[DEBUG] onMouseDown CALLED - button:', event.button, 'buttonName:', buttonName, 'target:', event.target);
-        console.log('[DEBUG] Config - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
         
         const action = getMouseButtonAction(event.button, controlsConfig);
-        console.log('[DEBUG] onMouseDown - action:', action, 'brushType:', controls.brushType);
         
         if (action === 'brushActivate') {
             const brushContext: BrushContext = {
@@ -208,25 +202,18 @@ export function createEventHandlers(
                 event.preventDefault();
                 event.stopPropagation();
                 event.stopImmediatePropagation();
-                console.log('[DEBUG] brushPressed set to:', controls.brushPressed);
                 return; // Exit early to prevent other handlers
             } else {
                 // Brush handler already prevented default and stopped propagation
                 return;
             }
-        } else {
-            console.log('[DEBUG] Not a brush action - button:', event.button, 'buttonName:', buttonName);
-            console.log('[DEBUG] Expected - keys.brushActivate:', controlsConfig.keys.brushActivate, 'mouse.brushActivate:', controlsConfig.mouse.brushActivate);
         }
     }
 
     function onMouseUp(event: MouseEvent | PointerEvent) {
-        console.log('[DEBUG] onMouseUp CALLED - button:', event.button, 'target:', event.target);
         const action = getMouseButtonAction(event.button, controlsConfig);
-        console.log('[DEBUG] onMouseUp - action:', action);
         
         if (action === 'brushActivate') {
-            console.log('[DEBUG] Deactivating brush - setting brushPressed = 0');
             controls.brushPressed = 0;
             
             const brushContext: BrushContext = {

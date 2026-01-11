@@ -1,14 +1,16 @@
 {
   "compilerOptions": {
     "lib": ["dom", "es2017"],
-    "module": "nodenext",
+    "module": "esnext",
     "target": "es2017",
     "strict": true,
     "noEmit": true,
     "sourceMap": true,
     "allowJs": true,
-    "moduleResolution": "nodenext",
-    "skipLibCheck": true
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
   },
   "include": [
     "src"

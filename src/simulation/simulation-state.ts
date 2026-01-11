@@ -14,6 +14,12 @@ export let PauseGeneration = false;
 // CPU buffer for raycasting - dynamically sized to match simulation resolution
 export let HightMapCpuBuf = new Float32Array(1024 * 1024 * 4); // Initial size, will be resized
 export let HightMapBufCounter = 0;
+// Flag to track if heightmap buffer is fresh (just read after terrain generation)
+export let HightMapBufIsFresh = false;
+
+export function setHightMapBufIsFresh(isFresh: boolean): void {
+    HightMapBufIsFresh = isFresh;
+}
 
 export function incrementHightMapBufCounter(): void {
     HightMapBufCounter++;

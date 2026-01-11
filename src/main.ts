@@ -29,7 +29,8 @@ import {
     setClientDimensions, setLastMousePosition, clientWidth, clientHeight, lastX, lastY,
     setPauseGeneration, setSimFramecnt, incrementSimFramecnt, setTerrainGeometryDirty,
     resizeHightMapCpuBuf, incrementHightMapBufCounter, resetHightMapBufCounter,
-    terrainGeometry, terrainBVH, setTerrainGeometry, setTerrainBVH
+    terrainGeometry, terrainBVH, setTerrainGeometry, setTerrainBVH,
+    HightMapBufIsFresh, setHightMapBufIsFresh
 } from './simulation/simulation-state';
 import {
     frame_buffer, shadowMap_frame_buffer, deferred_frame_buffer,
@@ -177,6 +178,36 @@ const controls = {
     AdvectionMethod : 1,
     VelocityAdvectionMag : 0.2,
     SimulationResolution : simres,
+    'Reset Erosion Parameters': () => {
+        // Reset all erosion parameters to defaults
+        controls.Kc = 0.06;
+        controls.Ks = 0.036;
+        controls.Kd = 0.006;
+        controls.ErosionMode = 0;
+        controls.EvaporationConstant = 0.003;
+        controls.VelocityMultiplier = 1;
+        controls.VelocityAdvectionMag = 0.2;
+        controls.AdvectionMethod = 1;
+        controls.RainErosion = false;
+        controls.RainErosionStrength = 0.2;
+        controls.RainErosionDropSize = 2.0;
+        
+        // Update GUI controllers to reflect the changes
+        const controllers = (window as any).erosionControllers;
+        if (controllers) {
+            controllers.kcController.updateDisplay();
+            controllers.ksController.updateDisplay();
+            controllers.kdController.updateDisplay();
+            controllers.erosionModeController.updateDisplay();
+            controllers.evaporationController.updateDisplay();
+            controllers.velocityMultiplierController.updateDisplay();
+            controllers.velocityAdvectionController.updateDisplay();
+            controllers.advectionMethodController.updateDisplay();
+            controllers.rainErosionController.updateDisplay();
+            controllers.rainErosionStrengthController.updateDisplay();
+            controllers.rainErosionDropSizeController.updateDisplay();
+        }
+    },
 };
 
 
@@ -194,6 +225,12 @@ let waterPlane : Plane;
 
 // Reference to the initial terrain shader (set in main function)
 let noiseterrain: ShaderProgram | null = null;
+const terrainRandom = {
+    seedOffset: vec2.fromValues(0.0, 0.0),
+    duneDir: vec2.fromValues(1.0, 0.0),
+    craterDensity: 1.0,
+    canyonDepth: 0.7
+};
 
 // ================ dat gui button call backs ============
 // =============================================================
@@ -214,17 +251,23 @@ function StartGeneration(){
 
 function Reset(){
     setSimFramecnt(0);
+    setTerrainRandom();
     setTerrainGeometryDirty(true);
-    if(controls.SimulationResolution!=simres){
-        const newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
-        setSimRes(newRes);
-        resizeTextures4Simulation(gl_context, newRes);
-        resizeHightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
-    }
+    // Resolution change will be handled in the TerrainGeometryDirty block
     //PauseGeneration = true;
 }
 
 function setTerrainRandom() {
+    const angle = Math.random() * Math.PI * 2.0;
+    terrainRandom.duneDir[0] = Math.cos(angle);
+    terrainRandom.duneDir[1] = Math.sin(angle);
+
+    terrainRandom.craterDensity = 0.8 + Math.random() * 0.7;
+    terrainRandom.canyonDepth = 0.45 + Math.random() * 0.5;
+    terrainRandom.seedOffset[0] = Math.random() * 256.0;
+    terrainRandom.seedOffset[1] = Math.random() * 256.0;
+
+    setTerrainGeometryDirty(true);
 }
 
 // Heightmap loading functions are now created via createHeightMapLoader in main()
@@ -1064,11 +1107,9 @@ function main() {
   // Note: controlsConfig will be loaded in main() before event listeners are set up
   window.addEventListener('pointerdown', (e) => {
     const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][e.button];
-    console.log('[DEBUG] WINDOW pointerdown CAPTURE - button:', e.button, 'buttonName:', buttonName, 'target:', e.target);
     // Check if target is canvas or contains canvas
     const target = e.target as HTMLElement;
     const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
-    console.log('[DEBUG] WINDOW pointerdown - isCanvas:', isCanvas, 'target:', target, 'canvas:', canvas);
     if (isCanvas) {
       // Always update mouse position when clicking on canvas (needed for accurate brush positioning)
       setLastMousePosition(e.clientX, e.clientY);
@@ -1076,7 +1117,6 @@ function main() {
       // Check if this is a brush action BEFORE calling handler
       const action = getMouseButtonAction(e.button, controlsConfig);
       if (action === 'brushActivate') {
-        console.log('[DEBUG] WINDOW pointerdown - BRUSH ACTION, stopping propagation immediately');
         // Stop propagation IMMEDIATELY to prevent OrbitControls from seeing it
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -1088,12 +1128,10 @@ function main() {
     }
   }, true);
   window.addEventListener('pointerup', (e) => {
-    console.log('[DEBUG] WINDOW pointerup CAPTURE - button:', e.button, 'target:', e.target);
     const target = e.target as HTMLElement;
     if (target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas) {
       const action = getMouseButtonAction(e.button, controlsConfig);
       if (action === 'brushActivate') {
-        console.log('[DEBUG] WINDOW pointerup - BRUSH ACTION, stopping propagation');
         e.preventDefault();
         e.stopImmediatePropagation();
         e.stopPropagation();
@@ -1122,7 +1160,6 @@ function main() {
             // Modifier is pressed but operation not inverted yet - invert it
             setOriginalBrushOperation(controls.brushOperation);
             controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
-            console.log('[DEBUG] Brush operation inverted on modifier (pointermove) to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
           } else if (!modifierPressed && getOriginalBrushOperation() !== null) {
             // Modifier released - restore original operation
             const original = getOriginalBrushOperation();
@@ -1130,7 +1167,6 @@ function main() {
                 controls.brushOperation = original;
                 setOriginalBrushOperation(null);
             }
-            console.log('[DEBUG] Brush operation restored on modifier release (pointermove) to:', controls.brushOperation === 0 ? 'Add' : 'Subtract');
           }
         }
       }
@@ -1140,7 +1176,6 @@ function main() {
   // Handle pointercancel to deactivate brush if pointer is lost
   window.addEventListener('pointercancel', (e) => {
     if (controls.brushPressed === 1) {
-      console.log('[DEBUG] WINDOW pointercancel - deactivating brush');
       controls.brushPressed = 0;
     }
   }, true);
@@ -1228,6 +1263,7 @@ function main() {
         combinedShader, bilateralBlur, veladvect
     } = shaders;
     noiseterrain = shaders.noiseterrain;
+    setTerrainRandom();
 
 
     let timer = 0;
@@ -1321,77 +1357,134 @@ function main() {
 
     //==========set initial terrain uniforms=================
     timer++;
-    noiseterrain.setTime(timer);
-    noiseterrain.setTerrainHeight(controls.TerrainHeight);
-    noiseterrain.setTerrainScale(controls.TerrainScale);
-    noiseterrain.setInt(controls.TerrainMask,"u_TerrainMask");
-    gl_context.uniform1i(getCachedUniformLocation(noiseterrain.prog,"u_terrainBaseType"),controls.TerrainBaseType);
+    if (noiseterrain) {
+        noiseterrain.setTime(timer);
+        noiseterrain.setTerrainHeight(controls.TerrainHeight);
+        noiseterrain.setTerrainScale(controls.TerrainScale);
+        noiseterrain.setInt(controls.TerrainMask,"u_TerrainMask");
+        gl_context.uniform1i(getCachedUniformLocation(noiseterrain.prog,"u_terrainBaseType"),controls.TerrainBaseType);
+        gl_context.uniform2fv(getCachedUniformLocation(noiseterrain.prog,"u_TerrainSeedOffset"), terrainRandom.seedOffset);
+        gl_context.uniform2fv(getCachedUniformLocation(noiseterrain.prog,"u_DuneDir"), terrainRandom.duneDir);
+        gl_context.uniform1f(getCachedUniformLocation(noiseterrain.prog,"u_CraterDensity"), terrainRandom.craterDensity);
+        gl_context.uniform1f(getCachedUniformLocation(noiseterrain.prog,"u_CanyonDepth"), terrainRandom.canyonDepth);
+    }
 
 
     if(TerrainGeometryDirty){
-
-        //=============clean up all simulation textures===================
-        cleanUpTextures();
-        //=============recreate base terrain textures=====================
-        Render2Texture(renderer,gl_context,camera,noiseterrain,read_terrain_tex,square,noiseterrain);
-        Render2Texture(renderer,gl_context,camera,noiseterrain,write_terrain_tex,square,noiseterrain);
-
-        //=============rebuild secondary terrain mesh and BVH for raycasting===================
-        // Dispose old BVH and geometry if they exist
-        if (terrainBVH) {
-            // BVH doesn't have explicit dispose, but we'll null the reference
-            setTerrainBVH(null);
+        // Show loading overlay and force a repaint before blocking operations
+        const loadingOverlay = document.getElementById('terrain-loading-overlay');
+        const progressText = document.getElementById('loading-progress-text');
+        if (loadingOverlay) {
+            loadingOverlay.classList.add('visible');
         }
-        if (terrainGeometry) {
-            terrainGeometry.dispose();
-            setTerrainGeometry(null);
+        if (progressText) {
+            progressText.textContent = 'Rendering terrain textures...';
         }
         
-        // Create new terrain geometry from heightmap
-        // Note: HightMapCpuBuf might not be populated yet on first frame
-        // The BVH will be built when the buffer is available (next frame or when heightmap is read)
-        // Check if buffer has actual data (not all zeros) before creating geometry
-        if (HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
-            // Check if buffer has non-zero height data (sample a few points)
-            let hasData = false;
-            const sampleCount = Math.min(100, simres * simres);
-            for (let i = 0; i < sampleCount; i++) {
-                const idx = Math.floor(Math.random() * simres * simres) * 4;
-                if (HightMapCpuBuf[idx] !== 0) {
-                    hasData = true;
-                    break;
-                }
+        // Use setTimeout to ensure overlay is rendered before blocking operations
+        setTimeout(() => {
+            // Handle resolution change if needed (must happen before texture cleanup)
+            if(controls.SimulationResolution != simres){
+                if (progressText) progressText.textContent = 'Resizing textures...';
+                const newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
+                setSimRes(newRes);
+                resizeTextures4Simulation(gl_context, newRes);
+                resizeHightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
             }
             
-            if (hasData) {
-                try {
-                    const newGeometry = createTerrainGeometry(simres, HightMapCpuBuf, 1.0);
-                setTerrainGeometry(newGeometry);
+            //=============clean up all simulation textures===================
+            cleanUpTextures();
+            //=============recreate base terrain textures=====================
+            if (noiseterrain) {
+                if (progressText) progressText.textContent = 'Rendering terrain textures (1/2)...';
+                Render2Texture(renderer,gl_context,camera,noiseterrain,read_terrain_tex,square,noiseterrain);
+                if (progressText) progressText.textContent = 'Rendering terrain textures (2/2)...';
+                Render2Texture(renderer,gl_context,camera,noiseterrain,write_terrain_tex,square,noiseterrain);
                 
-                // Build BVH from geometry
-                const bvh = new MeshBVH(newGeometry, {
-                    strategy: SAH, // Surface Area Heuristic for best performance (use constant, not string)
-                    maxDepth: 40,    // Reasonable depth limit
-                    indirect: false   // Direct indexed geometry
-                });
-                setTerrainBVH(bvh);
-                    console.log('[BVH] Terrain BVH built successfully');
-                } catch (error) {
-                    console.warn('[BVH] Failed to build BVH (heightmap may not be ready yet):', error);
+                // Force immediate read of heightmap buffer after terrain generation
+                // This ensures BVH gets fresh data, not stale data
+                if (progressText) progressText.textContent = 'Reading heightmap data...';
+                gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+                gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, read_terrain_tex, 0);
+                gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
+                gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
+                gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
+                setHightMapBufIsFresh(true); // Mark buffer as fresh
+            }
+
+            //=============rebuild secondary terrain mesh and BVH for raycasting===================
+            // Dispose old BVH and geometry if they exist
+            if (terrainBVH) {
+                // BVH doesn't have explicit dispose, but we'll null the reference
+                setTerrainBVH(null);
+            }
+            if (terrainGeometry) {
+                terrainGeometry.dispose();
+                setTerrainGeometry(null);
+            }
+            
+            // Create new terrain geometry from heightmap
+            // Only build BVH if buffer is fresh (just read after terrain generation)
+            // This prevents building BVH with stale data
+            if (HightMapBufIsFresh && HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
+                // Verify buffer has actual data (not all zeros)
+                let hasData = false;
+                const sampleCount = Math.min(100, simres * simres);
+                for (let i = 0; i < sampleCount; i++) {
+                    const idx = Math.floor(Math.random() * simres * simres) * 4;
+                    if (HightMapCpuBuf[idx] !== 0) {
+                        hasData = true;
+                        break;
+                    }
+                }
+                
+                if (hasData) {
+                    try {
+                        if (progressText) progressText.textContent = 'Creating terrain geometry...';
+                        const newGeometry = createTerrainGeometry(simres, HightMapCpuBuf, 1.0);
+                        setTerrainGeometry(newGeometry);
+                        
+                        // Build BVH from geometry
+                        if (progressText) progressText.textContent = 'Building spatial index (BVH)...';
+                        const bvh = new MeshBVH(newGeometry, {
+                            strategy: SAH, // Surface Area Heuristic for best performance (use constant, not string)
+                            maxDepth: 40,    // Reasonable depth limit
+                            indirect: false   // Direct indexed geometry
+                        });
+                        setTerrainBVH(bvh);
+                        setHightMapBufIsFresh(false); // Mark as consumed
+                        console.log('[BVH] Terrain BVH built successfully');
+                    } catch (error) {
+                        console.warn('[BVH] Failed to build BVH:', error);
+                        setHightMapBufIsFresh(false); // Mark as consumed even on error
+                    }
+                } else {
+                    console.log('[BVH] Heightmap buffer has no valid data');
+                    setHightMapBufIsFresh(false); // Mark as consumed
                 }
             } else {
-                console.log('[BVH] Heightmap buffer exists but has no data yet, will build when populated');
+                console.log('[BVH] Heightmap buffer not fresh yet, will build when available');
             }
-        } else {
-            console.log('[BVH] Heightmap buffer not ready yet, BVH will be built when available');
-        }
 
-        setTerrainGeometryDirty(false);
+            setTerrainGeometryDirty(false);
+            
+            // Hide loading overlay
+            if (loadingOverlay) {
+                loadingOverlay.classList.remove('visible');
+            }
+        });
     }
     
-    // Build BVH if it doesn't exist but heightmap buffer is available
+    // Build BVH if it doesn't exist but heightmap buffer is fresh
     // This handles the case where terrain was dirty but buffer wasn't ready yet
-    if (!terrainBVH && !terrainGeometry && HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
+    if (!terrainBVH && !terrainGeometry && HightMapBufIsFresh && HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
+        // Show loading overlay for delayed BVH build
+        const loadingOverlay = document.getElementById('terrain-loading-overlay');
+        const progressText = document.getElementById('loading-progress-text');
+        if (loadingOverlay) {
+            loadingOverlay.classList.add('visible');
+        }
+        
         // Check if buffer has actual data (not all zeros)
         let hasData = false;
         const sampleCount = Math.min(100, simres * simres);
@@ -1405,19 +1498,28 @@ function main() {
         
         if (hasData) {
             try {
+                if (progressText) progressText.textContent = 'Creating terrain geometry (delayed)...';
                 const newGeometry = createTerrainGeometry(simres, HightMapCpuBuf, 1.0);
                 setTerrainGeometry(newGeometry);
                 
+                if (progressText) progressText.textContent = 'Building spatial index (BVH)...';
                 const bvh = new MeshBVH(newGeometry, {
                     strategy: SAH,
                     maxDepth: 40,
                     indirect: false
                 });
                 setTerrainBVH(bvh);
+                setHightMapBufIsFresh(false); // Mark as consumed
                 console.log('[BVH] Terrain BVH built (delayed initialization)');
             } catch (error) {
                 console.warn('[BVH] Failed to build BVH:', error);
+                setHightMapBufIsFresh(false); // Mark as consumed even on error
             }
+        }
+        
+        // Hide loading overlay
+        if (loadingOverlay) {
+            loadingOverlay.classList.remove('visible');
         }
     }
 
@@ -1635,11 +1737,13 @@ function main() {
         (Math.abs(lastX - lastReadMouseX) + Math.abs(lastY - lastReadMouseY) > 1);
     if ((justPressed || mouseMoved) && shouldReadHeightmap(brushPressed, brushVisible, simres)) {
         // Read full resolution for accurate raycasting
+        // Note: This is throttled by shouldReadHeightmap to avoid blocking
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
         gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, read_terrain_tex, 0);
         gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
         gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
+        // Don't mark as fresh here - this is for brush raycasting, not BVH building
         lastReadMouseX = lastX;
         lastReadMouseY = lastY;
         if (!brushPressed && !brushVisible && HightMapBufCounter >= MaxHightMapBufCounter) {

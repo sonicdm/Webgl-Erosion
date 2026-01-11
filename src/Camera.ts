@@ -70,7 +70,6 @@ class Camera {
         };
         // If brush uses left click, ensure LEFT is disabled for camera
         if (brushUsesLeftClick) {
-            console.log('[DEBUG] Camera: Disabling LEFT button for OrbitControls (brush uses it)');
             mouseButtons.LEFT = null;
         }
         // Set rotate button (unless it's LEFT and brush uses it)
@@ -86,7 +85,6 @@ class Camera {
             }
         }
         this.threeControls.mouseButtons = mouseButtons;
-        console.log('[DEBUG] Camera: OrbitControls mouseButtons set to:', mouseButtons);
 
         // Apply speed settings
         this.threeControls.rotateSpeed = cameraConfig.rotateSpeed;

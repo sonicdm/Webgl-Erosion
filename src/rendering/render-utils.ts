@@ -27,10 +27,12 @@ export function Render2Texture(
     gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
-    let status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
-    if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
-        console.log("frame buffer status:" + status.toString());
-    }
+    // Removed expensive checkFramebufferStatus call for performance
+    // Only enable in debug builds if needed
+    // let status = gl_context.checkFramebufferStatus(gl_context.FRAMEBUFFER);
+    // if (status !== gl_context.FRAMEBUFFER_COMPLETE) {
+    //     console.log("frame buffer status:" + status.toString());
+    // }
 
     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);

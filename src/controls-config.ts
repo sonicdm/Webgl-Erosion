@@ -132,19 +132,15 @@ export function getMouseButtonAction(button: number, config: ControlsConfig): st
         2: 'RIGHT'
     };
     const buttonName = buttonMap[button];
-    console.log('[DEBUG] getMouseButtonAction - button:', button, '-> buttonName:', buttonName, 'mouse.brushActivate:', config.mouse.brushActivate, 'keys.brushActivate:', config.keys.brushActivate);
     
     // Check mouse binding first (takes priority)
     if (config.mouse.brushActivate && buttonName === config.mouse.brushActivate) {
-        console.log('[DEBUG] getMouseButtonAction - MATCH (mouse binding)!');
         return 'brushActivate';
     }
     // Fall back to keys.brushActivate if it's a mouse button string
     if (buttonName && config.keys.brushActivate === buttonName) {
-        console.log('[DEBUG] getMouseButtonAction - MATCH (key binding)!');
         return 'brushActivate';
     }
-    console.log('[DEBUG] getMouseButtonAction - NO MATCH');
     return null;
 }
 

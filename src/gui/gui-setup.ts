@@ -42,9 +42,24 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         RadialGradient: 5, 
         Corner: 6, 
         Diagonal: 7, 
-        Cross: 8 
+        Cross: 8,
+        Craters: 10,
+        Dunes: 11
     });
-    terrainParameters.add(controls, 'TerrainBaseType', { ordinaryFBM: 0, domainWarp: 1, terrace: 2, voroni: 3, ridgeNoise: 4 });
+    terrainParameters.add(controls, 'TerrainBaseType', { 
+        ordinaryFBM: 0, 
+        domainWarp: 1, 
+        terrace: 2, 
+        voroni: 3, 
+        ridgeNoise: 4,
+        billowNoise: 5,
+        turbulence: 6,
+        craters: 7,
+        dunes: 8,
+        canyons: 9,
+        mountains: 10,
+        billowyRidges: 11
+    });
     terrainParameters.add(controls, 'ResetTerrain');
     terrainParameters.add(controls, 'Import Height Map');
     terrainParameters.add(controls, 'Clear Height Map');
@@ -53,20 +68,36 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     // Erosion Parameters
     var erosionpara = gui.addFolder('Erosion Parameters');
     var RainErosionPara = erosionpara.addFolder('Rain Erosion Parameters');
-    RainErosionPara.add(controls, 'RainErosion');
-    RainErosionPara.add(controls, 'RainErosionStrength', 0.1, 3.0);
-    RainErosionPara.add(controls, 'RainErosionDropSize', 0.1, 3.0);
+    const rainErosionController = RainErosionPara.add(controls, 'RainErosion');
+    const rainErosionStrengthController = RainErosionPara.add(controls, 'RainErosionStrength', 0.1, 3.0);
+    const rainErosionDropSizeController = RainErosionPara.add(controls, 'RainErosionDropSize', 0.1, 3.0);
     RainErosionPara.close();
-    erosionpara.add(controls, 'ErosionMode', { RiverMode: 0, MountainMode: 1, PolygonalMode: 2 });
-    erosionpara.add(controls, 'VelocityAdvectionMag', 0.0, 0.5);
-    erosionpara.add(controls, 'EvaporationConstant', 0.0001, 0.08);
-    erosionpara.add(controls, 'Kc', 0.01, 0.5);
-    erosionpara.add(controls, 'Ks', 0.001, 0.2);
-    erosionpara.add(controls, 'Kd', 0.0001, 0.1);
+    const erosionModeController = erosionpara.add(controls, 'ErosionMode', { RiverMode: 0, MountainMode: 1, PolygonalMode: 2 });
+    const velocityAdvectionController = erosionpara.add(controls, 'VelocityAdvectionMag', 0.0, 0.5);
+    const evaporationController = erosionpara.add(controls, 'EvaporationConstant', 0.0001, 0.08);
+    const kcController = erosionpara.add(controls, 'Kc', 0.01, 0.5);
+    const ksController = erosionpara.add(controls, 'Ks', 0.001, 0.2);
+    const kdController = erosionpara.add(controls, 'Kd', 0.0001, 0.1);
     erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10 });
-    erosionpara.add(controls, 'AdvectionMethod', { Semilagrangian: 0, MacCormack: 1 });
-    erosionpara.add(controls, 'VelocityMultiplier', 1.0, 5.0);
+    const advectionMethodController = erosionpara.add(controls, 'AdvectionMethod', { Semilagrangian: 0, MacCormack: 1 });
+    const velocityMultiplierController = erosionpara.add(controls, 'VelocityMultiplier', 1.0, 5.0);
+    erosionpara.add(controls, 'Reset Erosion Parameters');
     erosionpara.open();
+    
+    // Store controller references for reset function
+    (window as any).erosionControllers = {
+        kcController,
+        ksController,
+        kdController,
+        erosionModeController,
+        evaporationController,
+        velocityMultiplierController,
+        velocityAdvectionController,
+        advectionMethodController,
+        rainErosionController,
+        rainErosionStrengthController,
+        rainErosionDropSizeController
+    };
     
     // Thermal Erosion Parameters
     var thermalerosionpara = gui.addFolder("Thermal Erosion Parameters");
@@ -182,4 +213,3 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         }
     };
 }
-

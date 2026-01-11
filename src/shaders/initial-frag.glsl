@@ -8,6 +8,10 @@ uniform float u_TerrainScale;
 uniform float u_TerrainHeight;
 uniform int u_terrainBaseType;
 uniform int u_TerrainMask;
+uniform vec2 u_TerrainSeedOffset;
+uniform vec2 u_DuneDir;
+uniform float u_CraterDensity;
+uniform float u_CanyonDepth;
 uniform sampler2D u_HeightMap; // Optional height map texture
 uniform int u_UseHeightMap; // 0 = procedural, 1 = use height map
 
@@ -73,7 +77,7 @@ float noise2(vec2 st) {
 
 //smooth========================================================================
 
-#define OCTAVES 12
+#define OCTAVES 8  // Reduced from 12 for faster generation (can be increased for more detail)
 
 float random (in vec2 st) {
     return fract(sin(dot(st.xy,
@@ -103,16 +107,34 @@ float noise (in vec2 st) {
 float fbm (in vec2 st) {
     // Initial values
     float value = 0.0;
-    float amplitude = .5;
-    float frequency = 0.;
+    float amplitude = 0.5;
     //
-    // Loop of octaves
+    // Loop of octaves - optimized
     for (int i = 0; i < OCTAVES; i++) {
-        value += amplitude * noise(st);//iqnoise(st,1.f,1.f);
+        value += amplitude * noise(st);
         st *= 2.0;
-        amplitude *= .47;
+        amplitude *= 0.47;
     }
     return value;
+}
+
+float fbm4(in vec2 st) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    for (int i = 0; i < 4; i++) {
+        value += amplitude * noise(st);
+        st *= 2.0;
+        amplitude *= 0.5;
+    }
+    return value;
+}
+
+float hash12(vec2 st) {
+    return random(st);
+}
+
+vec2 hash22(vec2 st) {
+    return random2(st) * 0.5 + 0.5;
 }
 
 float voroni(in vec2 ss){
@@ -178,6 +200,195 @@ float ridgenoise(float p) {
     return 0.8 * (0.3 - abs(0.3 - p));
 }
 
+// Ridged noise - creates sharp mountain ridges
+float ridged_noise(vec2 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    float maxValue = 0.0;
+    
+    for (int i = 0; i < 8; i++) {
+        float n = noise(p * frequency);
+        n = abs(n);
+        n = 1.0 - n; // Invert to create ridges
+        n = n * n; // Square to sharpen ridges
+        value += n * amplitude;
+        maxValue += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    return value / maxValue;
+}
+
+float ridged_mf(vec2 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    float weight = 1.0;
+
+    for (int i = 0; i < 6; i++) {
+        float n = noise(p * frequency);
+        n = abs(n * 2.0 - 1.0);
+        n = 1.0 - n;
+        n = n * n;
+        n *= weight;
+        weight = clamp(n * 2.0, 0.0, 1.0);
+        value += n * amplitude;
+        frequency *= 2.0;
+        amplitude *= 0.5;
+    }
+    return value;
+}
+
+// Billow noise - creates puffy, cloud-like terrain using absolute value of noise
+float billow_noise(vec2 p) {
+    vec2 warp = vec2(fbm4(p * 0.35 + 3.1), fbm4(p * 0.35 + 9.2));
+    p += (warp - 0.5) * 1.2;
+
+    float value = 0.0;
+    float amplitude = 0.5;
+    float maxValue = 0.0;
+
+    for (int i = 0; i < 6; i++) {
+        float n = noise(p);
+        n = abs(n * 2.0 - 1.0);
+        n = n * n;
+        value += n * amplitude;
+        maxValue += amplitude;
+        p *= 2.0;
+        amplitude *= 0.5;
+    }
+    return value / maxValue;
+}
+
+// Turbulence - chaotic variation using absolute value of noise
+float turbulence(vec2 p) {
+    vec2 warp = vec2(fbm4(p * 0.25 + 11.7), fbm4(p * 0.25 + 21.3));
+    p += (warp - 0.5) * 1.8;
+
+    float value = 0.0;
+    float amplitude = 0.5;
+    float maxValue = 0.0;
+
+    for (int i = 0; i < 7; i++) {
+        float n = noise(p);
+        n = abs(n * 2.0 - 1.0);
+        value += n * amplitude;
+        maxValue += amplitude;
+        p *= 2.0;
+        amplitude *= 0.55;
+    }
+    return value / maxValue;
+}
+
+float crater_mask(vec2 p) {
+    vec2 cell = floor(p);
+    float bowl = 0.0;
+    float rim = 0.0;
+
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            vec2 c = cell + vec2(float(x), float(y));
+            vec2 rnd = hash22(c);
+            vec2 center = c + rnd;
+            float radius = mix(0.2, 0.45, hash12(c + vec2(2.3, 5.7)));
+            float d = distance(p, center);
+
+            float depth = 1.0 - smoothstep(0.0, radius, d);
+            depth = depth * depth;
+            bowl = max(bowl, depth);
+
+            float rimWidth = radius * 0.25;
+            float rimBand = smoothstep(radius - rimWidth, radius, d) *
+                (1.0 - smoothstep(radius, radius + rimWidth, d));
+            rim = max(rim, rimBand);
+        }
+    }
+
+    float micro = (noise(p * 6.0) - 0.5) * 0.06;
+    float mask = 1.0 - bowl * 0.6 + rim * 0.25 + micro;
+    return clamp(mask, 0.2, 1.4);
+}
+
+float dune_mask(vec2 p) {
+    vec2 dir = normalize(u_DuneDir);
+    float warp = (fbm4(p * 0.2 + 4.0) - 0.5) * 1.6;
+    float t = dot(p, dir) * 1.8 + warp;
+
+    float phase = fract(t);
+    float rampUp = smoothstep(0.0, 0.7, phase);
+    float rampDown = 1.0 - smoothstep(0.7, 1.0, phase);
+    float ridge = rampUp * rampDown;
+    ridge = pow(ridge, 0.7);
+
+    float ripple = (noise(p * 6.0 + 17.0) - 0.5) * 0.08;
+    float mask = 1.0 + (ridge - 0.35) * 0.6 + ripple;
+    return clamp(mask, 0.6, 1.35);
+}
+
+// Canyon mask - carves drainage canyons into existing terrain
+float canyon_mask(vec2 p) {
+    float scaleNorm = clamp(u_TerrainScale / 4.0, 0.0, 1.0);
+    float scaleFactor = mix(0.7, 1.25, scaleNorm);
+    float width = mix(0.18, 0.07, scaleNorm);
+
+    vec2 warp = vec2(fbm4(p * 0.08 + 2.0), fbm4(p * 0.08 + 8.0));
+    vec2 q = p * scaleFactor + (warp - 0.5) * 3.0;
+
+    // Create more contiguous river network by combining rivers
+    float river1 = fbm4(q * 0.08);
+    float river2 = fbm4(q * 0.11 + vec2(17.0, 9.0));
+    
+    // Use smooth minimum to create more contiguous canyons
+    // This creates better connections between river branches
+    float dist1 = abs(river1 - 0.5);
+    float dist2 = abs(river2 - 0.52);
+    
+    // Smooth minimum for better connectivity
+    float k = 0.15; // Smoothing factor
+    float h = clamp(0.5 + 0.5 * (dist2 - dist1) / k, 0.0, 1.0);
+    float dist = mix(dist2, dist1, h) - k * h * (1.0 - h);
+    
+    // Alternative: use max to ensure canyons connect (creates wider network)
+    // float dist = min(dist1, dist2) * 0.7; // Make them connect better
+
+    float profile = max(0.0, 1.0 - dist / width);
+    profile = clamp(profile, 0.0, 1.0);
+
+    float heightFactor = mix(0.6, 1.3, clamp(u_TerrainHeight / 5.0, 0.0, 1.0));
+    float depth = u_CanyonDepth * heightFactor;
+    
+    // Reduce maximum depth - never go below 0.3 (30% of terrain height)
+    // This leaves room for erosion to work
+    float minMask = 0.3;
+    float maxDepth = 1.0 - minMask; // Maximum depth is 70% of terrain
+    depth = min(depth, maxDepth);
+    
+    float mask = 1.0 - profile * depth;
+    return clamp(mask, minMask, 1.0); // Ensure mask never goes below minMask
+}
+
+
+// Mountains - dramatic peaks using ridged multifractal with clustered ranges
+float mountains(vec2 p) {
+    vec2 warp = vec2(fbm4(p * 0.25 + 10.0), fbm4(p * 0.25 + 31.0));
+    vec2 q = p + (warp - 0.5) * 1.8;
+
+    float base = ridged_mf(q * 1.0);
+    float macro = fbm4(q * 0.12);
+    base *= mix(0.5, 1.0, macro);
+    float detail = fbm4(q * 6.0) * 0.15;
+    return clamp(base + detail, 0.0, 1.2);
+}
+
+// Billowy ridges - combination of billow and ridged noise
+float billowy_ridges(vec2 p) {
+    float billow = billow_noise(p * 1.4);
+    float ridge = ridged_mf(p * 1.1);
+    float detail = fbm4(p * 6.0) * 0.1;
+    return clamp(mix(billow, ridge, 0.65) + detail, 0.0, 1.3);
+}
+
 //nice one 5.3f*uv+vec2(178.f,27.f);
 
 // 6.f*vec2(uv.x,uv.y)+vec2(121.f,41.f);
@@ -203,20 +414,43 @@ void main() {
         float c_mask = circle_mask(uv);
         vec2 cpos = 1.5 * uv * u_TerrainScale;
         cpos = cpos + vec2(1.f*sin(u_Time / 3.0) + 2.1,1.0 * cos(u_Time/17.0)+3.6);
+        cpos += u_TerrainSeedOffset;
 
-        terrain_hight = fbm(cpos*2.0)*1.1;
-        float base_height = fbm(cpos*6.2)/1.0;
+        float base_height = pow(fbm(cpos * 2.0) * 1.1, 3.0);
+        terrain_hight = base_height;
 
-        terrain_hight = pow(terrain_hight,3.0)/1.0;
-        //terrain_hight = ridgenoise(terrain_hight);
         if(u_terrainBaseType == 2){
-            terrain_hight = teR(terrain_hight / 1.2);
+            terrain_hight = teR(base_height / 1.2);
         }else if(u_terrainBaseType == 1){
-            terrain_hight = domainwarp(cpos * 2.0)/1.0;
+            terrain_hight = domainwarp(cpos * 2.0);
         }else if(u_terrainBaseType == 3){
-            terrain_hight = voroni(cpos * 2.0)/3.0;
+            terrain_hight = voroni(cpos * 2.0) / 3.0;
         }else if(u_terrainBaseType == 4){
-            terrain_hight =  ridgenoise(pow(fbm(cpos*1.5),2.0));
+            terrain_hight = ridgenoise(pow(fbm(cpos * 1.5), 2.0));
+        }else if(u_terrainBaseType == 5){
+            terrain_hight = billow_noise(cpos * 1.6);
+        }else if(u_terrainBaseType == 6){
+            terrain_hight = turbulence(cpos * 1.5);
+        }else if(u_terrainBaseType == 7){
+            float crater_base = pow(fbm(cpos * 1.2), 2.2);
+            float crater_density = clamp(u_CraterDensity, 0.6, 1.8);
+            terrain_hight = crater_base * crater_mask(cpos * 1.1 * crater_density);
+        }else if(u_terrainBaseType == 8){
+            float dune_base = fbm(cpos * 0.6) * 0.35 + 0.65;
+            terrain_hight = dune_base * dune_mask(cpos * 1.2);
+        }else if(u_terrainBaseType == 9){
+            float canyon = canyon_mask(cpos * 1.1);
+            float centerDist = distance(uv, vec2(0.5));
+            float centerBias = 1.0 - smoothstep(0.25, 0.6, centerDist);
+            float centerPull = mix(0.25, 1.0, centerBias);
+            float plateau = fbm(cpos * 0.5) * 0.6 + 0.35;
+            float ridge = ridged_mf(cpos * 0.9) * 0.22;
+            float carve = (1.0 - canyon) * 1.15 * centerPull;
+            terrain_hight = clamp(plateau + ridge - carve, 0.0, 1.2);
+        }else if(u_terrainBaseType == 10){
+            terrain_hight = mountains(cpos * 1.4);
+        }else if(u_terrainBaseType == 11){
+            terrain_hight = billowy_ridges(cpos * 1.3);
         }
 
         terrain_hight *= u_TerrainHeight*120.0;
@@ -250,6 +484,15 @@ void main() {
             // Cross mask - cross pattern from center
             float cross = cross_mask(uv);
             terrain_hight *= 1.0 + cross * 0.5;
+        }else if(u_TerrainMask == 10){
+            // Crater mask - adds impact basins
+            float crater_density = clamp(u_CraterDensity, 0.6, 1.8);
+            float crater = crater_mask(cpos * 1.1 * crater_density);
+            terrain_hight *= crater;
+        }else if(u_TerrainMask == 11){
+            // Dune mask - adds wind-aligned ridges
+            float dune = dune_mask(cpos * 1.2);
+            terrain_hight *= dune;
         }
         //terrain_hight = test(uv) * 500.0;
     }
