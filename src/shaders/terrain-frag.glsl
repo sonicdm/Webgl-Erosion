@@ -390,6 +390,58 @@ void main()
             // Soil - brown/tan
             fcol = vec3(0.6, 0.5, 0.4);
         }
+    }else if(u_TerrainDebug == 11){
+        // Lava Volume debug view
+        // Show lava volume as color intensity (red = high volume, black = no lava)
+        float vol = lavaVolume;
+        fcol = vec3(vol * 10.0, 0.0, 0.0); // Red intensity based on volume
+        fcol = clamp(fcol, vec3(0.0), vec3(1.0));
+    }else if(u_TerrainDebug == 12){
+        // Lava Temperature debug view
+        // Temperature gradient: Blue (800°C) -> Green (1000°C) -> Yellow (1100°C) -> Red (1200°C)
+        float temp = lavaTemp;
+        float tempNormalized = (temp - 800.0) / 400.0; // Normalize 800-1200°C to 0-1
+        tempNormalized = clamp(tempNormalized, 0.0, 1.0);
+        
+        if (lavaVolume < 0.001) {
+            // No lava - black
+            fcol = vec3(0.0);
+        } else if (tempNormalized < 0.33) {
+            // 800-933°C: Blue to Cyan
+            float t = tempNormalized / 0.33;
+            fcol = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), t);
+        } else if (tempNormalized < 0.66) {
+            // 933-1067°C: Cyan to Yellow
+            float t = (tempNormalized - 0.33) / 0.33;
+            fcol = mix(vec3(0.0, 1.0, 1.0), vec3(1.0, 1.0, 0.0), t);
+        } else {
+            // 1067-1200°C: Yellow to Red
+            float t = (tempNormalized - 0.66) / 0.34;
+            fcol = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t);
+        }
+    }else if(u_TerrainDebug == 13){
+        // Lava Temperature + Volume combined
+        // Show temperature as color, volume as intensity
+        float temp = lavaTemp;
+        float tempNormalized = (temp - 800.0) / 400.0;
+        tempNormalized = clamp(tempNormalized, 0.0, 1.0);
+        float volIntensity = clamp(lavaVolume * 10.0, 0.0, 1.0);
+        
+        vec3 tempColor = vec3(0.0);
+        if (lavaVolume < 0.001) {
+            tempColor = vec3(0.0);
+        } else if (tempNormalized < 0.33) {
+            float t = tempNormalized / 0.33;
+            tempColor = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), t);
+        } else if (tempNormalized < 0.66) {
+            float t = (tempNormalized - 0.33) / 0.33;
+            tempColor = mix(vec3(0.0, 1.0, 1.0), vec3(1.0, 1.0, 0.0), t);
+        } else {
+            float t = (tempNormalized - 0.66) / 0.34;
+            tempColor = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t);
+        }
+        
+        fcol = tempColor * volIntensity;
     }
 
 
