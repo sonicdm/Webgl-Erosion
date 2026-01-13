@@ -167,16 +167,10 @@ export function handleBrushMouseDown(
             
             
             const rawHeight = sampleHeightBilinear(brushUV, context.simres, context.HightMapCpuBuf);
-            // The shader uses currentHeight = cur.x directly, so currentHeight is in the same range as the texture
-            // The texture stores values in 0-simres range (based on terrain-vert.glsl dividing by u_SimRes)
-            // But if the value is exactly half, maybe the texture stores in a different range?
-            // Let's check: if rawHeight is in 0-simres (0-1024), and we want 0-500, we'd do rawHeight * 500 / simres
-            // But if it's exactly half, maybe we need rawHeight * 1000 / simres? Or maybe rawHeight is already in 0-500 range?
-            // Actually, the shader comparison is: (targetHeight - currentHeight) where both should be in the same range
-            // If currentHeight is in 0-simres range, then targetHeight should also be in 0-simres range
-            // But we're sending 0-500. So we need to convert rawHeight to 0-500 range to match what we're sending
-            // If the value is exactly half, maybe we need to multiply by 2?
-            const heightValue = (rawHeight * 1000.0) / context.simres; // Convert from 0-simres to 0-500, multiply by 2 to fix "exactly half" issue
+            // Convert from texture space (0-2000.30) to 0-500 range for UI
+            // The shader will convert this back to texture space for comparison
+            const MAX_TEXTURE_HEIGHT = 2000.30;
+            const heightValue = (rawHeight / MAX_TEXTURE_HEIGHT) * 500.0;
             
             
             if (heightValue !== undefined && !isNaN(heightValue) && isFinite(heightValue)) {
@@ -335,7 +329,10 @@ export function updateBrushState(
         // Secondary modifier is pressed - read target height from CPU buffer at brush center using bilinear interpolation
         const brushUV = vec2.fromValues(pos[0], pos[1]);
         const rawHeight = sampleHeightBilinear(brushUV, context.simres, context.HightMapCpuBuf);
-        const heightValue = rawHeight / context.simres; // Normalize height value
+        // Convert from texture space (0-2000.30) to 0-500 range for UI
+        // The shader will convert this back to texture space for comparison
+        const MAX_TEXTURE_HEIGHT = 2000.30;
+        const heightValue = (rawHeight / MAX_TEXTURE_HEIGHT) * 500.0;
         
         if (heightValue !== undefined && !isNaN(heightValue)) {
             // Set the value on the controls object

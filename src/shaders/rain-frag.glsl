@@ -174,9 +174,11 @@ void main() {
                         // Alt+click (brushOperation == 1) should NOT flatten, just set target in JS
                         if (u_BrushOperation == 0) {
                               // Primary button: flatten to target height
-                              float targetHeight = u_FlattenTargetHeight;
+                              // Convert targetHeight from 0-500 range to texture space (0-2000.30) to match currentHeight
+                              float maxTextureHeight = 2000.30;
+                              float targetHeightTextureSpace = u_FlattenTargetHeight * (maxTextureHeight / 500.0);
                               float flattenAmount = dens * u_BrushStrength * 0.2; // Flattening strength
-                              addterrain = (targetHeight - currentHeight) * flattenAmount;
+                              addterrain = (targetHeightTextureSpace - currentHeight) * flattenAmount;
                         }
                         // When Alt is pressed (brushOperation == 1), don't do anything - JS will set target
                   }else if(u_BrushType == 6){
