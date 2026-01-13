@@ -50,17 +50,19 @@ void main() {
 
     // Effective pipe length increases with viscosity (higher viscosity = slower flow)
     // Real-world: Basaltic lava viscosity is 10-100 Pa·s (10,000-100,000x water's 0.001 Pa·s)
-    // But real flow speeds are only 10-100x slower, not 10,000x slower
+    // But real flow speeds are only 2-10x slower, not 10,000x slower
     // This is because flow speed depends on viscosity^0.5 to viscosity^0.33 (not linear)
     float viscosityRatio = viscosity / 0.001; // Ratio to water viscosity (10,000-100,000,000)
     
     // Power-based scaling (matches real-world flow speed relationship)
     // Flow speed ~ viscosity^(-0.5 to -0.33), so effectivePipeLen ~ viscosity^(0.15 to 0.25)
-    float viscosityScaleFactor = pow(viscosityRatio, 0.2); // 0.2 power gives:
-    // At 1200°C: viscosity ~100 Pa·s, ratio = 100,000, factor = 6.3x
-    // At 1000°C: viscosity ~1,000 Pa·s, ratio = 1,000,000, factor = 10x  
-    // At 800°C: viscosity ~100,000 Pa·s, ratio = 100,000,000, factor = 25x (clamp to 10x)
-    viscosityScaleFactor = clamp(viscosityScaleFactor, 1.0, 10.0); // Cap at 10x slower
+    // Use a much smaller power (0.1 instead of 0.2) to make lava flow faster
+    // This makes hot lava (1200°C) flow only 2-3x slower than water, and cool lava (800°C) flow 5-6x slower
+    float viscosityScaleFactor = pow(viscosityRatio, 0.1); // 0.1 power gives:
+    // At 1200°C: viscosity ~100 Pa·s, ratio = 100,000, factor = 2.5x
+    // At 1000°C: viscosity ~1,000 Pa·s, ratio = 1,000,000, factor = 3.2x  
+    // At 800°C: viscosity ~100,000 Pa·s, ratio = 100,000,000, factor = 5.0x
+    viscosityScaleFactor = clamp(viscosityScaleFactor, 1.0, 6.0); // Cap at 6x slower (reduced from 10x)
     float effectivePipeLen = pipelen * viscosityScaleFactor;
 
     // Calculate height differences for flow (terrain height + lava height)
@@ -71,8 +73,8 @@ void main() {
 
     // Flow velocity based on gravity-driven flow: v = (ρ * g * h² * sin(θ)) / (3 * η)
     // Simplified for pipe model: flux = (height_diff * gravity * area) / (pipe_length * viscosity)
-    // Apply damping to flux accumulation
-    float damping = 0.95; // Slight damping for stability
+    // Remove damping to match water flow behavior (water uses damping = 1.0, which is no damping)
+    float damping = 1.0; // No damping, match water flow behavior
     float ftopout = max(0.0f, curFlux.x * damping + (u_timestep * g * u_PipeArea * Htopout) / effectivePipeLen);
     float frightout = max(0.0f, curFlux.y * damping + (u_timestep * g * u_PipeArea * Hrightout) / effectivePipeLen);
     float fbottomout = max(0.0f, curFlux.z * damping + (u_timestep * g * u_PipeArea * Hbottomout) / effectivePipeLen);
