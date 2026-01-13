@@ -6,13 +6,14 @@
 ## Controls
 
 ### Brush System
-- **Brush Types** (Press number keys 1-6 or use brush palette):
+- **Brush Types** (Press number keys 1-7 or use brush palette):
   - `1` - **Terrain Brush** ⛰️: Modify terrain height (elevate or lower)
   - `2` - **Water Brush** 💧: Add or remove water
   - `3` - **Rock Brush** 🪨: Place erosion-resistant rock material
   - `4` - **Smooth Brush** ✨: Smooth terrain surface
   - `5` - **Flatten Brush** 📐: Flatten terrain to a target height
   - `6` - **Slope Brush** 📉: Create a slope between two points
+  - `7` - **Lava Brush** 🌋: Add or remove lava at high temperature (1200°C)
 
 - **Brush Operations**:
   - **Left Click**: Add mode (elevate terrain, add water, place rock, etc.)
@@ -38,6 +39,13 @@
 - Press `Shift + r` to remove the nearest permanent water source
 - Press `p` to remove all permanent water sources
 - Red circle marks the location of permanent water sources
+- Size and strength match the brush size and strength when placed
+
+### Lava Sources
+- Press `l` to place a permanent lava source at cursor location
+- Press `Shift + l` to remove the nearest permanent lava source
+- Press `p` to remove all permanent sources (both water and lava)
+- Orange/red glow marks the location of permanent lava sources
 - Size and strength match the brush size and strength when placed
 
 ### Camera Controls
@@ -98,6 +106,11 @@
   - **flowMap (7)**: Flow direction map
   - **spikeDiffusion (8)**: Spike diffusion visualization
   - **rockMaterial (10)**: Rock material visualization
+  - **lavaVolume (11)**: Lava volume visualization (red intensity)
+  - **lavaTemperature (12)**: Lava temperature gradient (blue=800°C to red=1200°C)
+  - **lavaTempVolume (13)**: Combined lava temperature and volume
+  - **waterLavaContact (14)**: Water-lava contact zones (magenta=contact, blue=water, red=lava)
+  - **rockLayering (15)**: Rock material with sediment layering (yellow/orange=sediment on rock, gray=rock)
 
 ### Rain Erosion
 - **RainErosion** (toggle): Enables rain-based erosion that drops water randomly across the terrain
@@ -113,6 +126,35 @@
   - **0.0**: Rock erodes at the same rate as normal terrain
   - **1.0**: Rock doesn't erode (maximum resistance)
   - **Default (0.8)**: Rock erodes much slower than soil, creating erosion-resistant features
+
+### Lava Simulation
+- **Physics-Based Lava Flow**: Lava simulation with temperature-dependent viscosity using Arrhenius viscosity law
+- **Flow Speed**: Lava flows 2-10x slower than water (relative to water simulation, not real-world ratios)
+- **Temperature System**: Lava temperature ranges from 800°C (solidification) to 1200°C (initial)
+- **Cooling**: Lava cools in air (~1-2 minutes from 1200°C to 800°C) and much faster in water (10x multiplier)
+- **Water Interaction**: 
+  - Hot lava rapidly cools when in contact with water
+  - Water evaporates when in contact with hot lava (5x evaporation rate)
+  - Water erosion is prevented under hot lava (lava protects terrain)
+- **Thermal Erosion**: Hot lava (above 1200°C) melts terrain, carving channels
+- **Solidification**: Cooled lava (below 800°C) solidifies into rock material, filling channels
+- **Visual Effects**: Lava glows with temperature-based color gradient (orange/yellow/red) and intensity
+
+#### Lava Physics Parameters
+- **LavaViscosityPreExp** (1e-6 to 1e-4): Pre-exponential factor for Arrhenius viscosity law
+- **LavaActivationEnergy** (100000-300000 J/mol): Activation energy for viscosity calculation
+- **LavaDensity** (2000-3000 kg/m³): Lava density (default: 2700 kg/m³)
+- **LavaSpecificHeat** (800-1500 J/(kg·K)): Specific heat capacity (default: 1200 J/(kg·K))
+- **LavaAirHeatTransfer** (10-50 W/(m²·K)): Heat transfer coefficient for air cooling (default: 200 W/(m²·K))
+- **LavaWaterHeatTransfer** (1000-5000 W/(m²·K)): Heat transfer coefficient for water cooling (default: 2000 W/(m²·K))
+- **LavaAmbientTemp** (0-30°C): Ambient air temperature (default: 20°C)
+- **LavaWaterTemp** (0-20°C): Water temperature (default: 10°C)
+- **LavaContactHeatTransfer** (100-500 W/(m²·K)): Heat transfer for terrain melting (default: 200 W/(m²·K))
+- **LavaMeltThreshold** (1000-1400°C): Temperature at which lava melts terrain (default: 1200°C)
+- **LavaLatentHeatFusion** (200000-600000 J/kg): Latent heat of fusion for melting (default: 400000 J/kg)
+- **LavaSolidificationTemp** (700-1000°C): Temperature at which lava solidifies (default: 800°C)
+- **LavaInitialTemp** (1000-1300°C): Initial temperature of new lava (default: 1200°C)
+- **LavaGlowIntensity** (0.5-5.0): Visual glow intensity multiplier (default: 2.0)
 
 ### Terrain Generation
 - **Import Height Map**: Load external PNG height maps

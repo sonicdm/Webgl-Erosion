@@ -47,12 +47,57 @@ location of the sources is fixed, for rain fall, all pixel have to be increment 
 
    - ***Evaporation***:
    a quite straight forward step, water will be evaporated with the increase of simulation time, and the rate of evaporation will gradually slow down as well.
+
+### Lava Simulation
+
+#### Physics-Based Lava Flow System
+
+The lava simulation implements a physics-based flow system with temperature-dependent viscosity, thermal erosion, and solidification. The system uses three main simulation passes:
+
+   - ***Lava Flow Calculation*** : Similar to water flow, but with temperature-dependent viscosity
+     - Uses Arrhenius viscosity law: `η(T) = A * exp(E_a / (R * T))`
+     - Viscosity increases exponentially as temperature decreases
+     - Flow speed is scaled relative to water (2-10x slower, not 100-1000x) for gameplay
+     - Uses same pipe model as water flow but with viscosity-modified effective pipe length
+     - Formula: `flux = (height_diff * gravity * area) / (pipe_length * viscosity_scale_factor)`
+     - Viscosity scaling uses power-based approach: `effectivePipeLen = pipelen * pow(viscosityRatio, 0.2)`
+     - This keeps lava flow speeds in the same ballpark as water (2-10x slower) rather than orders of magnitude slower
+
+   - ***Lava Volume Update*** : Updates lava volume based on flux and applies cooling
+     - Volume update: `deltaVolume = timestep * (inflow - outflow) / (pipeLen²)`
+     - Temperature cooling using Newton's law of cooling: `dT/dt = -(h * A * (T - T_ambient)) / (m * c_p)`
+     - Air cooling: Uses `LavaAirHeatTransfer` coefficient (default: 200 W/(m²·K))
+     - Water cooling: Uses `LavaWaterHeatTransfer` coefficient (default: 2000 W/(m²·K)) with 10x multiplier
+     - Surface area calculation accounts for thin flows (up to 5x multiplier for very thin flows)
+     - Water contact detection checks current pixel and neighbors for water presence
+     - Temperature clamped to 800-1200°C range
+
+   - ***Lava-Terrain Interaction*** : Handles melting, water evaporation, and solidification
+     - **Melting (Thermal Erosion)**: Hot lava (above 1200°C) melts terrain
+       - Heat flux: `Q = h_contact * A * (T_lava - T_melt)`
+       - Melting rate: `dm/dt = Q / L_f` where L_f is latent heat of fusion
+       - Reduces terrain height, carving channels
+     - **Water Evaporation**: Hot lava evaporates water when in contact
+       - Calculates heat transfer from lava to water
+       - Energy first heats water to boiling point, then vaporizes it
+       - Uses latent heat of vaporization (2,260,000 J/kg)
+       - Evaporation rate multiplied by 5x for visible effect
+       - Reduces water volume in terrain
+     - **Solidification**: Cooled lava (below 800°C) solidifies into rock
+       - Temperature-dependent solidification rate (cooler = faster)
+       - Base rate: 0.3 (6x faster than original 0.05)
+       - Converts solidified lava to rock material (scale factor 1.0)
+       - Raises terrain height to fill channels carved by hot lava
+       - Rock material value set to 0.5-1.0 for visible rock
+       - Removes solidified volume from liquid lava
       
 -  **Simulation structure** entire simulation is achieved using a series of ping pong texture pairs each mapping to a spedific stage in the simulation process ，following are the texture pairs I used :
    - ![](img/fs.JPG) 
    - ```read_terrain_tex``` and ```write_terrain_tex``` : including terrain water information, corresponding to d and b in above graph : 
      -  **R** chanel : terrain height
      -  **G** chanel : water height
+     -  **B** chanel : rock material (0.0 to 1.0, where 1.0 = fully rock)
+     -  **A** chanel : base rock surface height (height of rock before sediment deposition)
    - ```read_flux_tex``` and ```write_flux_tex``` : flux information in each cell, correspond to right half of above graph:
      -  **R** chanel : flux toward up direction in current cell (fT)
      -  **G** chanel : flux toward right direction in current cell (fR)
@@ -62,6 +107,14 @@ location of the sources is fixed, for rain fall, all pixel have to be increment 
    - ```read_sediment_tex``` and ```write_sediment_tex``` : sediment map, record the transporation and deposition of sediments, only one chanel is occupied for now
    - ```read_max_slippage_tex``` and ```write_max_slippage_tex``` : slippage height limit map, store max allowed slippage for height map change
    - ```read_terrain_flux_tex``` and ```write_terrain_flux_tex``` : slippage material flux map
+   - ```read_lava_tex``` and ```write_lava_tex``` : lava information map:
+     -  **R** chanel : lava volume
+     -  **G** chanel : lava temperature (normalized 800-1200°C range)
+   - ```read_lava_flux_tex``` and ```write_lava_flux_tex``` : lava flux information in each cell, similar to water flux:
+     -  **R** chanel : flux toward up direction (fT)
+     -  **G** chanel : flux toward right direction (fR)
+     -  **B** chanel : flux toward bottom direction (fB)
+     -  **A** chanel : flux toward left direction (fL)
 
 -  **Implementation** using the above textures, I put all of the major computation in shader to be excuted by GPU, each time the frame buffer will have specific color attachment for writing texture, and also shader will have uniform locations as read texture, after each time I write to a texture, I will swap the two textures inside the pair the written texture belongs to, in general, the texture flow are :  
    - Increament water level : ```hight map -----> hight map```
@@ -73,6 +126,9 @@ location of the sources is fixed, for rain fall, all pixel have to be increment 
    - slippage/terrain flux computation step : ```terrain map + max slippage map -----> terrain/slippage flux map```
    - thermal appy step : ```terrain/slippage flux map -----> terrain map```
    - Water evaporation step : ```terrain map -----> terrain map```
+   - Lava flow computation step : ```terrain map + lava map -----> lava flux map```
+   - Lava volume update step : ```lava map + lava flux map -----> lava map``` (with temperature cooling)
+   - Lava-terrain interaction step : ```terrain map + lava map -----> terrain map + lava map``` (melting, water evaporation, solidification)
   
 #### a comparision of bilateral blurred passes applied and bilateral blurred passes not applied (the setup I used : bayer 4x4 dither, 5 ray marching steps pps , 6 times hrizontal vertical bilateral blurring based on scene depth with gaussian kernel size being 14)
 
