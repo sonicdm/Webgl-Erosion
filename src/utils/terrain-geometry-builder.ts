@@ -10,12 +10,14 @@ import { sampleHeightBilinear } from './raycast';
  * @param simres - Simulation resolution (heightmap size)
  * @param heightMapBuffer - CPU buffer containing height data (Float32Array)
  * @param scale - Scale factor for terrain (default: 1.0)
+ * @param onProgress - Optional callback to report progress (0.0 to 1.0) during geometry creation
  * @returns Three.js BufferGeometry ready for BVH building
  */
 export function createTerrainGeometry(
     simres: number,
     heightMapBuffer: Float32Array,
-    scale: number = 1.0
+    scale: number = 1.0,
+    onProgress?: (progress: number) => void
 ): BufferGeometry {
     const geometry = new BufferGeometry();
     
@@ -34,6 +36,11 @@ export function createTerrainGeometry(
     // Use bilinear interpolation to match shader texture sampling and heightmap raycast
     let posIdx = 0;
     const uv = vec2.create();
+    const totalVertices = width * height;
+    let processedVertices = 0;
+    // Update more frequently for smoother progress (every ~2%)
+    const progressUpdateInterval = Math.max(1, Math.floor(totalVertices / 50));
+    
     for (let z = 0; z < height; z++) {
         for (let x = 0; x < width; x++) {
             // Calculate UV coordinates in [0, 1] range
@@ -66,10 +73,22 @@ export function createTerrainGeometry(
             const uvIdx = (z * width + x) * 2;
             uvs[uvIdx] = u;
             uvs[uvIdx + 1] = v;
+            
+            // Report progress during vertex generation (0.0 to 0.7 of geometry phase)
+            processedVertices++;
+            if (onProgress && processedVertices % progressUpdateInterval === 0) {
+                const vertexProgress = processedVertices / totalVertices;
+                onProgress(vertexProgress * 0.7); // Vertices are 70% of geometry creation
+            }
         }
     }
     
     // Generate indices for triangles (two triangles per quad)
+    const totalQuads = (width - 1) * (height - 1);
+    let processedQuads = 0;
+    // Update more frequently for smoother progress (every ~5%)
+    const quadProgressUpdateInterval = Math.max(1, Math.floor(totalQuads / 20));
+    
     for (let z = 0; z < height - 1; z++) {
         for (let x = 0; x < width - 1; x++) {
             const topLeft = z * width + x;
@@ -82,7 +101,19 @@ export function createTerrainGeometry(
             
             // Second triangle: topRight, bottomLeft, bottomRight
             indices.push(topRight, bottomLeft, bottomRight);
+            
+            // Report progress during index generation (0.7 to 1.0 of geometry phase)
+            processedQuads++;
+            if (onProgress && processedQuads % quadProgressUpdateInterval === 0) {
+                const quadProgress = processedQuads / totalQuads;
+                onProgress(0.7 + (quadProgress * 0.3)); // Indices are 30% of geometry creation
+            }
         }
+    }
+    
+    // Report completion
+    if (onProgress) {
+        onProgress(1.0);
     }
     
     // Set geometry attributes

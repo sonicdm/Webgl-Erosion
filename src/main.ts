@@ -17,6 +17,7 @@ import { createEventHandlers } from './events/event-handlers';
 import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
 import { updatePaletteSelection } from './brush-palette';
 import { MAX_WATER_SOURCES, waterSources, getWaterSourceCount } from './utils/water-sources';
+import { MAX_LAVA_SOURCES, lavaSources, getLavaSourceCount } from './utils/lava-sources';
 import { rayCast } from './utils/raycast';
 import { rayCastBVH } from './utils/bvh-raycast';
 import { createTerrainGeometry, updateTerrainGeometry } from './utils/terrain-geometry-builder';
@@ -47,11 +48,12 @@ import {
     read_vel_tex, write_vel_tex, read_sediment_tex, write_sediment_tex,
     terrain_nor, read_sediment_blend, write_sediment_blend,
     sediment_advect_a, sediment_advect_b,
+    read_lava_tex, write_lava_tex, read_lava_flux_tex, write_lava_flux_tex,
     setupFramebufferandtextures, resizeTextures4Simulation, resizeScreenTextures,
     setHeightMapTexture, getHeightMapTexture,
     swapTerrainTextures, swapFluxTextures, swapVelTextures, swapSedimentTextures,
     swapSedimentBlendTextures, swapMaxSlippageTextures, swapTerrainFluxTextures,
-    swapBilateralFilterTextures
+    swapBilateralFilterTextures, swapLavaTextures, swapLavaFluxTextures
 } from './simulation/texture-management';
 import { Render2Texture } from './rendering/render-utils';
 import { createShaders, Shaders } from './rendering/shader-factory';
@@ -184,6 +186,22 @@ const controls = {
     AdvectionMethod : 1,
     VelocityAdvectionMag : 0.2,
     SimulationResolution : simres,
+    // Lava physics parameters
+    LavaViscosityPreExp : 1e-5,
+    LavaActivationEnergy : 200000.0,
+    LavaDensity : 2700.0,
+    LavaSpecificHeat : 1200.0,
+    LavaAirHeatTransfer : 30.0,
+    LavaWaterHeatTransfer : 2000.0,
+    LavaAmbientTemp : 20.0,
+    LavaWaterTemp : 10.0,
+    LavaContactHeatTransfer : 200.0,
+    LavaMeltThreshold : 1200.0,
+    LavaLatentHeatFusion : 400000.0,
+    LavaSolidificationTemp : 800.0,
+    LavaInitialTemp : 1200.0,
+    LavaGlowIntensity : 2.0,
+    LavaSourceCount : 0, // Number of active lava sources
     'Reset Erosion Parameters': () => {
         // Reset all erosion parameters to defaults
         controls.Kc = 0.06;
@@ -297,7 +315,18 @@ function SimulatePerStep(renderer:OpenGLRenderer,
                          ave:ShaderProgram,
                          thermalterrainflux:ShaderProgram,
                          thermalapply:ShaderProgram,
-                         maxslippageheight:ShaderProgram) {
+                         maxslippageheight:ShaderProgram,
+                         lavaFlow:ShaderProgram,
+                         lavaUpdate:ShaderProgram,
+                         lavaTerrain:ShaderProgram,
+                         lavaSourcePositions:Float32Array,
+                         lavaSourceSizes:Float32Array,
+                         lavaSourceStrengths:Float32Array,
+                         lavaSourceCount:number,
+                         controls:any,
+                         reusableMousePoint:vec4,
+                         reusableDir:vec3,
+                         reusablePos:vec2) {
 
 
     //////////////////////////////////////////////////////////////////
@@ -956,6 +985,191 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     //---------------swap terrain mao----------------------------
 
     //////////////////////////////////////////////////////////////////
+    // Lava Flow Calculation
+    // 7.1---use terrain map and lava map to derive lava flux map :
+    // terrain map + lava map -----> lava flux map
+    //////////////////////////////////////////////////////////////////
+
+    // Unbind all textures first to avoid feedback loops
+    gl_context.activeTexture(gl_context.TEXTURE0);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,null);
+    gl_context.activeTexture(gl_context.TEXTURE1);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,null);
+    gl_context.activeTexture(gl_context.TEXTURE2);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,null);
+    gl_context.activeTexture(gl_context.TEXTURE3);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,null);
+
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,frame_buffer);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT0,gl_context.TEXTURE_2D,write_lava_flux_tex,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT1,gl_context.TEXTURE_2D,null,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT2,gl_context.TEXTURE_2D,null,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT3,gl_context.TEXTURE_2D,null,0);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER,gl_context.DEPTH_ATTACHMENT,gl_context.RENDERBUFFER,render_buffer);
+    gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
+
+    gl_context.bindTexture(gl_context.TEXTURE_2D,null);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
+    gl_context.bindRenderbuffer(gl_context.RENDERBUFFER,null);
+
+    gl_context.viewport(0,0,simres,simres);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,frame_buffer);
+
+    renderer.clear();
+    lavaFlow.use();
+
+    gl_context.activeTexture(gl_context.TEXTURE0);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lavaFlow.prog,"readTerrain"),0);
+
+    gl_context.activeTexture(gl_context.TEXTURE1);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_lava_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lavaFlow.prog,"readLava"),1);
+
+    gl_context.activeTexture(gl_context.TEXTURE2);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_lava_flux_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lavaFlow.prog,"readLavaFlux"),2);
+
+    lavaFlow.setSimres(simres);
+    lavaFlow.setPipeLen(controls.pipelen);
+    lavaFlow.setTimestep(controls.timestep);
+    lavaFlow.setPipeArea(controls.pipeAra);
+    // Physics constants from controls
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaViscosityPreExp"), controls.LavaViscosityPreExp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaActivationEnergy"), controls.LavaActivationEnergy);
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaDensity"), controls.LavaDensity);
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaGasConstant"), 8.314); // Gas constant R = 8.314 J/(mol·K)
+
+    renderer.render(camera,lavaFlow,[square]);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
+
+    //-----swap lava flux ping and pong
+    swapLavaFluxTextures();
+    //-----swap lava flux ping and pong
+
+    //////////////////////////////////////////////////////////////////
+    // Lava Volume Update
+    // 7.2---use lava flux map and lava map to derive new lava map :
+    // lava map + lava flux map -----> lava map (with temperature updates)
+    //////////////////////////////////////////////////////////////////
+
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,frame_buffer);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT0,gl_context.TEXTURE_2D,write_lava_tex,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT1,gl_context.TEXTURE_2D,null,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT2,gl_context.TEXTURE_2D,null,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT3,gl_context.TEXTURE_2D,null,0);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER,gl_context.DEPTH_ATTACHMENT,gl_context.RENDERBUFFER,render_buffer);
+    gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
+
+    gl_context.bindTexture(gl_context.TEXTURE_2D,null);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
+    gl_context.bindRenderbuffer(gl_context.RENDERBUFFER,null);
+
+    gl_context.viewport(0,0,simres,simres);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,frame_buffer);
+
+    renderer.clear();
+    lavaUpdate.use();
+
+    gl_context.activeTexture(gl_context.TEXTURE0);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lavaUpdate.prog,"readTerrain"),0);
+
+    gl_context.activeTexture(gl_context.TEXTURE1);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_lava_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lavaUpdate.prog,"readLava"),1);
+
+    gl_context.activeTexture(gl_context.TEXTURE2);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_lava_flux_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lavaUpdate.prog,"readLavaFlux"),2);
+
+    lavaUpdate.setSimres(simres);
+    lavaUpdate.setPipeLen(controls.pipelen);
+    lavaUpdate.setTimestep(controls.timestep);
+    lavaUpdate.setPipeArea(controls.pipeAra);
+    // Heat transfer constants from controls
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaAirHeatTransfer"), controls.LavaAirHeatTransfer);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaWaterHeatTransfer"), controls.LavaWaterHeatTransfer);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaAmbientTemp"), controls.LavaAmbientTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaWaterTemp"), controls.LavaWaterTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaDensity"), controls.LavaDensity);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaSpecificHeat"), controls.LavaSpecificHeat);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaInitialTemp"), controls.LavaInitialTemp);
+    gl_context.uniform1i(getCachedUniformLocation(lavaUpdate.prog,"u_LavaSourceCount"), lavaSourceCount);
+    
+    // Lava brush uniforms - MUST be set here while shader is active
+    lavaUpdate.setMouseWorldPos(reusableMousePoint);
+    lavaUpdate.setMouseWorldDir(reusableDir);
+    lavaUpdate.setBrushSize(controls.brushSize);
+    lavaUpdate.setBrushStrength(controls.brushStrenth);
+    lavaUpdate.setBrushType(controls.brushType);
+    lavaUpdate.setBrushPressed(controls.brushPressed);
+    lavaUpdate.setBrushPos(reusablePos);
+    lavaUpdate.setBrushOperation(controls.brushOperation);
+    // Note: Lava source arrays are populated in tick() function and passed here via uniforms set in tick()
+
+    renderer.render(camera,lavaUpdate,[square]);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
+
+    //-----swap lava ping and pong
+    swapLavaTextures();
+    //-----swap lava ping and pong
+
+    //////////////////////////////////////////////////////////////////
+    // Lava-Terrain Interaction (Melting and Solidification)
+    // 7.3---use lava map and terrain map to derive new terrain map :
+    // terrain map + lava map -----> terrain map (with melting and solidification)
+    // Also updates lava map (removes solidified parts)
+    //////////////////////////////////////////////////////////////////
+
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,frame_buffer);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT0,gl_context.TEXTURE_2D,write_terrain_tex,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT1,gl_context.TEXTURE_2D,write_lava_tex,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT2,gl_context.TEXTURE_2D,null,0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER,gl_context.COLOR_ATTACHMENT3,gl_context.TEXTURE_2D,null,0);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER,gl_context.DEPTH_ATTACHMENT,gl_context.RENDERBUFFER,render_buffer);
+    gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1]);
+
+    gl_context.bindTexture(gl_context.TEXTURE_2D,null);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
+    gl_context.bindRenderbuffer(gl_context.RENDERBUFFER,null);
+
+    gl_context.viewport(0,0,simres,simres);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,frame_buffer);
+
+    renderer.clear();
+    lavaTerrain.use();
+
+    gl_context.activeTexture(gl_context.TEXTURE0);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_terrain_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lavaTerrain.prog,"readTerrain"),0);
+
+    gl_context.activeTexture(gl_context.TEXTURE1);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_lava_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lavaTerrain.prog,"readLava"),1);
+
+    lavaTerrain.setSimres(simres);
+    lavaTerrain.setTimestep(controls.timestep);
+    // Thermal erosion and solidification constants from controls
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaContactHeatTransfer"), controls.LavaContactHeatTransfer);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaMeltThreshold"), controls.LavaMeltThreshold);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaLatentHeatFusion"), controls.LavaLatentHeatFusion);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaSolidificationTemp"), controls.LavaSolidificationTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaDensity"), controls.LavaDensity);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaWaterTemp"), controls.LavaWaterTemp);
+
+    renderer.render(camera,lavaTerrain,[square]);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
+
+    //-----swap terrain ping and pong
+    swapTerrainTextures();
+    //-----swap terrain ping and pong
+    
+    //-----swap lava ping and pong (updated lava with solidified parts removed)
+    swapLavaTextures();
+    //-----swap lava ping and pong
+
+    //////////////////////////////////////////////////////////////////
     // final average step : average terrain to avoid extremly sharp ridges or ravines
     // 6---use terrain map to derive new terrain map :
     //  terrain map -----> terrain map
@@ -1015,12 +1229,24 @@ function SimulationStep(curstep:number,
                         thermalterrainflux:ShaderProgram,
                         thermalapply:ShaderProgram,
                         maxslippageheight : ShaderProgram,
+                        lavaFlow:ShaderProgram,
+                        lavaUpdate:ShaderProgram,
+                        lavaTerrain:ShaderProgram,
+                        lavaSourcePositions:Float32Array,
+                        lavaSourceSizes:Float32Array,
+                        lavaSourceStrengths:Float32Array,
+                        lavaSourceCount:number,
+                        controls:any,
                         renderer:OpenGLRenderer,
-                        gl_context:WebGL2RenderingContext,camera:Camera){
+                        gl_context:WebGL2RenderingContext,
+                        camera:Camera,
+                        reusableMousePoint:vec4,
+                        reusableDir:vec3,
+                        reusablePos:vec2){
     if(PauseGeneration) return true;
     else{
         SimulatePerStep(renderer,
-            gl_context,camera,flow,waterhight,veladvect,sediment,advect, macCormack,rains,evapo,average,thermalterrainflux,thermalapply, maxslippageheight);
+            gl_context,camera,flow,waterhight,veladvect,sediment,advect, macCormack,rains,evapo,average,thermalterrainflux,thermalapply, maxslippageheight, lavaFlow, lavaUpdate, lavaTerrain, lavaSourcePositions, lavaSourceSizes, lavaSourceStrengths, lavaSourceCount, controls, reusableMousePoint, reusableDir, reusablePos);
     }
     return false;
 }
@@ -1267,7 +1493,7 @@ function main() {
         lambert, flat, flow, waterhight, sediment, sediadvect, macCormack,
         rains, evaporation, average, clean, water, thermalterrainflux,
         thermalapply, maxslippageheight, shadowMapShader, sceneDepthShader,
-        combinedShader, bilateralBlur, veladvect
+        combinedShader, bilateralBlur, veladvect, lavaFlow, lavaUpdate, lavaTerrain
     } = shaders;
     noiseterrain = shaders.noiseterrain;
     setTerrainRandom();
@@ -1292,6 +1518,10 @@ function main() {
         Render2Texture(renderer, gl_context, camera, clean, write_sediment_blend, square, noiseterrain);
         Render2Texture(renderer, gl_context, camera, clean, sediment_advect_a, square, noiseterrain);
         Render2Texture(renderer, gl_context, camera, clean, sediment_advect_b, square, noiseterrain);
+        Render2Texture(renderer, gl_context, camera, clean, read_lava_tex, square, noiseterrain);
+        Render2Texture(renderer, gl_context, camera, clean, write_lava_tex, square, noiseterrain);
+        Render2Texture(renderer, gl_context, camera, clean, read_lava_flux_tex, square, noiseterrain);
+        Render2Texture(renderer, gl_context, camera, clean, write_lava_flux_tex, square, noiseterrain);
     }
 
     // rayCast is now imported from utils/raycast.ts
@@ -1313,6 +1543,10 @@ function main() {
   const reusableSourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
   const reusableSourceSizes = new Float32Array(MAX_WATER_SOURCES);
   const reusableSourceStrengths = new Float32Array(MAX_WATER_SOURCES);
+  
+  const reusableLavaSourcePositions = new Float32Array(MAX_LAVA_SOURCES * 2);
+  const reusableLavaSourceSizes = new Float32Array(MAX_LAVA_SOURCES);
+  const reusableLavaSourceStrengths = new Float32Array(MAX_LAVA_SOURCES);
 
   // Track brush state transitions for heightmap readback
   let lastBrushPressed = 0;
@@ -1805,11 +2039,33 @@ function main() {
     lambert.setSourceCount(getWaterSourceCount());
     lambert.setSourcePositions(reusableSourcePositions);
     lambert.setSourceSizes(reusableSourceSizes);
+    
+    // Populate lava source arrays for terrain shader visualization
+    for (let i = 0; i < MAX_LAVA_SOURCES; i++) {
+        if (i < lavaSources.length) {
+            reusableLavaSourcePositions[i * 2] = lavaSources[i].position[0];
+            reusableLavaSourcePositions[i * 2 + 1] = lavaSources[i].position[1];
+            reusableLavaSourceSizes[i] = lavaSources[i].size;
+        } else {
+            reusableLavaSourcePositions[i * 2] = 0.0;
+            reusableLavaSourcePositions[i * 2 + 1] = 0.0;
+            reusableLavaSourceSizes[i] = 0.0;
+        }
+    }
+    
+    // Set lava source arrays for terrain shader (visualization)
+    gl_context.uniform1i(getCachedUniformLocation(lambert.prog,"u_LavaSourceCount"), getLavaSourceCount());
+    gl_context.uniform2fv(getCachedUniformLocation(lambert.prog,"u_LavaSourcePositions"), reusableLavaSourcePositions);
+    gl_context.uniform1fv(getCachedUniformLocation(lambert.prog,"u_LavaSourceSizes"), reusableLavaSourceSizes);
+    
+    // Note: Lava source arrays for lava update shader are set in SimulatePerStep function
+    // They need to be set there because that's where the shader is used
+    
     reusableLightPos[0] = controls.lightPosX;
     reusableLightPos[1] = controls.lightPosY;
     reusableLightPos[2] = controls.lightPosZ;
     gl_context.uniform3fv(getCachedUniformLocation(lambert.prog,"unif_LightPos"), reusableLightPos);
-
+    
     sceneDepthShader.setSimres(simres);
 
     rains.setMouseWorldPos(reusableMousePoint);
@@ -1855,6 +2111,50 @@ function main() {
     flow.setSimres(simres);
     flow.setTimestep(controls.timestep);
     flow.setPipeArea(controls.pipeAra);
+
+    // Lava shader uniforms
+    lavaFlow.setSimres(simres);
+    lavaFlow.setPipeLen(controls.pipelen);
+    lavaFlow.setTimestep(controls.timestep);
+    lavaFlow.setPipeArea(controls.pipeAra);
+    // Physics constants from controls
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaViscosityPreExp"), controls.LavaViscosityPreExp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaActivationEnergy"), controls.LavaActivationEnergy);
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaDensity"), controls.LavaDensity);
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaGasConstant"), 8.314); // Gas constant R = 8.314 J/(mol·K)
+
+    lavaUpdate.setSimres(simres);
+    lavaUpdate.setPipeLen(controls.pipelen);
+    lavaUpdate.setTimestep(controls.timestep);
+    lavaUpdate.setPipeArea(controls.pipeAra);
+    // Heat transfer constants from controls
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaAirHeatTransfer"), controls.LavaAirHeatTransfer);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaWaterHeatTransfer"), controls.LavaWaterHeatTransfer);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaAmbientTemp"), controls.LavaAmbientTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaWaterTemp"), controls.LavaWaterTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaDensity"), controls.LavaDensity);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaSpecificHeat"), controls.LavaSpecificHeat);
+    gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaInitialTemp"), controls.LavaInitialTemp);
+    
+    // Lava brush uniforms
+    lavaUpdate.setMouseWorldPos(reusableMousePoint);
+    lavaUpdate.setMouseWorldDir(reusableDir);
+    lavaUpdate.setBrushSize(controls.brushSize);
+    lavaUpdate.setBrushStrength(controls.brushStrenth);
+    lavaUpdate.setBrushType(controls.brushType);
+    lavaUpdate.setBrushPressed(controls.brushPressed);
+    lavaUpdate.setBrushPos(reusablePos);
+    lavaUpdate.setBrushOperation(controls.brushOperation);
+
+    lavaTerrain.setSimres(simres);
+    lavaTerrain.setTimestep(controls.timestep);
+    // Thermal erosion and solidification constants from controls
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaContactHeatTransfer"), controls.LavaContactHeatTransfer);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaMeltThreshold"), controls.LavaMeltThreshold);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaLatentHeatFusion"), controls.LavaLatentHeatFusion);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaSolidificationTemp"), controls.LavaSolidificationTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaDensity"), controls.LavaDensity);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaWaterTemp"), controls.LavaWaterTemp);
 
     waterhight.setPipeLen(controls.pipelen);
     waterhight.setSimres(simres);
@@ -1937,7 +2237,7 @@ function main() {
       //==========================  we begin simulation from now ===========================================
 
     for(let i = 0;i<controls.SimulationSpeed;i++) {
-        SimulationStep(SimFramecnt, flow, waterhight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, renderer, gl_context, camera);
+        SimulationStep(SimFramecnt, flow, waterhight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, lavaFlow, lavaUpdate, lavaTerrain, reusableLavaSourcePositions, reusableLavaSourceSizes, reusableLavaSourceStrengths, getLavaSourceCount(), controls, renderer, gl_context, camera, reusableMousePoint, reusableDir, reusablePos);
         incrementSimFramecnt();
     }
     
@@ -2255,6 +2555,12 @@ function main() {
     gl_context.activeTexture(gl_context.TEXTURE9);
     gl_context.bindTexture(gl_context.TEXTURE_2D, scene_depth_tex);
     gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "sceneDepth"), 9);
+
+    // Lava rendering texture - use TEXTURE10 to avoid conflict with shadowMap (TEXTURE8)
+    gl_context.activeTexture(gl_context.TEXTURE0 + 10);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_tex);
+    gl_context.uniform1i(getCachedUniformLocation(lambert.prog,"lavamap"), 10);
+    gl_context.uniform1f(getCachedUniformLocation(lambert.prog,"u_LavaGlowIntensity"), controls.LavaGlowIntensity);
 
     gl_context.uniformMatrix4fv(getCachedUniformLocation(lambert.prog,'u_sproj'),false,reusableLightProjMat);
     gl_context.uniformMatrix4fv(getCachedUniformLocation(lambert.prog,'u_sview'),false,reusableLightViewMat);

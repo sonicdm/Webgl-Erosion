@@ -105,6 +105,24 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     thermalerosionpara.add(controls, 'thermalTalusAngleScale', 1.0, 10.0);
     thermalerosionpara.add(controls, 'thermalErosionScale', 0.0, 5.0);
     
+    // Lava Physics Parameters
+    var lavapara = gui.addFolder("Lava Physics Parameters");
+    lavapara.add(controls, 'LavaViscosityPreExp', 1e-6, 1e-4);
+    lavapara.add(controls, 'LavaActivationEnergy', 100000.0, 300000.0);
+    lavapara.add(controls, 'LavaDensity', 2000.0, 3000.0);
+    lavapara.add(controls, 'LavaSpecificHeat', 800.0, 1500.0);
+    lavapara.add(controls, 'LavaAirHeatTransfer', 10.0, 50.0);
+    lavapara.add(controls, 'LavaWaterHeatTransfer', 1000.0, 5000.0);
+    lavapara.add(controls, 'LavaAmbientTemp', 0.0, 30.0);
+    lavapara.add(controls, 'LavaWaterTemp', 0.0, 20.0);
+    lavapara.add(controls, 'LavaContactHeatTransfer', 100.0, 500.0);
+    lavapara.add(controls, 'LavaMeltThreshold', 1000.0, 1400.0);
+    lavapara.add(controls, 'LavaLatentHeatFusion', 200000.0, 600000.0);
+    lavapara.add(controls, 'LavaSolidificationTemp', 700.0, 1000.0);
+    lavapara.add(controls, 'LavaInitialTemp', 1000.0, 1300.0);
+    lavapara.add(controls, 'LavaGlowIntensity', 0.5, 5.0);
+    lavapara.close();
+    
     // Terrain Editor
     var terraineditor = gui.addFolder('Terrain Editor');
     terraineditor.add(controls, 'raycastMethod', { Heightmap: 'heightmap', BVH: 'bvh' }).onChange((value: string) => {
@@ -114,7 +132,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         config.raycast.method = value as 'heightmap' | 'bvh';
         saveSettings(config);
     });
-    const brushTypeController = terraineditor.add(controls, 'brushType', { NoBrush: 0, TerrainBrush: 1, WaterBrush: 2, RockBrush: 3, SmoothBrush: 4, FlattenBrush: 5, SlopeBrush: 6 });
+    const brushTypeController = terraineditor.add(controls, 'brushType', { NoBrush: 0, TerrainBrush: 1, WaterBrush: 2, RockBrush: 3, SmoothBrush: 4, FlattenBrush: 5, SlopeBrush: 6, LavaBrush: 7 });
     brushTypeController.onChange((value: number) => {
         // Reset slope state when switching brush types
         if (value !== 6) {

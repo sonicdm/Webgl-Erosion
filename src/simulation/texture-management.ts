@@ -45,6 +45,12 @@ export let write_sediment_blend: WebGLTexture;
 export let sediment_advect_a: WebGLTexture;
 export let sediment_advect_b: WebGLTexture;
 
+// Lava simulation textures
+export let read_lava_tex: WebGLTexture;
+export let write_lava_tex: WebGLTexture;
+export let read_lava_flux_tex: WebGLTexture;
+export let write_lava_flux_tex: WebGLTexture;
+
 // Height map texture for importing external height maps
 export let heightmap_tex: WebGLTexture | null = null;
 
@@ -103,6 +109,10 @@ export function resizeTextures4Simulation(context: WebGL2RenderingContext, simre
     LE_recreate_texture(simres, simres, simulationTextureSampler, write_sediment_blend);
     LE_recreate_texture(simres, simres, simulationTextureSampler, sediment_advect_a);
     LE_recreate_texture(simres, simres, simulationTextureSampler, sediment_advect_b);
+    LE_recreate_texture(simres, simres, simulationTextureSampler, read_lava_tex);
+    LE_recreate_texture(simres, simres, simulationTextureSampler, write_lava_tex);
+    LE_recreate_texture(simres, simres, simulationTextureSampler, read_lava_flux_tex);
+    LE_recreate_texture(simres, simres, simulationTextureSampler, write_lava_flux_tex);
 
     // recreate all framebuffer/renderbuffer related to simulation
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, render_buffer);
@@ -146,6 +156,11 @@ export function setupFramebufferandtextures(context: WebGL2RenderingContext, sim
 
     sediment_advect_a = LE_create_texture(simres, simres, simulationTextureSampler);
     sediment_advect_b = LE_create_texture(simres, simres, simulationTextureSampler);
+
+    read_lava_tex = LE_create_texture(simres, simres, simulationTextureSampler);
+    write_lava_tex = LE_create_texture(simres, simres, simulationTextureSampler);
+    read_lava_flux_tex = LE_create_texture(simres, simres, simulationTextureSampler);
+    write_lava_flux_tex = LE_create_texture(simres, simres, simulationTextureSampler);
 
     shadowMap_tex = LE_create_screen_texture(shadowMapResolution, shadowMapResolution, gl_context.LINEAR);
     scene_depth_tex = LE_create_screen_texture(window.innerWidth, window.innerHeight, gl_context.LINEAR);
@@ -287,5 +302,17 @@ export function swapBilateralFilterTextures(): void {
     const tmp = bilateral_filter_horizontal_tex;
     bilateral_filter_horizontal_tex = bilateral_filter_vertical_tex;
     bilateral_filter_vertical_tex = tmp;
+}
+
+export function swapLavaTextures(): void {
+    const tmp = read_lava_tex;
+    read_lava_tex = write_lava_tex;
+    write_lava_tex = tmp;
+}
+
+export function swapLavaFluxTextures(): void {
+    const tmp = read_lava_flux_tex;
+    read_lava_flux_tex = write_lava_flux_tex;
+    write_lava_flux_tex = tmp;
 }
 

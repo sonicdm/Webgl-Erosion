@@ -21,6 +21,20 @@ import {
     clearAllWaterSources,
     getWaterSourceCount
 } from '../utils/water-sources';
+import {
+    MAX_LAVA_SOURCES,
+    addLavaSource,
+    removeNearestLavaSource,
+    clearAllLavaSources,
+    getLavaSourceCount
+} from '../utils/lava-sources';
+import {
+    MAX_LAVA_SOURCES,
+    addLavaSource,
+    removeNearestLavaSource,
+    clearAllLavaSources,
+    getLavaSourceCount
+} from '../utils/lava-sources';
 import { simres, HightMapCpuBuf } from '../simulation/simulation-state';
 import Camera from '../Camera';
 
@@ -129,10 +143,28 @@ export function createEventHandlers(
         }
         
         if (action === 'removePermanentSource') {
-            // Remove all sources
+            // Remove all sources (both water and lava)
             clearAllWaterSources();
+            clearAllLavaSources();
             controls.sourceCount = 0;
-            console.log('Removed all water sources');
+            console.log('Removed all water and lava sources');
+        }
+
+        if (action === 'permanentLavaSource') {
+            // Check if Shift is held for removal
+            if (event.shiftKey) {
+                // Remove nearest source to cursor
+                if (removeNearestLavaSource(controls.posTemp)) {
+                    console.log(`Removed lava source. Remaining: ${getLavaSourceCount()}`);
+                }
+            } else {
+                // Add new source at cursor position
+                if (addLavaSource(controls.posTemp, controls.brushSize, controls.brushStrenth)) {
+                    console.log(`Added lava source at (${controls.posTemp[0].toFixed(3)}, ${controls.posTemp[1].toFixed(3)}). Total: ${getLavaSourceCount()}`);
+                } else {
+                    console.log(`Maximum ${MAX_LAVA_SOURCES} lava sources reached`);
+                }
+            }
         }
     }
 

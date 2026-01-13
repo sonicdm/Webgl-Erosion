@@ -27,6 +27,9 @@ import sceneDepthFrag from '../shaders/sceneDepth-frag.glsl?raw';
 import combineFrag from '../shaders/combine-frag.glsl?raw';
 import bilateralBlurFrag from '../shaders/bilateralBlur-frag.glsl?raw';
 import veladvectFrag from '../shaders/veladvect-frag.glsl?raw';
+import lavaFlowFrag from '../shaders/lava-flow-frag.glsl?raw';
+import lavaUpdateFrag from '../shaders/lava-update-frag.glsl?raw';
+import lavaTerrainFrag from '../shaders/lava-terrain-frag.glsl?raw';
 
 export interface Shaders {
     lambert: ShaderProgram;
@@ -50,6 +53,9 @@ export interface Shaders {
     combinedShader: ShaderProgram;
     bilateralBlur: ShaderProgram;
     veladvect: ShaderProgram;
+    lavaFlow: ShaderProgram;
+    lavaUpdate: ShaderProgram;
+    lavaTerrain: ShaderProgram;
 }
 
 export function createShaders(gl_context: any): Shaders {
@@ -158,6 +164,21 @@ export function createShaders(gl_context: any): Shaders {
         new Shader(gl_context.FRAGMENT_SHADER, veladvectFrag),
     ]);
 
+    const lavaFlow = new ShaderProgram([
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, lavaFlowFrag),
+    ]);
+
+    const lavaUpdate = new ShaderProgram([
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, lavaUpdateFrag),
+    ]);
+
+    const lavaTerrain = new ShaderProgram([
+        new Shader(gl_context.VERTEX_SHADER, quadVert),
+        new Shader(gl_context.FRAGMENT_SHADER, lavaTerrainFrag),
+    ]);
+
     return {
         lambert,
         flat,
@@ -179,7 +200,10 @@ export function createShaders(gl_context: any): Shaders {
         sceneDepthShader,
         combinedShader,
         bilateralBlur,
-        veladvect
+        veladvect,
+        lavaFlow,
+        lavaUpdate,
+        lavaTerrain
     };
 }
 

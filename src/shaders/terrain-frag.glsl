@@ -21,6 +21,7 @@ uniform sampler2D maxslippagemap;
 uniform sampler2D sediBlend;
 uniform sampler2D shadowMap;
 uniform sampler2D sceneDepth;
+uniform sampler2D lavamap;
 
 #define PI 3.1415926
 
@@ -46,7 +47,11 @@ uniform vec3 unif_LightPos;
 uniform int u_SourceCount;
 uniform vec2 u_SourcePositions[16];  // Max 16 sources
 uniform float u_SourceSizes[16];
+uniform int u_LavaSourceCount;
+uniform vec2 u_LavaSourcePositions[16];  // Max 16 lava sources
+uniform float u_LavaSourceSizes[16];
 uniform int u_FlowTrace;
+uniform float u_LavaGlowIntensity;
 
 
 uniform mat4 u_sproj;
@@ -184,6 +189,9 @@ void main()
             }else if(u_BrushType == 6){
                 // Slope brush - green
                 addcol = vec3(0.3, 1.0, 0.3) * 0.8;
+            }else if(u_BrushType == 7){
+                // Lava brush - red/orange
+                addcol = vec3(1.0, 0.3, 0.0) * 0.8;
             }
             addcol *= 1.0;
         }
@@ -200,6 +208,19 @@ void main()
             float dens = (0.01 * sourceSize - pdis2fragment) / (0.01 * sourceSize);
             vec3 sourceCol = permanentCol * 0.8;
             addcol += sourceCol * dens * 5.0;
+        }
+    }
+
+    // Visualize all lava sources (red/orange circles)
+    vec3 lavaSourceCol = vec3(1.0, 0.3, 0.0); // Bright red/orange
+    for(int i = 0; i < u_LavaSourceCount; i++){
+        vec2 pointOnPlane = u_LavaSourcePositions[i];
+        float pdis2fragment = distance(pointOnPlane, fs_Uv);
+        float sourceSize = u_LavaSourceSizes[i];
+        
+        if (pdis2fragment < 0.01 * sourceSize){
+            float dens = (0.01 * sourceSize - pdis2fragment) / (0.01 * sourceSize);
+            addcol += lavaSourceCol * dens * 5.0;
         }
     }
 
@@ -221,6 +242,11 @@ void main()
     float wval = fH.y;
     float rockVal = fH.z; // Rock material value (1.0 = rock, 0.0 = normal)
     float sval = texture(sediBlend, fs_Uv).x;
+    
+    // Sample lava data
+    vec4 lavaData = texture(lavamap, fs_Uv);
+    float lavaVolume = lavaData.x;
+    float lavaTemp = lavaData.y; // Temperature in Celsius
 
     vec3 finalcol = vec3(0);
 
@@ -419,8 +445,31 @@ void main()
 
     }
 
-
-
+    // ========== LAVA RENDERING WITH GLOW EFFECT ==========
+    // Add glowing red/orange lava visualization based on temperature and volume
+    if(lavaVolume > 0.001){
+        // Convert temperature to normalized 0-1 range (800-1200°C)
+        float tempNorm = clamp((lavaTemp - 800.0) / 400.0, 0.0, 1.0);
+        
+        // Color gradient: hot = bright red/orange, cool = dark red/black
+        vec3 hotLavaCol = vec3(1.0, 0.3, 0.0);  // Bright red/orange (1200°C)
+        vec3 coolLavaCol = vec3(0.3, 0.0, 0.0); // Dark red (800°C)
+        vec3 lavaCol = mix(coolLavaCol, hotLavaCol, tempNorm);
+        
+        // Glow intensity based on temperature and volume
+        // Hotter and thicker lava glows more
+        float glowFactor = tempNorm * sqrt(lavaVolume) * u_LavaGlowIntensity;
+        glowFactor = clamp(glowFactor, 0.0, 2.0); // Limit glow intensity
+        
+        // Add emissive glow effect (additive blending)
+        vec3 lavaGlow = lavaCol * glowFactor;
+        fcol += lavaGlow;
+        
+        // Also tint the surface color where lava is present
+        float lavaSurfaceFactor = min(lavaVolume * 10.0, 1.0); // Surface coverage factor
+        fcol = mix(fcol, lavaCol, lavaSurfaceFactor * 0.3); // Blend lava color into surface
+    }
+    // =====================================================
 
     vec3 tmpCol = fcol;
     fcol += addcol;

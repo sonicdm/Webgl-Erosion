@@ -51,6 +51,21 @@
           font-size: 14px;
           margin-top: 10px;
         }
+        .progress-bar-container {
+          width: 300px;
+          height: 8px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 4px;
+          margin-top: 15px;
+          overflow: hidden;
+        }
+        .progress-bar {
+          height: 100%;
+          background: linear-gradient(90deg, #4A90E2, #5BA3F5);
+          border-radius: 4px;
+          transition: width 0.2s ease-out;
+          width: 0%;
+        }
       </style>
   </head>
   <body>
@@ -59,6 +74,9 @@
       <div class="loading-spinner"></div>
       <div class="loading-text">Generating Terrain...</div>
       <div class="loading-progress" id="loading-progress-text"></div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="loading-progress-bar"></div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

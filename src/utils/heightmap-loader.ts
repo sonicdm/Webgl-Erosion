@@ -4,6 +4,7 @@ import * as simulationState from '../simulation/simulation-state';
 
 export interface Controls {
     TerrainHeight: number;
+    SimulationResolution?: number;
 }
 
 // Reusable buffer for heightmap conversion (reused across loads to avoid allocations)
