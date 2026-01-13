@@ -191,7 +191,7 @@ const controls = {
     LavaActivationEnergy : 200000.0,
     LavaDensity : 2700.0,
     LavaSpecificHeat : 1200.0,
-    LavaAirHeatTransfer : 30.0,
+    LavaAirHeatTransfer : 200.0, // Increased from 30.0 (6-7x faster cooling)
     LavaWaterHeatTransfer : 2000.0,
     LavaAmbientTemp : 20.0,
     LavaWaterTemp : 10.0,
@@ -575,6 +575,10 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,read_sediment_tex);
     gl_context.uniform1i(getCachedUniformLocation(sedi.prog,"readSediment"),2);
+
+    gl_context.activeTexture(gl_context.TEXTURE4);
+    gl_context.bindTexture(gl_context.TEXTURE_2D,read_lava_tex);
+    gl_context.uniform1i(getCachedUniformLocation(sedi.prog,"readLava"),4);
 
     renderer.render(camera,sedi,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);

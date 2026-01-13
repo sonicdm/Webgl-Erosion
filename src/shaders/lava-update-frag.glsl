@@ -81,8 +81,14 @@ void main() {
     // dT/dt = -(h * A * (T - T_ambient)) / (m * c_p)
     // Only cool if there's lava present
     if (lavaVolume > 0.0001f) {
-        // Surface area (proportional to thickness)
-        float surfaceArea = sqrt(max(lavaVolume, 0.0001f));
+        // Improved surface area calculation
+        // Thin lava flows have more surface area relative to volume
+        // For very thin flows, surface area should be larger
+        float baseSurfaceArea = sqrt(max(lavaVolume, 0.0001f));
+        // Thin flows (< 0.1 volume) have proportionally more surface area
+        float thinFlowMultiplier = lavaVolume < 0.1 ? (0.1 / max(lavaVolume, 0.001f)) : 1.0;
+        thinFlowMultiplier = clamp(thinFlowMultiplier, 1.0, 5.0); // Cap at 5x for very thin flows
+        float surfaceArea = baseSurfaceArea * thinFlowMultiplier;
         
         // Mass
         float mass = lavaVolume * u_LavaDensity;

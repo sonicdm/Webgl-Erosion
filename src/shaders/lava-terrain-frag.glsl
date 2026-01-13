@@ -99,9 +99,16 @@ void main() {
         // ========== SOLIDIFICATION (Filling Channels) ==========
         // Cooled lava solidifies into rock and fills channels
         if (lavaTemp < u_LavaSolidificationTemp) {
-            // Determine how much lava solidifies in this timestep
-            // This is a simplified model; a more complex one would consider latent heat release
-            float solidificationRate = 0.05; // Rate of solidification per timestep (adjust as needed)
+            // Temperature-dependent solidification rate
+            // Cooler lava solidifies faster (more below solidification temp = faster solidification)
+            float tempBelowSolidification = u_LavaSolidificationTemp - lavaTemp;
+            float maxTempDiff = u_LavaSolidificationTemp - 800.0; // Max possible difference (800°C is minimum)
+            float tempFactor = clamp(tempBelowSolidification / max(maxTempDiff, 1.0), 0.0, 1.0);
+            
+            // Base solidification rate (increased from 0.05 to 0.3 for faster solidification)
+            float baseSolidificationRate = 0.3;
+            // Cooler lava solidifies faster - scale by temperature difference
+            float solidificationRate = baseSolidificationRate * (1.0 + tempFactor * 2.0); // Up to 3x faster when very cool
             float solidifiedVolume = min(newLavaVolume, solidificationRate * u_timestep);
 
             // Convert solidified lava to rock material
@@ -113,10 +120,16 @@ void main() {
                 // This fills the channel carved by hot lava
                 newTerrainHeight = max(newTerrainHeight, lavaSurfaceHeight);
                 
-                // Mark as rock material
+                // Mark as rock material - increased scale factor from 0.1 to 1.0
                 // Rock material is stored in B channel (0.0 to 1.0)
-                float solidifiedRock = min(1.0, solidifiedVolume * 0.1); // Scale factor for rock material
+                // Use larger scale factor to ensure rock material is clearly visible
+                float solidifiedRock = min(1.0, solidifiedVolume * 1.0); // Changed from 0.1 to 1.0
                 newRockMaterial = max(rockMaterial, solidifiedRock);
+                
+                // Ensure rock material reaches meaningful level (at least 0.5 if significant volume)
+                if (solidifiedVolume > 0.01) {
+                    newRockMaterial = max(newRockMaterial, 0.5); // Ensure visible rock
+                }
 
                 // Remove solidified volume from liquid lava
                 newLavaVolume -= solidifiedVolume;

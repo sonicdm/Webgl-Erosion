@@ -4,6 +4,7 @@ precision highp float;
 uniform sampler2D readTerrain;//water and hight map R: hight map, G: water map, B: , A:
 uniform sampler2D readVelocity;
 uniform sampler2D readSediment;
+uniform sampler2D readLava; // R: lava volume, G: temperature
 
 uniform float u_SimRes;
 uniform float u_PipeLen;
@@ -98,6 +99,29 @@ void main() {
   vec4 curTerrain = texture(readTerrain,curuv);
   float rockMaterialValue = curTerrain.z;
   bool isRock = rockMaterialValue > 0.1; // Consistent threshold for rock detection
+  
+  // Check for lava presence - hot lava protects terrain from water erosion
+  vec4 curLava = texture(readLava, curuv);
+  float lavaVolume = curLava.x;
+  float lavaTemp = curLava.y; // Temperature in Celsius (800-1200°C range)
+  
+  // Check if lava is present and hot (above solidification temp)
+  // Hot lava protects terrain from erosion
+  bool hasHotLava = lavaVolume > 0.001 && lavaTemp > 800.0; // Above solidification temp
+  bool hasLava = lavaVolume > 0.001; // Any lava present
+  
+  // Prevent erosion if hot lava is present
+  // Cooled/solidified lava is already rock material, which has erosion resistance
+  float erosionMultiplier = 1.0;
+  if (hasHotLava) {
+      // Hot lava completely protects terrain from water erosion
+      // Water should cool the lava instead of eroding terrain
+      erosionMultiplier = 0.0; // No erosion when hot lava is present
+  } else if (hasLava) {
+      // Cooled lava (below solidification temp) still provides some protection
+      // But less than hot lava since it's starting to solidify
+      erosionMultiplier = 0.1; // Very little erosion
+  }
   
   // Track base rock surface height (A channel stores the height of the rock surface
   // before any sediment was deposited on top)
@@ -234,7 +258,8 @@ void main() {
     float effectiveRockFactor = erodingSedimentLayer ? 1.0 : rockFactor;
     
     // Calculate erosion with correct resistance
-    float changesedi = (sedicap -cursedi) * (Ks * effectiveRockFactor);
+    // Apply erosion multiplier to prevent erosion when lava is present
+    float changesedi = (sedicap -cursedi) * (Ks * effectiveRockFactor) * erosionMultiplier;
     //changesedi = min(changesedi, curTerrain.y);
 
       hight = hight - changesedi;
