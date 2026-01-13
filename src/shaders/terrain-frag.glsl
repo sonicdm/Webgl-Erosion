@@ -463,6 +463,32 @@ void main()
             // Neither - black
             fcol = vec3(0.0);
         }
+    }else if(u_TerrainDebug == 15){
+        // Rock Material debug view (with layering)
+        // Shows rock material value and sediment layering on top
+        vec4 terrainData = texture(hightmap, fs_Uv);
+        float rockVal = terrainData.z; // Rock material (0.0 to 1.0)
+        float baseRockHeight = terrainData.w; // Base rock surface height
+        float terrainHeight = terrainData.x; // Current terrain height
+        float sedimentHeight = terrainHeight - baseRockHeight; // Sediment layer thickness
+        
+        // Check if there's sediment on top of rock
+        bool hasSedimentOnRock = baseRockHeight > 0.001 && rockVal > 0.1 && sedimentHeight > 0.05;
+        
+        if (hasSedimentOnRock) {
+            // Sediment on rock - show as yellow/orange, intensity based on sediment thickness
+            float sedimentIntensity = clamp(sedimentHeight * 5.0, 0.0, 1.0);
+            fcol = mix(vec3(1.0, 0.8, 0.2), vec3(1.0, 0.6, 0.0), sedimentIntensity); // Yellow to orange
+        } else if (rockVal > 0.1) {
+            // Rock material - gray scale, intensity based on rock value
+            // Dark gray (0.1) to light gray (1.0)
+            float rockIntensity = (rockVal - 0.1) / 0.9; // Normalize 0.1-1.0 to 0-1
+            rockIntensity = clamp(rockIntensity, 0.0, 1.0);
+            fcol = vec3(0.2 + rockIntensity * 0.6); // Dark gray to light gray
+        } else {
+            // No rock - black
+            fcol = vec3(0.0);
+        }
     }
 
 

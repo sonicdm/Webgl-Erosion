@@ -75,7 +75,12 @@ void main() {
 
         if (lavaVolume > 0.001 && waterVolume > 0.001 && lavaTemp > u_LavaWaterTemp) {
             // Calculate heat flux from lava to water
-            float surfaceArea = sqrt(lavaVolume); // Contact area
+            // Use improved surface area calculation (same as cooling)
+            float baseSurfaceArea = sqrt(max(lavaVolume, 0.0001f));
+            float thinFlowMultiplier = lavaVolume < 0.1 ? (0.1 / max(lavaVolume, 0.001f)) : 1.0;
+            thinFlowMultiplier = clamp(thinFlowMultiplier, 1.0, 5.0);
+            float surfaceArea = baseSurfaceArea * thinFlowMultiplier;
+            
             float heatFlux = u_LavaContactHeatTransfer * surfaceArea * (lavaTemp - u_LavaWaterTemp);
             float heatTransferred = heatFlux * u_timestep; // Total heat transferred this timestep
             
@@ -93,6 +98,11 @@ void main() {
             
             // Convert mass to volume and reduce water
             float volumeVaporized = massVaporized / waterDensity;
+            
+            // Make evaporation more aggressive - water should evaporate quickly when in contact with hot lava
+            // Multiply by a factor to make it more noticeable
+            volumeVaporized *= 5.0; // 5x faster evaporation
+            
             waterVolume = max(0.0, waterVolume - volumeVaporized);
         }
 
