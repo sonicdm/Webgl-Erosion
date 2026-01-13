@@ -18,6 +18,7 @@ uniform float u_LavaWaterTemp;            // Water temperature (default: 10.0 °
 uniform float u_LavaDensity;              // Density (default: 2700 kg/m³)
 uniform float u_LavaSpecificHeat;        // Specific heat capacity (default: 1200 J/(kg·K))
 uniform float u_LavaInitialTemp;         // Initial temperature for new lava (default: 1200.0 °C)
+uniform float u_Time;                    // Time for source variation
 
 // Lava sources (similar to water sources)
 uniform int u_LavaSourceCount;
@@ -38,6 +39,39 @@ uniform int u_BrushOperation;
 layout (location = 0) out vec4 writeLava;
 
 in vec2 fs_Pos;
+
+// Noise functions for source variation
+#define OCTAVES 6
+
+float random (in vec2 st) {
+    return fract(sin(dot(st.xy, vec2(12.9898,78.233)))*43758.5453123);
+}
+
+float noise (in vec2 st) {
+    vec2 i = floor(st);
+    vec2 f = fract(st);
+    
+    float a = random(i);
+    float b = random(i + vec2(1.0, 0.0));
+    float c = random(i + vec2(0.0, 1.0));
+    float d = random(i + vec2(1.0, 1.0));
+    
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    
+    return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+float fbm (in vec2 st) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    
+    for (int i = 0; i < OCTAVES; i++) {
+        value += amplitude * noise(st);
+        st *= 2.0;
+        amplitude *= 0.53;
+    }
+    return value;
+}
 
 void main() {
     vec2 curuv = 0.5f * fs_Pos + 0.5f;
@@ -140,7 +174,7 @@ void main() {
         lavaTemp = u_LavaInitialTemp;
     }
 
-    // Lava sources - add lava at source positions
+    // Lava sources - add lava at source positions (with bubbling variation like water sources)
     for(int i = 0; i < u_LavaSourceCount; i++) {
         vec2 sourcePos = u_LavaSourcePositions[i];
         float sourceSize = u_LavaSourceSizes[i];
@@ -155,6 +189,13 @@ void main() {
             
             float sourceAmount = 0.0006 * sourceStrength;
             float sourceLava = sourceAmount * density * 280.0;
+            
+            // Add time-based variation for bubbling effect (similar to water sources)
+            // Use FBM noise with time to create natural variation
+            // This creates the "bubbling up" effect
+            float timeVariation = fbm(curuv * 200.0 + vec2(sin(u_Time * 5.0), cos(u_Time * 15.0)));
+            sourceLava *= (0.5 + 0.5 * timeVariation); // Vary between 0.5x and 1.0x
+            
             lavaVolume += sourceLava * u_timestep;
             
             // New lava from sources starts at high temperature

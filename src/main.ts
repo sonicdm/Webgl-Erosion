@@ -2149,6 +2149,7 @@ function main() {
     lavaUpdate.setBrushPressed(controls.brushPressed);
     lavaUpdate.setBrushPos(reusablePos);
     lavaUpdate.setBrushOperation(controls.brushOperation);
+    lavaUpdate.setTime(timer);
 
     lavaTerrain.setSimres(simres);
     lavaTerrain.setTimestep(controls.timestep);

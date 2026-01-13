@@ -111,7 +111,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavapara.add(controls, 'LavaActivationEnergy', 100000.0, 300000.0);
     lavapara.add(controls, 'LavaDensity', 2000.0, 3000.0);
     lavapara.add(controls, 'LavaSpecificHeat', 800.0, 1500.0);
-    lavapara.add(controls, 'LavaAirHeatTransfer', 10.0, 50.0);
+    lavapara.add(controls, 'LavaAirHeatTransfer', 50.0, 500.0);
     lavapara.add(controls, 'LavaWaterHeatTransfer', 1000.0, 5000.0);
     lavapara.add(controls, 'LavaAmbientTemp', 0.0, 30.0);
     lavapara.add(controls, 'LavaWaterTemp', 0.0, 20.0);

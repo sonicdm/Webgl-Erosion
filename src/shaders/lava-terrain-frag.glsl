@@ -108,17 +108,21 @@ void main() {
 
         // ========== SOLIDIFICATION (Filling Channels) ==========
         // Cooled lava solidifies into rock and fills channels
-        if (lavaTemp < u_LavaSolidificationTemp) {
+        // Only solidify if temperature is significantly below solidification temp to prevent sudden spikes
+        // Use a threshold to prevent all lava from solidifying when temp is raised
+        float solidificationThreshold = u_LavaSolidificationTemp - 50.0; // Only solidify if 50°C below threshold
+        if (lavaTemp < solidificationThreshold && newLavaVolume > 0.001) {
             // Temperature-dependent solidification rate
             // Cooler lava solidifies faster (more below solidification temp = faster solidification)
-            float tempBelowSolidification = u_LavaSolidificationTemp - lavaTemp;
-            float maxTempDiff = u_LavaSolidificationTemp - 800.0; // Max possible difference (800°C is minimum)
+            float tempBelowSolidification = solidificationThreshold - lavaTemp;
+            float maxTempDiff = solidificationThreshold - 800.0; // Max possible difference (800°C is minimum)
             float tempFactor = clamp(tempBelowSolidification / max(maxTempDiff, 1.0), 0.0, 1.0);
             
-            // Base solidification rate (increased from 0.05 to 0.3 for faster solidification)
-            float baseSolidificationRate = 0.3;
+            // Base solidification rate - reduced to prevent sudden spikes
+            // Make it more gradual to avoid terrain deformation when temp is changed
+            float baseSolidificationRate = 0.15; // Reduced from 0.3 to make it more gradual
             // Cooler lava solidifies faster - scale by temperature difference
-            float solidificationRate = baseSolidificationRate * (1.0 + tempFactor * 2.0); // Up to 3x faster when very cool
+            float solidificationRate = baseSolidificationRate * (1.0 + tempFactor * 1.0); // Reduced from 2.0 to 1.0
             float solidifiedVolume = min(newLavaVolume, solidificationRate * u_timestep);
 
             // Convert solidified lava to rock material
@@ -126,14 +130,16 @@ void main() {
                 // Calculate lava surface height (terrain height + remaining lava volume)
                 float lavaSurfaceHeight = newTerrainHeight + (newLavaVolume - solidifiedVolume);
                 
-                // Solidified rock raises terrain height to match lava surface
-                // This fills the channel carved by hot lava
-                newTerrainHeight = max(newTerrainHeight, lavaSurfaceHeight);
+                // Solidified rock raises terrain height gradually
+                // Use a blend factor to prevent sudden spikes - only raise terrain by a fraction
+                // This prevents drastic terrain deformation when solidification temp is changed
+                float heightBlendFactor = 0.5; // Only raise terrain by 50% of solidified volume
+                float targetHeight = mix(newTerrainHeight, lavaSurfaceHeight, heightBlendFactor);
+                newTerrainHeight = max(newTerrainHeight, targetHeight);
                 
-                // Mark as rock material - increased scale factor from 0.1 to 1.0
+                // Mark as rock material
                 // Rock material is stored in B channel (0.0 to 1.0)
-                // Use larger scale factor to ensure rock material is clearly visible
-                float solidifiedRock = min(1.0, solidifiedVolume * 1.0); // Changed from 0.1 to 1.0
+                float solidifiedRock = min(1.0, solidifiedVolume * 1.0);
                 newRockMaterial = max(rockMaterial, solidifiedRock);
                 
                 // Ensure rock material reaches meaningful level (at least 0.5 if significant volume)
