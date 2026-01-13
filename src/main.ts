@@ -146,6 +146,7 @@ const controls = {
     'setTerrainRandom':setTerrainRandom,
     'Import Height Map': () => {}, // Will be set in main() after gl_context is available
     'Clear Height Map': () => {}, // Will be set in main() after gl_context is available
+    'Export Height Map': () => {}, // Will be set in main() after gl_context is available
     SimulationSpeed : 3,
     TerrainBaseMap : 0,
     TerrainBaseType : 0,//0 ordinary fbm, 1 domain warping, 2 terrace, 3 voroni
@@ -1082,9 +1083,10 @@ function main() {
   setClientDimensions(canvas.clientWidth, canvas.clientHeight);
   
   // Create heightmap loader functions
-  const { loadHeightMap, clearHeightMap } = createHeightMapLoader(gl_context, simres, controls);
+  const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(gl_context, simres, controls);
   controls['Import Height Map'] = loadHeightMap;
   controls['Clear Height Map'] = clearHeightMap;
+  controls['Export Height Map'] = exportHeightMap;
 
   // Load settings (from localStorage or defaults) - must be done before creating event handlers
   controlsConfig = loadSettings();

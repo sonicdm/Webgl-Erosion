@@ -63,6 +63,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     terrainParameters.add(controls, 'ResetTerrain');
     terrainParameters.add(controls, 'Import Height Map');
     terrainParameters.add(controls, 'Clear Height Map');
+    terrainParameters.add(controls, 'Export Height Map');
     terrainParameters.open();
     
     // Erosion Parameters
