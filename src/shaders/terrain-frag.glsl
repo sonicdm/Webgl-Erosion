@@ -442,6 +442,27 @@ void main()
         }
         
         fcol = tempColor * volIntensity;
+    }else if(u_TerrainDebug == 14){
+        // Water Contact with Lava debug view
+        // Show where water and lava are in contact
+        // Blue = water only, Red = lava only, Purple = both (contact)
+        vec4 terrainData = texture(hightmap, fs_Uv);
+        float waterVol = terrainData.y;
+        float lavaVol = lavaVolume;
+        
+        if (waterVol > 0.001 && lavaVol > 0.001) {
+            // Both present - purple/magenta (contact zone)
+            fcol = vec3(1.0, 0.0, 1.0); // Magenta
+        } else if (waterVol > 0.001) {
+            // Water only - blue
+            fcol = vec3(0.0, 0.0, 1.0);
+        } else if (lavaVol > 0.001) {
+            // Lava only - red
+            fcol = vec3(1.0, 0.0, 0.0);
+        } else {
+            // Neither - black
+            fcol = vec3(0.0);
+        }
     }
 
 

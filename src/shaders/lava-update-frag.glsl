@@ -74,8 +74,31 @@ void main() {
     // Improved water contact: if water is present above threshold, apply full water cooling
     // This ensures even small amounts of water cause rapid cooling
     float waterVolume = curTerrain.y;
-    float waterThreshold = 0.001f; // Minimum water volume to trigger rapid cooling
-    float waterContact = waterVolume > waterThreshold ? 1.0f : 0.0f;
+    // Lower threshold to catch even tiny amounts of water
+    // Also check neighbors to catch water that's adjacent to lava
+    float waterThreshold = 0.0001f; // Very low threshold to catch any water
+    float waterContact = 0.0f;
+    
+    // Check current pixel and neighbors for water
+    vec4 topTerrain = texture(readTerrain, curuv + vec2(0.0f, div));
+    vec4 rightTerrain = texture(readTerrain, curuv + vec2(div, 0.0f));
+    vec4 bottomTerrain = texture(readTerrain, curuv + vec2(0.0f, -div));
+    vec4 leftTerrain = texture(readTerrain, curuv + vec2(-div, 0.0f));
+    
+    // If water is present at current location or any neighbor, apply water cooling
+    // This handles cases where water and lava are adjacent
+    if (waterVolume > waterThreshold || 
+        topTerrain.y > waterThreshold || 
+        rightTerrain.y > waterThreshold || 
+        bottomTerrain.y > waterThreshold || 
+        leftTerrain.y > waterThreshold) {
+        waterContact = 1.0f;
+    }
+    
+    // Also check if water volume is significant at current location (stronger cooling)
+    if (waterVolume > 0.001f) {
+        waterContact = 1.0f; // Full water cooling
+    }
 
     // Heat transfer physics (Newton's law of cooling)
     // dT/dt = -(h * A * (T - T_ambient)) / (m * c_p)
@@ -100,6 +123,13 @@ void main() {
         // Newton's law of cooling
         if (mass > 0.0f) {
             float coolingRate = (h_effective * surfaceArea * (lavaTemp - T_ambient_effective)) / (mass * u_LavaSpecificHeat);
+            
+            // Make water cooling more aggressive - water should cool lava much faster
+            // When water is present, multiply cooling rate significantly
+            if (waterContact > 0.5f) {
+                coolingRate *= 10.0f; // 10x faster cooling when water is present
+            }
+            
             lavaTemp -= coolingRate * u_timestep;
         }
         
