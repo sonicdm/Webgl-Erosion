@@ -60,7 +60,11 @@ export let simres: number = simresolution;
 
 export function resizeHightMapCpuBuf(newRes: number): void {
     // Resize CPU buffer to match simulation resolution for accurate raycasting
-    HightMapCpuBuf = new Float32Array(newRes * newRes * 4);
+    // Only reallocate if size changed to avoid unnecessary allocations
+    const newSize = newRes * newRes * 4;
+    if (!HightMapCpuBuf || HightMapCpuBuf.length !== newSize) {
+        HightMapCpuBuf = new Float32Array(newSize);
+    }
 }
 
 // Global state
@@ -109,6 +113,21 @@ export function setTerrainGeometryDirty(value: boolean): void {
 // BVH and terrain geometry state (secondary mesh for raycasting)
 export let terrainGeometry: BufferGeometry | null = null;
 export let terrainBVH: MeshBVH | null = null;
+// Flag to track if BVH build is currently in progress (prevents duplicate builds)
+export let terrainBVHBuildInProgress = false;
+
+// BVH update tracking for erosion synchronization
+// Counter for simulation steps since last geometry update
+export let geometryUpdateCounter = 0;
+// Flag to track if geometry needs update (set when erosion occurs)
+export let geometryNeedsUpdate = false;
+// Configuration for update frequency (update every N simulation steps)
+// Higher values = less frequent updates = better performance but less accuracy
+// Default: 2000 steps - balances accuracy with performance
+// Note: Updates only happen when heightmap is already read (no extra readPixels cost)
+export let geometryUpdateInterval = 2000; // Default: update every 2000 simulation steps
+// Flag to enable/disable automatic BVH updates (enabled by default)
+export let enableBVHUpdates = true; // BVH updates are enabled but only when heightmap is already fresh
 
 export function setTerrainGeometry(geometry: BufferGeometry | null): void {
     terrainGeometry = geometry;
@@ -116,5 +135,36 @@ export function setTerrainGeometry(geometry: BufferGeometry | null): void {
 
 export function setTerrainBVH(bvh: MeshBVH | null): void {
     terrainBVH = bvh;
+    // Clear in-progress flag when BVH is set (build complete or cancelled)
+    terrainBVHBuildInProgress = false;
+}
+
+export function setTerrainBVHBuildInProgress(inProgress: boolean): void {
+    terrainBVHBuildInProgress = inProgress;
+}
+
+// Geometry update tracking functions
+export function incrementGeometryUpdateCounter(): void {
+    geometryUpdateCounter++;
+}
+
+export function resetGeometryUpdateCounter(): void {
+    geometryUpdateCounter = 0;
+}
+
+export function setGeometryNeedsUpdate(needsUpdate: boolean): void {
+    geometryNeedsUpdate = needsUpdate;
+}
+
+export function setGeometryUpdateInterval(interval: number): void {
+    geometryUpdateInterval = Math.max(1, interval);
+}
+
+export function setEnableBVHUpdates(enabled: boolean): void {
+    enableBVHUpdates = enabled;
+}
+
+export function shouldUpdateGeometry(): boolean {
+    return enableBVHUpdates && (geometryNeedsUpdate || geometryUpdateCounter >= geometryUpdateInterval);
 }
 

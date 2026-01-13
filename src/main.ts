@@ -23,6 +23,7 @@ import { createTerrainGeometry, updateTerrainGeometry } from './utils/terrain-ge
 import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { createHeightMapLoader } from './utils/heightmap-loader';
 import { getCachedUniformLocation } from './utils/uniform-cache';
+import { LoadProgressTracker, LoadPhase } from './utils/load-progress';
 import { 
     simres, shadowMapResolution, SimFramecnt, TerrainGeometryDirty, PauseGeneration, 
     HightMapCpuBuf, HightMapBufCounter, MaxHightMapBufCounter, shouldReadHeightmap, setSimRes, setGlContext, 
@@ -30,7 +31,11 @@ import {
     setPauseGeneration, setSimFramecnt, incrementSimFramecnt, setTerrainGeometryDirty,
     resizeHightMapCpuBuf, incrementHightMapBufCounter, resetHightMapBufCounter,
     terrainGeometry, terrainBVH, setTerrainGeometry, setTerrainBVH,
-    HightMapBufIsFresh, setHightMapBufIsFresh
+    terrainBVHBuildInProgress, setTerrainBVHBuildInProgress,
+    HightMapBufIsFresh, setHightMapBufIsFresh,
+    geometryUpdateCounter, geometryNeedsUpdate, geometryUpdateInterval, enableBVHUpdates,
+    incrementGeometryUpdateCounter, resetGeometryUpdateCounter,
+    setGeometryNeedsUpdate, shouldUpdateGeometry, setEnableBVHUpdates
 } from './simulation/simulation-state';
 import {
     frame_buffer, shadowMap_frame_buffer, deferred_frame_buffer,
@@ -1371,156 +1376,356 @@ function main() {
 
 
     if(TerrainGeometryDirty){
-        // Show loading overlay and force a repaint before blocking operations
         const loadingOverlay = document.getElementById('terrain-loading-overlay');
         const progressText = document.getElementById('loading-progress-text');
-        if (loadingOverlay) {
-            loadingOverlay.classList.add('visible');
-        }
-        if (progressText) {
-            progressText.textContent = 'Rendering terrain textures...';
+        const progressBar = document.getElementById('loading-progress-bar');
+        
+        // Check if a build is already in progress - if so, don't reset the UI
+        const buildInProgress = terrainBVHBuildInProgress || (loadingOverlay && loadingOverlay.classList.contains('visible'));
+        
+        if (buildInProgress) {
+            console.log('[Loading] Build already in progress, skipping UI reset');
+            // Still need to process the loading, but don't reset UI
+        } else {
+            console.log('[Loading] TerrainGeometryDirty=true, starting loading process');
+            console.log('[Loading] UI elements:', {
+                overlay: !!loadingOverlay,
+                progressText: !!progressText,
+                progressBar: !!progressBar
+            });
+            
+            if (loadingOverlay) {
+                loadingOverlay.classList.add('visible');
+                // Force initial render of overlay
+                void loadingOverlay.offsetHeight;
+                console.log('[Loading] Overlay shown (visible class added)');
+            } else {
+                console.warn('[Loading] Overlay element not found!');
+            }
+            
+            // Initialize progress bar to 0% to ensure it's visible
+            if (progressBar) {
+                progressBar.style.width = '0%';
+                void progressBar.offsetHeight; // Force reflow
+                console.log('[Loading] Progress bar initialized to 0%');
+            } else {
+                console.warn('[Loading] Progress bar element not found!');
+            }
+            if (progressText) {
+                progressText.textContent = 'Initializing...';
+                console.log('[Loading] Progress text set to "Initializing..."');
+            } else {
+                console.warn('[Loading] Progress text element not found!');
+            }
         }
         
-        // Use setTimeout to ensure overlay is rendered before blocking operations
-        setTimeout(() => {
-            // Handle resolution change if needed (must happen before texture cleanup)
-            if(controls.SimulationResolution != simres){
-                if (progressText) progressText.textContent = 'Resizing textures...';
-                const newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
-                setSimRes(newRes);
-                resizeTextures4Simulation(gl_context, newRes);
-                resizeHightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
-            }
+        // Create progress tracker with UI update callback
+        const progressTracker = new LoadProgressTracker((progress, phase) => {
+            const progressPercent = progress * 100;
+            console.log(`[Loading] Progress callback: ${progressPercent.toFixed(1)}%, phase: ${phase || 'none'}`);
             
-            //=============clean up all simulation textures===================
-            cleanUpTextures();
-            //=============recreate base terrain textures=====================
-            if (noiseterrain) {
-                if (progressText) progressText.textContent = 'Rendering terrain textures (1/2)...';
-                Render2Texture(renderer,gl_context,camera,noiseterrain,read_terrain_tex,square,noiseterrain);
-                if (progressText) progressText.textContent = 'Rendering terrain textures (2/2)...';
-                Render2Texture(renderer,gl_context,camera,noiseterrain,write_terrain_tex,square,noiseterrain);
-                
-                // Force immediate read of heightmap buffer after terrain generation
-                // This ensures BVH gets fresh data, not stale data
-                if (progressText) progressText.textContent = 'Reading heightmap data...';
-                gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-                gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, read_terrain_tex, 0);
-                gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
-                gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
-                gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
-                setHightMapBufIsFresh(true); // Mark buffer as fresh
-            }
-
-            //=============rebuild secondary terrain mesh and BVH for raycasting===================
-            // Dispose old BVH and geometry if they exist
-            if (terrainBVH) {
-                // BVH doesn't have explicit dispose, but we'll null the reference
-                setTerrainBVH(null);
-            }
-            if (terrainGeometry) {
-                terrainGeometry.dispose();
-                setTerrainGeometry(null);
-            }
-            
-            // Create new terrain geometry from heightmap
-            // Only build BVH if buffer is fresh (just read after terrain generation)
-            // This prevents building BVH with stale data
-            if (HightMapBufIsFresh && HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
-                // Verify buffer has actual data (not all zeros)
-                let hasData = false;
-                const sampleCount = Math.min(100, simres * simres);
-                for (let i = 0; i < sampleCount; i++) {
-                    const idx = Math.floor(Math.random() * simres * simres) * 4;
-                    if (HightMapCpuBuf[idx] !== 0) {
-                        hasData = true;
-                        break;
-                    }
-                }
-                
-                if (hasData) {
-                    try {
-                        if (progressText) progressText.textContent = 'Creating terrain geometry...';
-                        const newGeometry = createTerrainGeometry(simres, HightMapCpuBuf, 1.0);
-                        setTerrainGeometry(newGeometry);
-                        
-                        // Build BVH from geometry
-                        if (progressText) progressText.textContent = 'Building spatial index (BVH)...';
-                        const bvh = new MeshBVH(newGeometry, {
-                            strategy: SAH, // Surface Area Heuristic for best performance (use constant, not string)
-                            maxDepth: 40,    // Reasonable depth limit
-                            indirect: false   // Direct indexed geometry
-                        });
-                        setTerrainBVH(bvh);
-                        setHightMapBufIsFresh(false); // Mark as consumed
-                        console.log('[BVH] Terrain BVH built successfully');
-                    } catch (error) {
-                        console.warn('[BVH] Failed to build BVH:', error);
-                        setHightMapBufIsFresh(false); // Mark as consumed even on error
-                    }
-                } else {
-                    console.log('[BVH] Heightmap buffer has no valid data');
-                    setHightMapBufIsFresh(false); // Mark as consumed
-                }
+            if (progressBar) {
+                const oldWidth = progressBar.style.width;
+                progressBar.style.width = `${progressPercent}%`;
+                // Force a reflow to ensure the browser renders the update
+                void progressBar.offsetHeight;
+                console.log(`[Loading] Progress bar updated: ${oldWidth} -> ${progressPercent.toFixed(1)}%`);
             } else {
-                console.log('[BVH] Heightmap buffer not fresh yet, will build when available');
+                console.warn('[Loading] Progress bar not available in callback!');
             }
-
-            setTerrainGeometryDirty(false);
             
-            // Hide loading overlay
-            if (loadingOverlay) {
-                loadingOverlay.classList.remove('visible');
+            if (progressText) {
+                const phaseNames: Record<LoadPhase, string> = {
+                    [LoadPhase.DECODE]: 'Decoding image...',
+                    [LoadPhase.GPU_UPLOAD]: 'Uploading to GPU...',
+                    [LoadPhase.READBACK]: 'Reading heightmap data...',
+                    [LoadPhase.GEOMETRY]: 'Creating terrain geometry...',
+                    [LoadPhase.BVH]: 'Building spatial index (BVH)...'
+                };
+                const newText = phase ? phaseNames[phase] : 'Initializing...';
+                progressText.textContent = newText;
+                console.log(`[Loading] Progress text updated: "${newText}"`);
+            } else {
+                console.warn('[Loading] Progress text not available in callback!');
             }
         });
-    }
-    
-    // Build BVH if it doesn't exist but heightmap buffer is fresh
-    // This handles the case where terrain was dirty but buffer wasn't ready yet
-    if (!terrainBVH && !terrainGeometry && HightMapBufIsFresh && HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
-        // Show loading overlay for delayed BVH build
-        const loadingOverlay = document.getElementById('terrain-loading-overlay');
-        const progressText = document.getElementById('loading-progress-text');
-        if (loadingOverlay) {
-            loadingOverlay.classList.add('visible');
-        }
         
-        // Check if buffer has actual data (not all zeros)
-        let hasData = false;
-        const sampleCount = Math.min(100, simres * simres);
-        for (let i = 0; i < sampleCount; i++) {
-            const idx = Math.floor(Math.random() * simres * simres) * 4;
-            if (HightMapCpuBuf[idx] !== 0) {
-                hasData = true;
-                break;
-            }
-        }
-        
-        if (hasData) {
-            try {
-                if (progressText) progressText.textContent = 'Creating terrain geometry (delayed)...';
-                const newGeometry = createTerrainGeometry(simres, HightMapCpuBuf, 1.0);
-                setTerrainGeometry(newGeometry);
+        // Use requestAnimationFrame to ensure overlay is rendered before blocking operations
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                // Handle resolution change if needed (must happen before texture cleanup)
+                const resolutionChanged = controls.SimulationResolution != simres;
+                if(resolutionChanged){
+                    const oldRes = simres;
+                    const newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
+                    console.log(`[Loading] Resolution change detected: ${oldRes} -> ${newRes}`);
+                    setSimRes(newRes);
+                    resizeTextures4Simulation(gl_context, newRes);
+                    resizeHightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
+                    
+                    // Clear old BVH and geometry when resolution changes (they're invalid for new resolution)
+                    if (terrainBVH) {
+                        console.log('[Loading] Clearing old BVH due to resolution change');
+                        setTerrainBVH(null);
+                    }
+                    if (terrainGeometry) {
+                        console.log('[Loading] Disposing old geometry due to resolution change');
+                        terrainGeometry.dispose();
+                        setTerrainGeometry(null);
+                    }
+                    if (terrainBVHBuildInProgress) {
+                        console.log('[Loading] Clearing in-progress flag due to resolution change');
+                        setTerrainBVHBuildInProgress(false);
+                    }
+                } else {
+                    console.log(`[Loading] No resolution change (current: ${simres})`);
+                }
                 
-                if (progressText) progressText.textContent = 'Building spatial index (BVH)...';
-                const bvh = new MeshBVH(newGeometry, {
-                    strategy: SAH,
-                    maxDepth: 40,
-                    indirect: false
+                //=============clean up all simulation textures===================
+                cleanUpTextures();
+                //=============recreate base terrain textures=====================
+                if (noiseterrain) {
+                    // GPU upload phase (rendering textures)
+                    progressTracker.startPhase(LoadPhase.GPU_UPLOAD);
+                    progressTracker.updateSubPhaseProgress(0.0);
+                    Render2Texture(renderer,gl_context,camera,noiseterrain,read_terrain_tex,square,noiseterrain);
+                    progressTracker.updateSubPhaseProgress(0.5);
+                    Render2Texture(renderer,gl_context,camera,noiseterrain,write_terrain_tex,square,noiseterrain);
+                    progressTracker.updateSubPhaseProgress(1.0);
+                    progressTracker.endPhase(LoadPhase.GPU_UPLOAD);
+                    
+                    // Readback phase
+                    progressTracker.startPhase(LoadPhase.READBACK);
+                    progressTracker.updateSubPhaseProgress(0.0);
+                    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+                    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, read_terrain_tex, 0);
+                    gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
+                    progressTracker.updateSubPhaseProgress(0.5);
+                    gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
+                    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
+                    setHightMapBufIsFresh(true); // Mark buffer as fresh
+                    progressTracker.updateSubPhaseProgress(1.0);
+                    progressTracker.endPhase(LoadPhase.READBACK);
+                }
+
+                //=============rebuild secondary terrain mesh and BVH for raycasting===================
+                // Guard: Don't rebuild if BVH build is already in progress (prevents duplicate builds)
+                // But allow rebuild if resolution changed (old BVH was cleared above)
+                console.log('[BVH] Checking build conditions:', {
+                    terrainBVH: !!terrainBVH,
+                    terrainBVHBuildInProgress,
+                    terrainGeometry: !!terrainGeometry,
+                    HightMapBufIsFresh,
+                    bufferLength: HightMapCpuBuf?.length,
+                    requiredLength: simres * simres * 4
                 });
-                setTerrainBVH(bvh);
-                setHightMapBufIsFresh(false); // Mark as consumed
-                console.log('[BVH] Terrain BVH built (delayed initialization)');
-            } catch (error) {
-                console.warn('[BVH] Failed to build BVH:', error);
-                setHightMapBufIsFresh(false); // Mark as consumed even on error
-            }
-        }
-        
-        // Hide loading overlay
-        if (loadingOverlay) {
-            loadingOverlay.classList.remove('visible');
-        }
+                
+                if (terrainBVHBuildInProgress) {
+                    console.log('[BVH] BVH build already in progress, skipping duplicate build');
+                    // Don't set TerrainGeometryDirty to false yet - wait for build to complete
+                    // Don't hide overlay - it should stay visible until build completes
+                    return;
+                }
+                
+                // Dispose old geometry and BVH if they exist (needed for rebuilds after reset/resolution change)
+                if (terrainGeometry) {
+                    console.log('[BVH] Disposing old terrain geometry');
+                    terrainGeometry.dispose();
+                    setTerrainGeometry(null);
+                }
+                if (terrainBVH) {
+                    console.log('[BVH] Clearing old BVH');
+                    setTerrainBVH(null);
+                }
+                
+                // Create new terrain geometry from heightmap
+                // Only build BVH if buffer is fresh (just read after terrain generation)
+                // This prevents building BVH with stale data
+                if (HightMapBufIsFresh && HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
+                    // Verify buffer has actual data (not all zeros)
+                    let hasData = false;
+                    const sampleCount = Math.min(100, simres * simres);
+                    for (let i = 0; i < sampleCount; i++) {
+                        const idx = Math.floor(Math.random() * simres * simres) * 4;
+                        if (HightMapCpuBuf[idx] !== 0) {
+                            hasData = true;
+                            break;
+                        }
+                    }
+                    
+                    if (hasData) {
+                        console.log('[BVH] Heightmap buffer has valid data, starting geometry and BVH build');
+                        try {
+                            // Mark BVH build as in progress to prevent duplicates
+                            setTerrainBVHBuildInProgress(true);
+                            // Set TerrainGeometryDirty to false NOW (synchronously) to prevent duplicate builds
+                            // This must happen before async operations start
+                            setTerrainGeometryDirty(false);
+                            console.log('[BVH] Build marked as in progress, TerrainGeometryDirty set to false');
+                            
+                            // Geometry phase with progress callbacks
+                            progressTracker.startPhase(LoadPhase.GEOMETRY);
+                            progressTracker.updateSubPhaseProgress(0.0);
+                            
+                            // Force initial UI update - ensure progress bar is visible before blocking work
+                            if (progressBar) {
+                                const currentProgress = progressTracker.getProgress().progress;
+                                progressBar.style.width = `${currentProgress * 100}%`;
+                                progressBar.offsetHeight; // Force reflow to ensure render
+                                console.log(`[Loading] Initial geometry progress bar set to ${(currentProgress * 100).toFixed(1)}%`);
+                            }
+                            
+                            // Yield to browser to ensure initial progress is rendered
+                            console.log('[Loading] Yielding to browser before geometry creation');
+                            requestAnimationFrame(() => {
+                                console.log('[Loading] Starting geometry creation');
+                                const newGeometry = createTerrainGeometry(
+                                    simres, 
+                                    HightMapCpuBuf, 
+                                    1.0,
+                                    (progress) => {
+                                        const overallProgress = progressTracker.getProgress().progress;
+                                        console.log(`[Geometry] Progress callback: ${(progress * 100).toFixed(1)}% (overall: ${(overallProgress * 100).toFixed(1)}%)`);
+                                        progressTracker.updateSubPhaseProgress(progress);
+                                        // Force UI update periodically
+                                        if (progressBar && Math.random() < 0.1) { // Update ~10% of calls to reduce overhead
+                                            progressBar.style.width = `${overallProgress * 100}%`;
+                                            console.log(`[Geometry] Progress bar updated to ${(overallProgress * 100).toFixed(1)}%`);
+                                        }
+                                    }
+                                );
+                                setTerrainGeometry(newGeometry);
+                                progressTracker.endPhase(LoadPhase.GEOMETRY);
+                                console.log('[Loading] Geometry creation complete');
+                            
+                                // BVH phase - ensure UI updates before blocking construction
+                                progressTracker.startPhase(LoadPhase.BVH);
+                                progressTracker.updateSubPhaseProgress(0.0);
+                                
+                                // Force UI update before blocking BVH construction
+                                if (progressBar) {
+                                    const currentProgress = progressTracker.getProgress().progress;
+                                    progressBar.style.width = `${currentProgress * 100}%`;
+                                    progressBar.offsetHeight; // Force reflow
+                                    console.log(`[Loading] BVH phase progress bar set to ${(currentProgress * 100).toFixed(1)}%`);
+                                }
+                                
+                                // Yield control to ensure progress bar updates before blocking BVH construction
+                                console.log('[Loading] Yielding to browser before BVH construction');
+                                requestAnimationFrame(() => {
+                                    requestAnimationFrame(() => {
+                                        console.log('[Loading] Starting BVH construction');
+                                        // Update progress to show we're starting BVH construction
+                                        progressTracker.updateSubPhaseProgress(0.05);
+                                        
+                                        // Force another UI update
+                                        if (progressBar) {
+                                            const currentProgress = progressTracker.getProgress().progress;
+                                            progressBar.style.width = `${currentProgress * 100}%`;
+                                            progressBar.offsetHeight; // Force reflow
+                                        }
+                                        
+                                        const bvhStartTime = performance.now();
+                                        
+                                        // Simulate progress updates during BVH construction
+                                        // Since MeshBVH doesn't provide progress callbacks, we'll estimate progress
+                                        // based on elapsed time (typical BVH build takes 2-3 seconds for 1024x1024)
+                                        const estimatedDuration = 2500; // Estimate 2.5 seconds
+                                        let progressUpdateInterval: number | null = null;
+                                        const startProgress = 0.05;
+                                        const endProgress = 0.95; // Leave 5% for completion
+                                        
+                                        const updateProgress = () => {
+                                            const elapsed = performance.now() - bvhStartTime;
+                                            const estimatedProgress = Math.min(endProgress, startProgress + (elapsed / estimatedDuration) * (endProgress - startProgress));
+                                            progressTracker.updateSubPhaseProgress(estimatedProgress);
+                                            if (progressBar) {
+                                                const currentProgress = progressTracker.getProgress().progress;
+                                                progressBar.style.width = `${currentProgress * 100}%`;
+                                            }
+                                        };
+                                        
+                                        // Update progress every 50ms for smooth animation
+                                        progressUpdateInterval = window.setInterval(updateProgress, 50);
+                                        
+                                        // Reduced maxDepth for faster construction while maintaining quality
+                                        // 30 is usually sufficient for most terrain (was 40)
+                                        const bvh = new MeshBVH(newGeometry, {
+                                            strategy: SAH, // Surface Area Heuristic for best performance
+                                            maxDepth: 30,    // Reduced from 40 for faster builds (still very accurate)
+                                            indirect: false   // Direct indexed geometry
+                                        });
+                                        
+                                        // Clear progress update interval
+                                        if (progressUpdateInterval !== null) {
+                                            clearInterval(progressUpdateInterval);
+                                        }
+                                        
+                                        const bvhDuration = performance.now() - bvhStartTime;
+                                        console.log(`[BVH] BVH construction complete in ${bvhDuration.toFixed(2)}ms`);
+                                        
+                                        setTerrainBVH(bvh); // This will clear terrainBVHBuildInProgress
+                                        progressTracker.updateSubPhaseProgress(1.0);
+                                        progressTracker.endPhase(LoadPhase.BVH);
+                                        setHightMapBufIsFresh(false); // Mark as consumed
+                                        
+                                        // Log timing information
+                                        const timings = progressTracker.getAllTimings();
+                                        const totalDuration = progressTracker.getTotalDuration();
+                                        console.log('[Load] Terrain loading complete:', {
+                                            totalDuration: `${totalDuration.toFixed(2)}ms`,
+                                            phases: timings.map(t => ({
+                                                phase: t.phase,
+                                                duration: t.duration ? `${t.duration.toFixed(2)}ms` : 'N/A'
+                                            }))
+                                        });
+                                        
+                                        // Hide loading overlay after BVH is built
+                                        if (loadingOverlay) {
+                                            loadingOverlay.classList.remove('visible');
+                                            console.log('[Loading] Overlay hidden (BVH complete)');
+                                        } else {
+                                            console.warn('[Loading] Overlay element not found when trying to hide!');
+                                        }
+                                        
+                                        // TerrainGeometryDirty was already set to false before async operations started
+                                        // No need to set it again here
+                                        console.log('[Loading] BVH build complete, overlay hidden');
+                                    });
+                                });
+                                // Don't hide overlay or mark as clean here - wait for BVH to complete
+                                // Exit early, overlay will be hidden and dirty flag cleared after BVH completes
+                                return;
+                            });
+                        } catch (error) {
+                            console.error('[BVH] Failed to build BVH:', error);
+                            setTerrainBVHBuildInProgress(false); // Clear flag on error
+                            setHightMapBufIsFresh(false); // Mark as consumed even on error
+                            setTerrainGeometryDirty(false);
+                            if (loadingOverlay) {
+                                loadingOverlay.classList.remove('visible');
+                                console.log('[Loading] Overlay hidden (error)');
+                            }
+                        }
+                    } else {
+                        console.log('[BVH] Heightmap buffer has no valid data');
+                        setHightMapBufIsFresh(false); // Mark as consumed
+                        setTerrainGeometryDirty(false);
+                        if (loadingOverlay) {
+                            loadingOverlay.classList.remove('visible');
+                            console.log('[Loading] Overlay hidden (no data)');
+                        }
+                    }
+                } else {
+                    console.log('[BVH] Heightmap buffer not fresh yet, will build when available');
+                    setTerrainGeometryDirty(false);
+                    if (loadingOverlay) {
+                        loadingOverlay.classList.remove('visible');
+                        console.log('[Loading] Overlay hidden (buffer not fresh)');
+                    }
+                }
+            });
+        });
     }
 
     //ray cast happens here
@@ -1723,6 +1928,7 @@ function main() {
     const brushPressed = controls.brushPressed === 1;
     const brushVisible = Number(controls.brushType) !== 0;
     const justPressed = brushPressed && lastBrushPressed === 0;
+    const justReleased = !brushPressed && lastBrushPressed === 1; // Brush was just released
     incrementHightMapBufCounter();
     stats.begin();
 
@@ -1732,10 +1938,22 @@ function main() {
         SimulationStep(SimFramecnt, flow, waterhight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, renderer, gl_context, camera);
         incrementSimFramecnt();
     }
+    
+    // Only track update counter if BVH updates are enabled
+    // This avoids unnecessary overhead when updates are disabled
+    if (enableBVHUpdates && controls.SimulationSpeed > 0 && !PauseGeneration) {
+        incrementGeometryUpdateCounter();
+    }
 
     const mouseMoved = (lastReadMouseX < 0 || lastReadMouseY < 0) ||
         (Math.abs(lastX - lastReadMouseX) + Math.abs(lastY - lastReadMouseY) > 1);
-    if ((justPressed || mouseMoved) && shouldReadHeightmap(brushPressed, brushVisible, simres)) {
+    
+    // Trigger heightmap read for brush raycasting (and BVH updates)
+    const shouldRead = (justPressed || mouseMoved) && shouldReadHeightmap(brushPressed, brushVisible, simres);
+    // Also read when brush is released to update BVH after brush stroke
+    const shouldReadForBVH = enableBVHUpdates && justReleased && terrainGeometry && terrainBVH;
+    
+    if (shouldRead || shouldReadForBVH) {
         // Read full resolution for accurate raycasting
         // Note: This is throttled by shouldReadHeightmap to avoid blocking
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
@@ -1743,13 +1961,158 @@ function main() {
         gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
         gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
-        // Don't mark as fresh here - this is for brush raycasting, not BVH building
+        // Mark as fresh so BVH updates can piggyback on this read (no extra readPixels cost)
+        setHightMapBufIsFresh(true);
         lastReadMouseX = lastX;
         lastReadMouseY = lastY;
         if (!brushPressed && !brushVisible && HightMapBufCounter >= MaxHightMapBufCounter) {
             resetHightMapBufCounter();
         }
     }
+
+    // ========== BVH Geometry Update Mechanism ==========
+    // Periodically update terrain geometry and refit BVH to keep it synchronized with erosion
+    // This avoids full BVH rebuilds (2+ seconds) by using fast refit operations (~50ms)
+    // CRITICAL: Only updates when heightmap is already fresh (from brush raycasting)
+    // This avoids expensive readPixels calls - we piggyback on existing heightmap reads
+    // Also triggers immediately on brush release to update after terrain modifications
+    // IMPORTANT: Updates are deferred to avoid blocking the render loop (BVH is not visible)
+    const shouldUpdateNow = enableBVHUpdates && terrainGeometry && terrainBVH && !terrainBVHBuildInProgress && HightMapBufIsFresh;
+    const updateTriggeredByBrush = justReleased; // Immediate update after brush stroke
+    const updateTriggeredByInterval = shouldUpdateGeometry(); // Periodic update during erosion
+    
+    if (shouldUpdateNow && (updateTriggeredByBrush || updateTriggeredByInterval)) {
+        // Copy heightmap data to avoid race conditions (heightmap buffer might be overwritten)
+        const heightmapCopy = new Float32Array(HightMapCpuBuf);
+        
+        // Clear fresh flag immediately (before async work) to prevent duplicate updates
+        setHightMapBufIsFresh(false);
+        
+        // Defer the actual update work to avoid blocking the render loop
+        // Since BVH is only used for raycasting (not rendering), we can update it asynchronously
+        const performAsyncUpdate = () => {
+            if (!terrainGeometry || !terrainBVH || terrainBVHBuildInProgress) {
+                return; // Safety check in case BVH was cleared during async delay
+            }
+            
+            // Update geometry positions with copied heightmap
+            updateTerrainGeometry(terrainGeometry, simres, heightmapCopy, 1.0);
+            
+            // Refit BVH bounding volumes to match updated geometry
+            // This is much faster than a full rebuild (~50ms vs 2000-5000ms)
+            terrainBVH.refit();
+            
+            // Reset update tracking
+            resetGeometryUpdateCounter();
+            setGeometryNeedsUpdate(false);
+        };
+        
+        // Use requestIdleCallback if available (runs when browser is idle)
+        // Fallback to setTimeout with 0ms delay (runs after current frame)
+        if ('requestIdleCallback' in window) {
+            requestIdleCallback(performAsyncUpdate, { timeout: 100 });
+        } else {
+            setTimeout(performAsyncUpdate, 0);
+        }
+    }
+
+    // ========== TEST: BVH Accuracy Degradation Over Time ==========
+    // Test how BVH accuracy degrades when geometry is not updated
+    // This helps determine optimal update frequency
+    const ENABLE_BVH_ACCURACY_TEST = false; // Set to true to enable test
+    const BVH_TEST_INTERVAL = 1000; // Test every N simulation frames
+    
+    if (ENABLE_BVH_ACCURACY_TEST && terrainGeometry && terrainBVH && SimFramecnt % BVH_TEST_INTERVAL === 0 && SimFramecnt > 0) {
+        // Read heightmap if not already fresh
+        if (!HightMapBufIsFresh) {
+            gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+            gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, read_terrain_tex, 0);
+            gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
+            gl_context.readPixels(0, 0, simres, simres, gl_context.RGBA, gl_context.FLOAT, HightMapCpuBuf);
+            gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
+        }
+        
+        // Test BVH raycast BEFORE geometry update
+        const testRayOrigin = vec3.fromValues(0, 2, 0); // Ray from above terrain
+        const testRayDir = vec3.fromValues(0, -1, 0); // Ray pointing down
+        const bvhPosBefore = vec2.create();
+        const heightmapPosBefore = vec2.create();
+        const bvhHitBefore = rayCastBVH(testRayOrigin, testRayDir, terrainBVH, terrainGeometry, bvhPosBefore);
+        rayCast(testRayOrigin, testRayDir, simres, HightMapCpuBuf, heightmapPosBefore);
+        
+        // Measure performance: Update + Refit
+        const updateStartTime = performance.now();
+        updateTerrainGeometry(terrainGeometry, simres, HightMapCpuBuf, 1.0);
+        const updateTime = performance.now() - updateStartTime;
+        
+        const refitStartTime = performance.now();
+        // Refit BVH to update bounding volumes after geometry changes
+        // Note: BVH stores references to geometry position buffer, so refit() recalculates bounding volumes
+        terrainBVH.refit();
+        const refitTime = performance.now() - refitStartTime;
+        
+        // Measure performance: Full rebuild (for comparison, but don't actually rebuild)
+        // This would be: const rebuildStartTime = performance.now(); new MeshBVH(terrainGeometry); const rebuildTime = performance.now() - rebuildStartTime;
+        // Skipping actual rebuild to avoid blocking, but documenting expected time
+        
+        // Test BVH raycast AFTER geometry update and refit
+        const bvhPosAfter = vec2.create();
+        const heightmapPosAfter = vec2.create();
+        const bvhHitAfter = rayCastBVH(testRayOrigin, testRayDir, terrainBVH, terrainGeometry, bvhPosAfter);
+        rayCast(testRayOrigin, testRayDir, simres, HightMapCpuBuf, heightmapPosAfter);
+        
+        // Calculate differences
+        const diffBefore = vec2.distance(bvhPosBefore, heightmapPosBefore);
+        const diffAfter = vec2.distance(bvhPosAfter, heightmapPosAfter);
+        const diffHeightmap = vec2.distance(heightmapPosBefore, heightmapPosAfter);
+        
+        // Test multiple raycast positions to measure accuracy degradation
+        const testRays = [
+            { origin: vec3.fromValues(0, 2, 0), dir: vec3.fromValues(0, -1, 0), name: 'center' },
+            { origin: vec3.fromValues(-0.3, 2, -0.3), dir: vec3.fromValues(0, -1, 0), name: 'corner1' },
+            { origin: vec3.fromValues(0.3, 2, 0.3), dir: vec3.fromValues(0, -1, 0), name: 'corner2' },
+        ];
+        
+        let maxDiff = 0;
+        let avgDiff = 0;
+        let testCount = 0;
+        
+        for (const testRay of testRays) {
+            const bvhPos = vec2.create();
+            const heightmapPos = vec2.create();
+            const bvhHit = rayCastBVH(testRay.origin, testRay.dir, terrainBVH, terrainGeometry, bvhPos);
+            rayCast(testRay.origin, testRay.dir, simres, HightMapCpuBuf, heightmapPos);
+            
+            if (bvhHit && heightmapPos[0] >= 0 && heightmapPos[0] <= 1) {
+                const diff = vec2.distance(bvhPos, heightmapPos);
+                maxDiff = Math.max(maxDiff, diff);
+                avgDiff += diff;
+                testCount++;
+            }
+        }
+        
+        if (testCount > 0) {
+            avgDiff /= testCount;
+        }
+        
+        console.log('[BVH Accuracy Test] Frame:', SimFramecnt, 'Resolution:', simres);
+        console.log('  Steps since last update:', geometryUpdateCounter);
+        console.log('  Update interval:', geometryUpdateInterval);
+        console.log('  Max BVH vs Heightmap diff:', maxDiff.toFixed(6));
+        console.log('  Avg BVH vs Heightmap diff:', avgDiff.toFixed(6));
+        console.log('  Accuracy:', maxDiff < 0.01 ? 'EXCELLENT' : maxDiff < 0.05 ? 'GOOD' : maxDiff < 0.1 ? 'ACCEPTABLE' : 'POOR');
+        console.log('  Performance:');
+        console.log('    Geometry update time:', updateTime.toFixed(2), 'ms');
+        console.log('    BVH refit time:', refitTime.toFixed(2), 'ms');
+        console.log('    Total update+refit time:', (updateTime + refitTime).toFixed(2), 'ms');
+        console.log('    Expected full rebuild time: ~2000-5000ms (not measured to avoid blocking)');
+        
+        // Log accuracy degradation warning if accuracy is poor
+        if (maxDiff > 0.1) {
+            console.warn('[BVH] Accuracy degradation detected! Consider reducing update interval.');
+        }
+    }
+    // ========== END TEST ==========
 
     lastBrushPressed = brushPressed ? 1 : 0;
 
