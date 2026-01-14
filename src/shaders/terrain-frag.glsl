@@ -24,7 +24,7 @@ uniform sampler2D sceneDepth;
 uniform sampler2D lavamap;
 
 #define PI 3.1415926
-const float LAVA_MAX_VOLUME = 10.0;
+const float LAVA_MAX_VOLUME = 50.0;
 
 
 layout (location = 0) out vec4 out_Col; // This is the final output color that you will see on your
@@ -55,6 +55,8 @@ uniform int u_FlowTrace;
 uniform float u_LavaGlowIntensity;
 uniform float u_Time; // Time for steam effect animation
 uniform float u_LavaSolidificationTemp; // Temperature threshold for solidification (default: 800.0 °C)
+uniform float u_LavaInitialTemp; // Initial temperature for new lava (default: 1200.0 °C)
+uniform float u_LavaAmbientTemp; // Ambient air temperature (default: 20.0 °C)
 uniform int u_LavaEnabled; // Flag to enable/disable lava rendering (1 = enabled, 0 = disabled)
 
 
@@ -274,23 +276,18 @@ void main()
             sampledTemp = 0.0;
         }
         
-        // Reject if temperature is out of valid range (0-2000°C)
+        // Reject if temperature is out of valid range
+        // Use actual max temperature from uniform (with some margin for safety)
         // This catches shadow map data which would be in 0-1 range
-        if (sampledTemp < 0.0 || sampledTemp > 2000.0) {
+        float maxValidTemp = u_LavaInitialTemp + 200.0; // Allow some margin above initial temp
+        if (sampledTemp < 0.0 || sampledTemp > maxValidTemp) {
             clampedVolume = 0.0;
             sampledTemp = 0.0;
         }
         
-        // Additional check: if temperature is suspiciously low (< 100°C) but volume exists,
-        // this might be shadow map data masquerading as lava - reject it
-        if (clampedVolume > 0.001 && sampledTemp > 0.0 && sampledTemp < 100.0) {
-            // Suspicious: has volume but very low temp - likely not real lava
-            clampedVolume = 0.0;
-            sampledTemp = 0.0;
-        }
         
         // Only use if both are valid and volume is significant
-        if (clampedVolume > 0.001 && sampledTemp >= 100.0) {
+        if (clampedVolume > 0.001) {
             lavaVolume = clampedVolume;
             lavaTemp = sampledTemp;
         }
@@ -452,9 +449,11 @@ void main()
         fcol = clamp(fcol, vec3(0.0), vec3(1.0));
     }else if(u_TerrainDebug == 12){
         // Lava Temperature debug view
-        // Temperature gradient: Blue (800°C) -> Green (1000°C) -> Yellow (1100°C) -> Red (1200°C)
+        // Temperature gradient: Blue (ambient) -> Green -> Yellow -> Red (initial)
         float temp = lavaTemp;
-        float tempNormalized = (temp - 800.0) / 400.0; // Normalize 800-1200°C to 0-1
+        // Normalize using FULL temperature range from ambient to initial
+        float tempRange = u_LavaInitialTemp - u_LavaAmbientTemp;
+        float tempNormalized = (temp - u_LavaAmbientTemp) / max(tempRange, 1.0); // Normalize to 0-1
         tempNormalized = clamp(tempNormalized, 0.0, 1.0);
         
         if (lavaVolume < 0.001) {
@@ -477,7 +476,9 @@ void main()
         // Lava Temperature + Volume combined
         // Show temperature as color, volume as intensity
         float temp = lavaTemp;
-        float tempNormalized = (temp - 800.0) / 400.0;
+        // Normalize using FULL temperature range from ambient to initial
+        float tempRange = u_LavaInitialTemp - u_LavaAmbientTemp;
+        float tempNormalized = (temp - u_LavaAmbientTemp) / max(tempRange, 1.0);
         tempNormalized = clamp(tempNormalized, 0.0, 1.0);
         float volIntensity = clamp(lavaVolume * 10.0, 0.0, 1.0);
         
@@ -602,13 +603,25 @@ void main()
     // Add glowing red/orange lava visualization based on temperature and volume
     // Only show orange glow for hot, active lava (not solidified rock)
     float solidificationTemp = u_LavaSolidificationTemp; // Use uniform from controls
-    bool isFullyCooled = lavaTemp <= solidificationTemp + 50.0; // Within 50°C of solidification
+    // Only consider lava "fully cooled" when:
+    // 1. Temperature is well BELOW solidification (at least 100°C below)
+    // 2. AND there's very little or no liquid lava volume left (< 0.01)
+    // This prevents flowing lava from showing as rock texture
+    bool isFullyCooled = lavaTemp < solidificationTemp - 100.0 && lavaVolume < 0.01;
     bool isSolidifiedRock = rockVal > 0.1 && isFullyCooled;
     
-    // Only process lava if volume is significant to avoid artifacts
-    if(lavaVolume > 0.001 && !isSolidifiedRock){
-        // Convert temperature to normalized 0-1 range (800-1200°C)
-        float tempNorm = clamp((lavaTemp - 800.0) / 400.0, 0.0, 1.0);
+    // Only process lava if volume is significant to avoid artifacts.
+    // Also skip full lava material in debug views so they can show
+    // raw data without being overridden by lava shading.
+    if(lavaVolume > 0.001 && !isSolidifiedRock && u_TerrainDebug == 0){
+        // Convert temperature to normalized 0-1 range using FULL temperature range
+        // This allows us to see color changes as lava cools from initial temp all the way down to ambient
+        float tempRange = u_LavaInitialTemp - u_LavaAmbientTemp;
+        float tempNorm = clamp((lavaTemp - u_LavaAmbientTemp) / max(tempRange, 1.0), 0.0, 1.0);
+        
+        // Also calculate solidification-normalized temp for color gradient transitions
+        float solidificationRange = u_LavaInitialTemp - u_LavaSolidificationTemp;
+        float solidificationNorm = clamp((lavaTemp - u_LavaSolidificationTemp) / max(solidificationRange, 1.0), -1.0, 1.0);
         
         // Simplified flow pattern - only calculate if lava exists
         vec2 flowUv1 = fs_Uv + vec2(1.5, -1.5) * u_Time * 0.02;
@@ -623,18 +636,33 @@ void main()
         vec3 hotLavaCol = vec3(0.9, 0.4, 0.05);     // Orange-red (reduced brightness)
         vec3 coolLavaCol = vec3(0.7, 0.15, 0.0);    // Deep orange-red
         vec3 coldestLavaCol = vec3(0.3, 0.03, 0.0); // Dark red (cooling)
+        vec3 nearSolidCol = vec3(0.15, 0.01, 0.0);  // Very dark red-brown (near solidification)
+        vec3 belowSolidCol = vec3(0.08, 0.005, 0.0); // Almost black (below solidification, still liquid)
         
-        // Multi-stage color gradient
+        // Multi-stage color gradient based on solidification-normalized temp
+        // This ensures color transitions happen at meaningful temperature points
         vec3 baseLavaCol;
-        if (tempNorm > 0.75) {
-            // Hottest range: bright yellow-orange (matches Three.js brightest areas)
-            baseLavaCol = mix(hotLavaCol, hottestLavaCol, (tempNorm - 0.75) / 0.25);
-        } else if (tempNorm > 0.5) {
-            // Hot range: orange-red (typical lava color)
-            baseLavaCol = mix(coolLavaCol, hotLavaCol, (tempNorm - 0.5) / 0.25);
+        if (solidificationNorm > 0.75) {
+            // Hottest range (above ~1100°C): bright yellow-orange
+            float t = (solidificationNorm - 0.75) / 0.25;
+            baseLavaCol = mix(hotLavaCol, hottestLavaCol, t);
+        } else if (solidificationNorm > 0.5) {
+            // Hot range (1000-1100°C): orange-red (typical lava color)
+            float t = (solidificationNorm - 0.5) / 0.25;
+            baseLavaCol = mix(coolLavaCol, hotLavaCol, t);
+        } else if (solidificationNorm > 0.25) {
+            // Cool range (900-1000°C): deep red to dark red
+            float t = (solidificationNorm - 0.25) / 0.25;
+            baseLavaCol = mix(coldestLavaCol, coolLavaCol, t);
+        } else if (solidificationNorm > 0.0) {
+            // Near solidification (800-900°C): very dark red-brown
+            float t = solidificationNorm / 0.25;
+            baseLavaCol = mix(nearSolidCol, coldestLavaCol, t);
         } else {
-            // Cool range: deep red to dark red
-            baseLavaCol = mix(coldestLavaCol, coolLavaCol, tempNorm / 0.5);
+            // Below solidification but still liquid (ambient to 800°C): fade to almost black
+            // Map from -1.0 (ambient) to 0.0 (solidification) smoothly
+            float t = clamp((solidificationNorm + 1.0) / 1.0, 0.0, 1.0);
+            baseLavaCol = mix(belowSolidCol, nearSolidCol, t);
         }
         
         // Apply flow pattern variation to color (like Three.js shader)
@@ -683,12 +711,15 @@ void main()
     // =====================================================
     
     // ========== STEAM EFFECT FOR WATER EVAPORATION ==========
+    // Only show steam in normal view; in debug views it obscures data.
     // Check if water is evaporating (lava + water + hot temp)
-    bool isEvaporating = lavaVolume > 0.001 && wval > 0.001 && lavaTemp > 800.0; // Lower from 1000.0 to 800.0
+    bool isEvaporating = (u_TerrainDebug == 0) &&
+                         (lavaVolume > 0.001 && wval > 0.001 && lavaTemp > u_LavaSolidificationTemp);
     
     if (isEvaporating) {
         // Calculate steam intensity based on temperature and water volume
-        float tempFactor = min(1.0, (lavaTemp - 800.0) / 200.0); // Updated threshold
+        float tempRange = u_LavaInitialTemp - u_LavaSolidificationTemp;
+        float tempFactor = min(1.0, (lavaTemp - u_LavaSolidificationTemp) / max(tempRange * 0.5, 1.0));
         float volumeFactor = min(1.0, wval * 10.0);
         float baseIntensity = tempFactor * volumeFactor;
         
@@ -718,7 +749,8 @@ void main()
         fcol = mix(fcol, steamColor, steamAlpha);
         
         // Optional: Add slight additive glow for hot steam
-        if (lavaTemp > 1100.0) {
+        float hotThreshold = u_LavaSolidificationTemp + (u_LavaInitialTemp - u_LavaSolidificationTemp) * 0.75;
+        if (lavaTemp > hotThreshold) {
             fcol += steamColor * density * 0.1; // Subtle additive glow
         }
     }

@@ -2,7 +2,7 @@
 precision highp float;
 
 uniform sampler2D readTerrain; // R: height, G: water, B: rock, A: base rock surface
-uniform sampler2D readLava;    // R: lava volume, G: temperature (normalized 0-1, 800-1200°C range)
+uniform sampler2D readLava;    // R: lava volume, G: temperature in Celsius
 uniform sampler2D readLavaFlux;
 
 uniform float u_SimRes;
@@ -15,6 +15,8 @@ uniform float u_LavaViscosityPreExp;      // Pre-exponential factor A (default: 
 uniform float u_LavaActivationEnergy;     // Activation energy E_a (default: 200000 J/mol)
 uniform float u_LavaDensity;               // Density (default: 2700 kg/m³)
 uniform float u_LavaGasConstant;          // Gas constant R = 8.314 J/(mol·K)
+uniform float u_LavaSolidificationTemp;  // Temperature threshold for solidification (default: 800.0 °C)
+uniform float u_LavaInitialTemp;         // Initial temperature for new lava (default: 1200.0 °C)
 
 layout (location = 0) out vec4 writeLavaFlux;
 
@@ -36,37 +38,21 @@ void main() {
     vec4 curFlux = texture(readLavaFlux, curuv);
 
     float lavaVolume = curLava.x;
-    float lavaTemp = curLava.y; // Temperature in Celsius (800-1200°C range)
+    float lavaTemp = curLava.y; // Temperature in Celsius
 
-    // Remove minimum volume threshold - let very thin flows still flow (they'll naturally pool in depressions)
-    // The flux system will naturally handle pooling when there's no downhill path
+    // Temperature-dependent viscosity:
+    // Normalize between solidification and initial temps using uniforms (Celsius values from GUI).
+    float T_solid = u_LavaSolidificationTemp;
+    float T_hot   = u_LavaInitialTemp;
+    float t = clamp((lavaTemp - T_solid) / max(T_hot - T_solid, 1.0), 0.0, 1.0);
 
-    // Convert temperature to Kelvin for Arrhenius equation
-    float tempKelvin = lavaTemp + 273.15; // Celsius to Kelvin
+    // When t = 1 (very hot) -> visc ≈ 1; when t = 0 (cold) -> visc ≈ maxSlowdown.
+    const float maxSlowdown = 20.0;
+    float visc = mix(maxSlowdown, 1.0, t);
 
-    // Arrhenius viscosity law: η(T) = A * exp(E_a / (R * T))
-    // Simplified for shader: viscosity = base_viscosity * exp(activation_energy / (gas_constant * temp_kelvin))
-    float viscosity = u_LavaViscosityPreExp * exp(u_LavaActivationEnergy / (u_LavaGasConstant * tempKelvin));
-    
-    // Clamp viscosity to reasonable range (10^2 to 10^5 Pa·s for basalt)
-    viscosity = clamp(viscosity, 100.0, 100000.0);
-
-    // Effective pipe length increases with viscosity (higher viscosity = slower flow)
-    // Real-world: Basaltic lava viscosity is 10-100 Pa·s (10,000-100,000x water's 0.001 Pa·s)
-    // But real flow speeds are only 2-10x slower, not 10,000x slower
-    // This is because flow speed depends on viscosity^0.5 to viscosity^0.33 (not linear)
-    float viscosityRatio = viscosity / 0.001; // Ratio to water viscosity (10,000-100,000,000)
-    
-    // Power-based scaling (matches real-world flow speed relationship)
-    // Flow speed ~ viscosity^(-0.5 to -0.33), so effectivePipeLen ~ viscosity^(0.15 to 0.25)
-    // Use a moderate power (0.18) to balance between too slow and too fast
-    // This makes hot lava (1200°C) flow 4-5x slower than water, and cool lava (800°C) flow 10-12x slower
-    float viscosityScaleFactor = pow(viscosityRatio, 0.18); // 0.18 power gives:
-    // At 1200°C: viscosity ~100 Pa·s, ratio = 100,000, factor = 4.2x
-    // At 1000°C: viscosity ~1,000 Pa·s, ratio = 1,000,000, factor = 5.5x  
-    // At 800°C: viscosity ~100,000 Pa·s, ratio = 100,000,000, factor = 10.5x
-    viscosityScaleFactor = clamp(viscosityScaleFactor, 1.0, 12.0); // Cap at 12x slower
-    float effectivePipeLen = pipelen * viscosityScaleFactor;
+    // Global lava vs water slowdown: even hot lava is slower than water.
+    const float lavaSlowFactor = 3.0;
+    float effectivePipeLen = pipelen * lavaSlowFactor;
 
     // Calculate height differences for flow (terrain height + lava height)
     // Check if neighbors have solidified rock (no active lava but rock material present)
@@ -106,25 +92,15 @@ void main() {
     float Hrightout_raw = (curTerrain.x + lavaVolume) - (right.x + rightEffectiveLava);
     float Hbottomout_raw = (curTerrain.x + lavaVolume) - (bottom.x + bottomEffectiveLava);
     float Hleftout_raw = (curTerrain.x + lavaVolume) - (left.x + leftEffectiveLava);
-    
-    // Check if flow is uphill (negative height difference)
-    // If uphill, completely prevent flow in that direction
-    bool topIsUphill = Htopout_raw <= 0.0f;
-    bool rightIsUphill = Hrightout_raw <= 0.0f;
-    bool bottomIsUphill = Hbottomout_raw <= 0.0f;
-    bool leftIsUphill = Hleftout_raw <= 0.0f;
-    
-    // Clamp height differences to non-negative (only allow downhill flow)
-    // This prevents lava from flowing uphill
+
+    // Only allow downhill flow; clamp to non-negative like water
     float Htopout = max(0.0f, Htopout_raw);
     float Hrightout = max(0.0f, Hrightout_raw);
     float Hbottomout = max(0.0f, Hbottomout_raw);
     float Hleftout = max(0.0f, Hleftout_raw);
 
-    // Flow velocity based on gravity-driven flow: v = (ρ * g * h² * sin(θ)) / (3 * η)
-    // Simplified for pipe model: flux = (height_diff * gravity * area) / (pipe_length * viscosity)
-    // Remove damping to match water flow behavior (water uses damping = 1.0, which is no damping)
-    float damping = 1.0; // No damping, match water flow behavior
+    // Very thin lava sheets barely move.
+    float minFlowVolume = 0.005;
     
     // Declare flux variables
     float ftopout;
@@ -132,15 +108,19 @@ void main() {
     float fbottomout;
     float fleftout;
     
-    // Normal flow calculation - match water flow behavior exactly
-    // Water allows some flux accumulation even when height differences are small
-    // This is important for pooling - when lava reaches a depression, flux should decay naturally
-    // but still allow volume to accumulate from inflow
-    // Match water's flux calculation exactly (water doesn't check for uphill, it just uses max(0, ...))
-    ftopout = max(0.0f, curFlux.x * damping + (u_timestep * g * u_PipeArea * Htopout) / effectivePipeLen);
-    frightout = max(0.0f, curFlux.y * damping + (u_timestep * g * u_PipeArea * Hrightout) / effectivePipeLen);
-    fbottomout = max(0.0f, curFlux.z * damping + (u_timestep * g * u_PipeArea * Hbottomout) / effectivePipeLen);
-    fleftout = max(0.0f, curFlux.w * damping + (u_timestep * g * u_PipeArea * Hleftout) / effectivePipeLen);
+    if (lavaVolume < minFlowVolume) {
+        // Too little lava to flow meaningfully; let it pool.
+        ftopout = 0.0f;
+        frightout = 0.0f;
+        fbottomout = 0.0f;
+        fleftout = 0.0f;
+    } else {
+        // Water-like flux, slowed by viscosity and global lava factor.
+        ftopout    = max(0.0f, curFlux.x + (u_timestep * g * u_PipeArea * Htopout)    / (effectivePipeLen * visc));
+        frightout  = max(0.0f, curFlux.y + (u_timestep * g * u_PipeArea * Hrightout)  / (effectivePipeLen * visc));
+        fbottomout = max(0.0f, curFlux.z + (u_timestep * g * u_PipeArea * Hbottomout) / (effectivePipeLen * visc));
+        fleftout   = max(0.0f, curFlux.w + (u_timestep * g * u_PipeArea * Hleftout)   / (effectivePipeLen * visc));
+    }
 
     float lavaOut = u_timestep * (ftopout + frightout + fbottomout + fleftout);
     

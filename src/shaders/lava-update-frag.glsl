@@ -2,7 +2,7 @@
 precision highp float;
 
 uniform sampler2D readTerrain; // R: height, G: water, B: rock, A: base rock surface
-uniform sampler2D readLava;     // R: lava volume, G: temperature (normalized 0-1, 800-1200°C range)
+uniform sampler2D readLava;    // R: lava volume, G: temperature in Celsius
 uniform sampler2D readLavaFlux; // R: top, G: right, B: bottom, A: left
 
 uniform float u_SimRes;
@@ -11,7 +11,7 @@ uniform float u_timestep;
 uniform float u_PipeArea;
 
 // Lava physics parameters
-uniform float u_LavaAirHeatTransfer;     // Heat transfer coefficient for air (default: 30.0 W/(m²·K))
+uniform float u_LavaAirHeatTransfer;     // Heat transfer coefficient for air (default: 200.0 W/(m^2 K))
 uniform float u_LavaWaterHeatTransfer;   // Heat transfer coefficient for water (default: 2000.0 W/(m²·K))
 uniform float u_LavaAmbientTemp;         // Ambient air temperature (default: 20.0 °C)
 uniform float u_LavaWaterTemp;            // Water temperature (default: 10.0 °C)
@@ -42,7 +42,7 @@ in vec2 fs_Pos;
 
 // Noise functions for source variation
 #define OCTAVES 6
-const float LAVA_MAX_VOLUME = 10.0;
+const float LAVA_MAX_VOLUME = 50.0;
 
 float random (in vec2 st) {
     return fract(sin(dot(st.xy, vec2(12.9898,78.233)))*43758.5453123);
@@ -88,6 +88,11 @@ void main() {
     vec4 bottomflux = texture(readLavaFlux, curuv + vec2(0.0f, -div));
     vec4 leftflux = texture(readLavaFlux, curuv + vec2(-div, 0.0f));
 
+    vec4 topLava = texture(readLava, curuv + vec2(0.0f, div));
+    vec4 rightLava = texture(readLava, curuv + vec2(div, 0.0f));
+    vec4 bottomLava = texture(readLava, curuv + vec2(0.0f, -div));
+    vec4 leftLava = texture(readLava, curuv + vec2(-div, 0.0f));
+
     // Outflow flux
     float ftopout = curFlux.x;
     float frightout = curFlux.y;
@@ -105,30 +110,26 @@ void main() {
     newLavaVolume = min(newLavaVolume, LAVA_MAX_VOLUME);
     
     // If lava is flowing in (positive delta), mix temperature with incoming lava
-    // Assume incoming lava is at initial temp (hot), mix based on volume ratio
-    float lavaTemp;
-    if (deltavol > 0.0001f && curLava.x > 0.0001f) {
-        // Mix temperatures: existing lava temp vs incoming lava temp (assume initial temp)
-        float existingVolume = curLava.x;
-        float incomingVolume = deltavol;
-        float totalVolume = newLavaVolume;
-        
-        // Weighted average temperature
-        float existingTemp = curLava.y;
-        float incomingTemp = u_LavaInitialTemp; // Incoming lava is hot
-        
-        // Mix based on volume ratio
-        float existingWeight = existingVolume / totalVolume;
-        float incomingWeight = incomingVolume / totalVolume;
-        lavaTemp = existingTemp * existingWeight + incomingTemp * incomingWeight;
-    } else if (deltavol > 0.0001f && curLava.x < 0.0001f) {
-        // New lava in empty cell - set to initial temp
-        lavaTemp = u_LavaInitialTemp;
-    } else {
-        // No inflow or outflow - keep existing temperature
-        lavaTemp = curLava.y;
+    // Use inflow-weighted neighbor temperatures so cooled lava stays cool.
+    float incomingVolume = u_timestep * fin / (u_PipeLen * u_PipeLen);
+    float lavaTemp = curLava.y;
+    if (incomingVolume > 0.0001f) {
+        float incomingTemp = curLava.y;
+        if (fin > 0.0001f) {
+            incomingTemp = (topLava.y * inputflux.x +
+                rightLava.y * inputflux.y +
+                bottomLava.y * inputflux.z +
+                leftLava.y * inputflux.w) / fin;
+        }
+
+        if (curLava.x > 0.0001f) {
+            lavaTemp = (curLava.y * curLava.x + incomingTemp * incomingVolume)
+                / max(curLava.x + incomingVolume, 0.0001f);
+        } else {
+            lavaTemp = incomingTemp;
+        }
     }
-    
+
     float lavaVolume = newLavaVolume;
 
     // Check for water contact (water in terrain G channel)
@@ -196,7 +197,12 @@ void main() {
         float surfaceArea = baseSurfaceArea * thinFlowMultiplier;
         
         // Mass
+        // NOTE: Cap effective mass so cooling is actually visible at simulation scales.
+        // Very large "physical" mass values were making dT/dt effectively zero.
         float mass = lavaVolume * u_LavaDensity;
+        float minEffectiveMass = u_LavaDensity * 0.02; // treat at least 2cm thickness
+        float maxEffectiveMass = u_LavaDensity * 0.5;  // and at most 50cm per cell
+        mass = clamp(mass, minEffectiveMass, maxEffectiveMass);
         
         // Effective heat transfer coefficient (mix between air and water)
         float h_effective = mix(u_LavaAirHeatTransfer, u_LavaWaterHeatTransfer, waterContact);
@@ -207,60 +213,51 @@ void main() {
         float totalFlux = abs(curFlux.x) + abs(curFlux.y) + abs(curFlux.z) + abs(curFlux.w);
         float flowSpeed = totalFlux / max(lavaVolume, 0.001f); // Flux per volume = flow speed
         
-        // For ambient cooling (no water), increase the effective heat transfer
-        // Real lava cools slowly, but not this slowly
+        // For ambient cooling (no water), only slightly increase the effective heat transfer
+        // so cooling is visible but not instant, especially for thick pools.
         if (waterContact < 0.5f) {
-            // Ambient cooling should be more effective for visible cooling
-            h_effective *= 8.0;
+            h_effective *= 1.5;
         }
         
-        // Also, for large pools, the mass makes cooling too slow
-        // Add a volume-dependent cooling boost to ensure pools still cool
+        // Let the basic physics (surface area vs mass) handle pool vs thin-flow differences.
+        // Avoid extra volume-based boosts that were making lava cool unrealistically fast.
         float volumeCoolingFactor = 1.0;
-        if (lavaVolume > 0.5) {
-            // Large pools should still cool, just slower than thin flows
-            // Reduce the mass effect for very large pools
-            volumeCoolingFactor = 1.0 + sqrt(lavaVolume - 0.5) * 0.5; // Boost cooling for large pools
-        }
         
         // Newton's law of cooling
         if (mass > 0.0f) {
             float coolingRate = (h_effective * surfaceArea * (lavaTemp - T_ambient_effective)) / (mass * u_LavaSpecificHeat);
-            coolingRate *= volumeCoolingFactor; // Apply volume-dependent boost
+            coolingRate *= volumeCoolingFactor;
             
-            // Flowing lava cools MUCH faster - increased air exposure
-            // Fast flows (> 0.1 flux/volume) cool 3-5x faster
+            // Flowing lava cools faster due to increased air exposure,
+            // but keep the boost moderate so hot streams stay hot for a while.
             if (flowSpeed > 0.1) {
-                float flowCoolingBoost = 1.0 + flowSpeed * 20.0; // Up to 3x boost for fast flows
-                coolingRate *= min(flowCoolingBoost, 5.0); // Cap at 5x
+                float flowCoolingBoost = 1.0 + flowSpeed * 10.0; // Softer scaling
+                coolingRate *= min(flowCoolingBoost, 2.5);       // Cap at 2.5x
             } else if (flowSpeed > 0.05) {
-                coolingRate *= 2.0; // Moderate flows cool 2x faster
+                coolingRate *= 1.5; // Moderate flows cool 1.5x faster
             }
             
-            // Add additional cooling boost for very thin flows (edges)
-            // For extremely thin edges (< 0.005 volume), apply exponential cooling boost
+            // Add additional cooling boost for very thin flows (edges),
+            // but keep it lower so edges don't freeze instantly.
             if (lavaVolume < 0.005) {
-                // Exponential boost: the thinner, the faster it cools
                 float thinnessFactor = 0.005 / max(lavaVolume, 0.0001f);
-                coolingRate *= thinnessFactor * 5.0; // Up to 25x faster for very thin edges
+                coolingRate *= min(thinnessFactor * 2.0, 8.0); // Cap edge boost
             } else if (lavaVolume < 0.01) {
-                // Still thin, but less aggressive
-                coolingRate *= 4.0; // Increase from 2.0 to 4.0
+                coolingRate *= 2.0;
             }
             
-            // Make water cooling more aggressive - water should cool lava much faster
-            // When water is present, multiply cooling rate significantly
+            // Make water cooling stronger than air, but still smooth.
             if (waterContact > 0.5f) {
-                coolingRate *= 10.0f; // 10x faster cooling when water is present
+                coolingRate *= 4.0f;   // With water, faster cooling
+            } else {
+                coolingRate *= 1.2f;   // Small ambient-only boost
             }
             
             lavaTemp -= coolingRate * u_timestep;
         }
         
-        // Clamp temperature to valid range - allow cooling below 800°C for solidification
-        // Only clamp upper bound, allow cooling below solidification temp
-        lavaTemp = min(lavaTemp, 1200.0); // Only clamp upper bound
-        // Don't clamp lower bound - allow cooling to solidification temp and below
+        // Clamp temperature to realistic simulation range
+        lavaTemp = clamp(lavaTemp, u_LavaAmbientTemp, u_LavaInitialTemp);
     } else {
         // No lava, reset temperature
         lavaTemp = u_LavaInitialTemp;

@@ -1043,6 +1043,8 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaActivationEnergy"), controls.LavaActivationEnergy);
     gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaDensity"), controls.LavaDensity);
     gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaGasConstant"), 8.314); // Gas constant R = 8.314 J/(mol·K)
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaSolidificationTemp"), controls.LavaSolidificationTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaInitialTemp"), controls.LavaInitialTemp);
 
     renderer.render(camera,lavaFlow,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -1162,6 +1164,7 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaMeltThreshold"), controls.LavaMeltThreshold);
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaLatentHeatFusion"), controls.LavaLatentHeatFusion);
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaSolidificationTemp"), controls.LavaSolidificationTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaInitialTemp"), controls.LavaInitialTemp);
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaDensity"), controls.LavaDensity);
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaWaterTemp"), controls.LavaWaterTemp);
 
@@ -2030,6 +2033,8 @@ function main() {
     lambert.setInt(controls.SedimentTrace ? 0 : 1,"u_SedimentTrace");
     lambert.setFloat(controls.LavaGlowIntensity, "u_LavaGlowIntensity");
     lambert.setFloat(controls.LavaSolidificationTemp, "u_LavaSolidificationTemp");
+    lambert.setFloat(controls.LavaInitialTemp, "u_LavaInitialTemp");
+    lambert.setFloat(controls.LavaAmbientTemp, "u_LavaAmbientTemp");
     lambert.setInt(1, "u_LavaEnabled");
     lambert.setTime(timer);
     // Fill reusable arrays with source data (reuse instead of creating new ones)
@@ -2137,6 +2142,8 @@ function main() {
     gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaActivationEnergy"), controls.LavaActivationEnergy);
     gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaDensity"), controls.LavaDensity);
     gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaGasConstant"), 8.314); // Gas constant R = 8.314 J/(mol·K)
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaSolidificationTemp"), controls.LavaSolidificationTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaFlow.prog,"u_LavaInitialTemp"), controls.LavaInitialTemp);
 
     lavaUpdate.setSimres(simres);
     lavaUpdate.setPipeLen(controls.pipelen);
@@ -2169,6 +2176,7 @@ function main() {
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaMeltThreshold"), controls.LavaMeltThreshold);
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaLatentHeatFusion"), controls.LavaLatentHeatFusion);
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaSolidificationTemp"), controls.LavaSolidificationTemp);
+    gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaInitialTemp"), controls.LavaInitialTemp);
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaDensity"), controls.LavaDensity);
     gl_context.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaWaterTemp"), controls.LavaWaterTemp);
 

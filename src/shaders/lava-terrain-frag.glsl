@@ -12,6 +12,7 @@ uniform float u_LavaContactHeatTransfer; // Contact heat transfer coefficient (d
 uniform float u_LavaMeltThreshold; // Terrain melting temperature (default: 1200.0 °C)
 uniform float u_LavaLatentHeatFusion; // Latent heat of fusion (default: 400000.0 J/kg)
 uniform float u_LavaSolidificationTemp; // Temperature threshold for solidification (default: 800.0 °C)
+uniform float u_LavaInitialTemp; // Initial temperature for new lava (default: 1200.0 °C)
 uniform float u_LavaDensity; // Density (default: 2700.0 kg/m³)
 uniform float u_LavaWaterTemp; // Water temperature (default: 10.0 °C)
 
@@ -64,13 +65,11 @@ void main() {
             // Reduce terrain height (carve channel)
             newTerrainHeight = terrainHeight - heightReduction;
             
-            // Mark melted area as rock material
-            // The melted terrain becomes rock (like obsidian or cooled lava rock)
-            float rockFromMelting = min(1.0, heightReduction * 10.0); // Scale based on amount melted
-            newRockMaterial = max(rockMaterial, rockFromMelting);
-            
-            // Also update base rock surface height if this is new rock
-            if (rockFromMelting > 0.1) {
+            // DON'T mark melted area as rock material while hot lava is flowing over it
+            // The melted terrain will become rock later when lava solidifies on top of it
+            // This prevents flowing hot lava from showing rock texture prematurely
+            // Only update base rock surface height if there's already rock material
+            if (rockMaterial > 0.1) {
                 baseRockSurfaceHeight = max(baseRockSurfaceHeight, newTerrainHeight);
             }
         }
@@ -106,10 +105,15 @@ void main() {
         bool hasAdjacentWater = neighborWater > waterVolume * 1.5; // Significant water in neighbors
 
         // Make evaporation more aggressive for hot lava
+        // Use relative temperature thresholds based on the actual temperature range
+        float tempRange = u_LavaInitialTemp - u_LavaSolidificationTemp;
+        float veryHotThreshold = u_LavaSolidificationTemp + tempRange * 0.75; // 75% of range (e.g., 1100°C if 800-1200°C)
+        float hotThreshold = u_LavaSolidificationTemp + tempRange * 0.5;      // 50% of range (e.g., 1000°C if 800-1200°C)
+        
         float evaporationMultiplier = 1.0;
-        if (lavaTemp > 1100.0) {
+        if (lavaTemp > veryHotThreshold) {
             evaporationMultiplier = 3.0; // 3x faster for very hot lava
-        } else if (lavaTemp > 1000.0) {
+        } else if (lavaTemp > hotThreshold) {
             evaporationMultiplier = 2.0; // 2x faster for hot lava
         }
 
@@ -239,6 +243,32 @@ void main() {
                 // Remove solidified volume from liquid lava
                 newLavaVolume -= solidifiedVolume;
             }
+        }
+
+        // Additional top-down solidification for deeper lava pools
+        if (lavaTemp < solidificationThreshold - 80.0 &&
+            newLavaVolume >= solidificationVolumeThreshold) {
+            // Slowly convert a fraction of the deep pool from the top down
+            float deepSolidificationRate = 0.03; // units of height per second
+            float deepSolidifiedVolume = min(newLavaVolume, deepSolidificationRate * u_timestep);
+            if (deepSolidifiedVolume > 0.0) {
+                newTerrainHeight += deepSolidifiedVolume;
+                baseRockSurfaceHeight = max(baseRockSurfaceHeight, newTerrainHeight);
+
+                float deepRock = min(1.0, deepSolidifiedVolume);
+                newRockMaterial = max(newRockMaterial, deepRock);
+
+                newLavaVolume -= deepSolidifiedVolume;
+            }
+        }
+
+        // Catch-up: if lava is very cold and only a tiny amount remains, turn it fully to rock.
+        if (lavaTemp < u_LavaSolidificationTemp - 150.0 &&
+            newLavaVolume > 0.0 && newLavaVolume < 0.005) {
+            newTerrainHeight += newLavaVolume;
+            baseRockSurfaceHeight = max(baseRockSurfaceHeight, newTerrainHeight);
+            newRockMaterial = max(newRockMaterial, min(1.0, newLavaVolume + 0.2));
+            newLavaVolume = 0.0;
         }
     }
 

@@ -22,14 +22,14 @@ This document consolidates all lava simulation features, implementation details,
 ### Core Functionality
 
 - **Physics-Based Lava Flow**: Temperature-dependent viscosity using Arrhenius viscosity law
-- **Flow Speed**: Lava flows 2-10x slower than water (relative to water simulation, not real-world ratios)
+- **Flow Speed**: Lava flows roughly 5-25x slower than water (temperature + yield threshold).
 - **Temperature System**: Lava temperature ranges from 800°C (solidification) to 1200°C (initial)
 - **Cooling System**: 
-  - Air cooling: ~1-2 minutes from 1200°C to 800°C
-  - Water cooling: 10x faster than air cooling
+  - Air cooling: tuned for visible cooling in tens of seconds for pools
+  - Water cooling: ~15x faster than air cooling
 - **Water Interaction**: 
   - Hot lava rapidly cools when in contact with water
-  - Water evaporates when in contact with hot lava (10x evaporation rate)
+  - Water evaporates when in contact with hot lava (15x evaporation rate)
   - Water erosion is prevented under hot lava (lava protects terrain)
 - **Thermal Erosion**: Hot lava (above 1200°C) melts terrain, carving channels
 - **Solidification**: Cooled lava (below 800°C) solidifies into rock material, filling channels
@@ -87,7 +87,7 @@ The lava simulation consists of three main passes executed sequentially each fra
 
 - `read_lava_tex` / `write_lava_tex`: Lava information map
   - **R channel**: Lava volume
-  - **G channel**: Lava temperature (normalized 800-1200°C range)
+  - **G channel**: Lava temperature in Celsius (can cool below solidification)
   
 - `read_lava_flux_tex` / `write_lava_flux_tex`: Lava flux information
   - **R channel**: Flux toward up direction (fT)
@@ -121,14 +121,14 @@ Where:
 - `R` = Gas constant (8.314 J/(mol·K))
 - `T` = Temperature in Kelvin (Celsius + 273.15)
 
-**Flow Speed Scaling**: To keep lava flow speeds in the same ballpark as water (2-10x slower), the effective pipe length is modified:
+**Flow Speed Scaling**: To keep lava flow speeds in the same ballpark as water (roughly 5-25x slower), the effective pipe length is modified:
 
 ```
-effectivePipeLen = pipelen * pow(viscosityRatio, 0.18)
-viscosityScaleFactor = clamp(pow(viscosityRatio, 0.18), 1.0, 12.0)
+effectivePipeLen = pipelen * pow(viscosityRatio, 0.2)
+viscosityScaleFactor = clamp(pow(viscosityRatio, 0.2), 1.0, 25.0)
 ```
 
-This ensures lava flows 2-12x slower than water, not orders of magnitude slower.
+This keeps lava slower than water without freezing it outright.
 
 ### Newton's Law of Cooling
 
@@ -147,8 +147,9 @@ Where:
 - `c_p` = Specific heat capacity
 
 **Cooling Multipliers**:
-- Air cooling: `LavaAirHeatTransfer` (default: 200 W/(m²·K)) with 2x multiplier for ambient cooling
-- Water cooling: `LavaWaterHeatTransfer` (default: 2000 W/(m²·K)) with 10x multiplier
+- Air cooling: `LavaAirHeatTransfer` (default: 200 W/(mA?A?K)) with ~60x ambient multiplier
+- Water cooling: `LavaWaterHeatTransfer` (default: 2000 W/(mA?A?K)) with ~15x multiplier
+- Large pools: volume-dependent boost (1.0 + sqrt(volume) * 2.0)
 - Flowing lava: Up to 5x faster cooling based on flow speed
 - Thin flows (edges): Up to 10x faster cooling for very thin flows (< 0.005 volume)
 
@@ -177,12 +178,12 @@ Hot lava evaporates water when in contact:
 2. Vaporize water: Q2 = m_water * L_v
 3. Total energy needed: Q_total = Q1 + Q2
 4. Energy available: Q_available = h_water * A * (T_lava - T_water) * dt
-5. Water vaporized: m_vaporized = min(Q_available / Q_total, m_water) * 10.0
+5. Water vaporized: m_vaporized = min(Q_available / Q_total, m_water) * 15.0
 ```
 
 Where:
 - `L_v` = Latent heat of vaporization (2,260,000 J/kg)
-- Multiplier of 10.0 for visible effect
+- Multiplier of 15.0 for visible effect
 - 20x boost when water is directly on top of lava
 
 ### Solidification
@@ -190,14 +191,16 @@ Where:
 Cooled lava solidifies into rock material:
 
 ```
-Solidification rate = baseRate * (1.0 + tempFactor * (solidificationTemp - lavaTemp) / 100.0)
+Solidification rate = baseRate * (1.0 + tempFactor * 1.2) * poolFactor * waterBoost
 ```
 
 Where:
-- `baseRate` = 0.1 (base solidification rate)
-- `tempFactor` = 1.0 (temperature factor)
+- `baseRate` = 0.08 (base solidification rate)
+- `tempFactor` = 1.2 (temperature factor multiplier)
 - `solidificationTemp` = 800°C (solidification temperature)
-- Rate capped at 0.2 maximum
+- `poolFactor` = 1.0 + sqrt(volume) * 0.08
+- `waterBoost` = 5x direct contact, 2x adjacent
+- Rate capped at 0.25 maximum
 
 Solidified lava:
 - Converts to rock material (scale factor 1.0, value 0.5-1.0)
@@ -229,8 +232,8 @@ Solidified lava:
 6. Scale effective pipe length based on viscosity
 7. Calculate flux for each direction: `flux = (height_diff * gravity * area) / (effectivePipeLen)`
 8. Allow fresh lava to flow over solidified rock (treat as zero lava height)
-9. Clamp height differences to prevent uphill flow
-10. Reset flux to 0.0 if height difference is non-positive
+9. Apply a temperature-based flow threshold so cooler lava requires more slope
+10. Dampen previous flux to reduce sloshing and help pooling
 
 **Uniforms**:
 - `u_LavaViscosityPreExp`: Pre-exponential factor
@@ -258,7 +261,7 @@ Solidified lava:
 5. Calculate surface area (accounts for thin flows)
 6. Apply Newton's law of cooling (air or water)
 7. Apply cooling boost for flowing lava (based on flow speed)
-8. Apply cooling boost for thin flows (edges of pools)
+8. Apply cooling boosts for thin flows and large pools
 9. Handle lava brush (brush type 7)
 10. Handle lava sources with FBM noise variation
 
@@ -323,7 +326,7 @@ Solidified lava:
 
 **Lava Rendering Logic**:
 1. Sample lava texture (if enabled)
-2. Validate lava data (volume 0-10.0, temp 0-2000°C)
+2. Validate lava data (volume 0-50.0, temp 0-2000°C)
 3. Calculate temperature-normalized value (0-1 range)
 4. Generate animated flow patterns using FBM noise
 5. Multi-stage color gradient (yellow-orange to deep red)
@@ -353,7 +356,7 @@ Solidified lava:
 **Lava Pooling**:
 - Samples `lavamap` texture
 - Extracts lava volume from R channel
-- Validates lava data (volume 0-10.0, temp 0-2000°C)
+- Validates lava data (volume 0-50.0, temp 0-2000°C)
 - Adds lava volume to height calculation: `(yval + sval + wval + lval)/u_SimRes`
 - This allows lava to pool like water
 
@@ -369,7 +372,7 @@ Solidified lava:
 - Format: RGBA32F
 - Size: `simres × simres`
 - Channels:
-  - **R**: Lava volume (0.0 to ~10.0)
+  - **R**: Lava volume (0.0 to ~50.0)
   - **G**: Lava temperature in Celsius (800-1200°C range, but can go lower for solidification)
   - **B**: Unused (0.0)
   - **A**: Unused (0.0)
@@ -452,6 +455,14 @@ All lava physics parameters are in the "Lava Physics Parameters" folder in the G
 1. **Lava source flow speed**: May need adjustment to match brush speed
 2. **Edge cooling**: Edges of lava pools may not cool as fast as desired
 3. **Volume pooling**: Lava volume may not pool correctly (similar to water pooling issue)
+
+
+### Fix Notes (Latest)
+
+- Added temperature-based flow threshold and damping so lava pools instead of sloshing.
+- Increased ambient cooling and pool cooling; water contact now boosts cooling and solidification.
+- Relaxed lava sampling validation so cooled lava still contributes to pooled height.
+- Relaxed flow threshold and viscosity scaling to restore movement when pools stalled.
 
 ---
 
