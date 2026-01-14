@@ -158,8 +158,6 @@ Where:
 Hot lava melts terrain through thermal erosion:
 
 ```
-Heat flux: Q = h_contact * A * (T_lava - T_melt)
-Melting rate: dm/dt = Q / L_f
 ```
 
 Where:
@@ -168,6 +166,28 @@ Where:
 - `L_f` = Latent heat of fusion (`LavaLatentHeatFusion`, default: 400000 J/kg)
 
 Melted terrain is marked as rock material.
+
+### Lava Erosion (Thermal + Mechanical)
+
+Flowing lava can actively **erode and reshape** the underlying terrain through a combination of thermal and mechanical processes:
+
+1. **Thermal Erosion (Dominant in this project)**  
+   - Extremely hot lava (\(T_\text{lava} \gg T_\text{melt}\)) transfers heat into the substrate, melting and incorporating it into the flow.  
+   - In the real world this has been documented, for example, in the Cave Basalt at Mount St. Helens, where basaltic lava thermally eroded and contaminated underlying dacitic material.  
+   - In the simulation this is represented by the `lava-terrain-frag.glsl` thermal erosion path (see *Thermal Erosion (Melting)* above), which:
+     - Computes a heat flux \(Q = h_\text{contact} A (T_\text{lava} - T_\text{melt})\).  
+     - Converts that into a melt rate and **reduces terrain height** along active lava channels.  
+     - Marks the melted substrate as rock material so carved channels become rock-armored once flows cool and solidify.
+
+2. **Mechanical Erosion (Shear + Scouring)**  
+   - Real lava can also erode mechanically via shear, plucking, and abrasion when fast, dense flows move over weaker substrates (or over partially molten material).  
+   - Observationally this helps deepen and widen lava channels and tubes, and may contribute to sinuous rilles and lava-carved channels on the Moon and Mars.  
+   - The current implementation *implicitly* captures part of this behavior via:
+     - Higher thermal erosion where flow speeds and fluxes are high (more hot lava passing over the same cell).  
+     - Downcutting and widening of channels because melted material is removed from the height field and re-deposited as rock.
+   - A future extension could add an explicit **mechanical erosion term** that scales with lava flux magnitude and local slope, further deepening channels even when temperatures are only slightly above \(T_\text{melt}\).
+
+Together, these effects let lava both **build up** the landscape (by depositing and solidifying) and **cut down** into it (by thermally and mechanically eroding channels), matching the mixed constructive/destructive role seen in real volcanic terrains.
 
 ### Water Evaporation
 
@@ -550,5 +570,4 @@ Lava sources are similar to water sources:
 ## Summary
 
 The lava system is a comprehensive physics-based simulation with three main shader passes, temperature-dependent viscosity, thermal erosion, water interaction, and solidification. The ghosting issue is resolved by binding lava/terrain textures for the scene depth pass, so lava pooling now works. Lava simulation and rendering are re-enabled in code.
-
 

@@ -45,33 +45,21 @@ void main() {
     // Only process if lava is present
     if (lavaVolume > 0.001) {
         // ========== MELTING (Carving Channels) ==========
-        // Hot lava melts terrain through thermal erosion
-        // Heat flux: Q = h_contact * A * (T_lava - T_melt)
-        // Melting rate: dm/dt = Q / L_f
-        if (lavaTemp > u_LavaMeltThreshold) {
-            // Calculate heat flux
-            float surfaceArea = sqrt(lavaVolume); // Simplified surface area
-            float heatFlux = u_LavaContactHeatTransfer * surfaceArea * (lavaTemp - u_LavaMeltThreshold);
-            
-            // Calculate melting rate
-            float mass = lavaVolume * u_LavaDensity;
-            float meltingRate = heatFlux / max(u_LavaLatentHeatFusion, 0.001);
-            float massMelted = meltingRate * u_timestep;
-            
-            // Convert mass to height reduction (simplified: assume density similar to terrain)
-            float heightReduction = massMelted / (u_LavaDensity * 1.0); // 1.0 = unit area
-            heightReduction = clamp(heightReduction, 0.0, terrainHeight); // Don't go below zero
-            
-            // Reduce terrain height (carve channel)
-            newTerrainHeight = terrainHeight - heightReduction;
-            
-            // DON'T mark melted area as rock material while hot lava is flowing over it
-            // The melted terrain will become rock later when lava solidifies on top of it
-            // This prevents flowing hot lava from showing rock texture prematurely
-            // Only update base rock surface height if there's already rock material
-            if (rockMaterial > 0.1) {
-                baseRockSurfaceHeight = max(baseRockSurfaceHeight, newTerrainHeight);
-            }
+        // Physics-driven melt: heat flux -> mass melted -> height reduction
+        float tempExcess = max(lavaTemp - u_LavaMeltThreshold, 0.0);
+        if (tempExcess > 0.0) {
+            float surfaceArea = sqrt(max(lavaVolume, 0.0001f)); // contact area
+            float heatFlux = u_LavaContactHeatTransfer * surfaceArea * tempExcess;
+            float massMelted = (heatFlux * u_timestep) / max(u_LavaLatentHeatFusion, 0.001);
+            float heightReduction = massMelted / max(u_LavaDensity, 1.0);
+            // Rock melts slower; scale by remaining soil fraction
+            heightReduction *= (1.0 - clamp(rockMaterial, 0.0, 1.0));
+            float dh = clamp(heightReduction, 0.0, terrainHeight);
+            newTerrainHeight = terrainHeight - dh;
+            // Melted material becomes rock/obsidian
+            float rockFromMelting = min(1.0, dh * 10.0);
+            newRockMaterial = max(newRockMaterial, rockFromMelting);
+            baseRockSurfaceHeight = max(baseRockSurfaceHeight, newTerrainHeight);
         }
 
         // ========== WATER EVAPORATION ==========
