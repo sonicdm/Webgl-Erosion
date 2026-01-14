@@ -437,14 +437,42 @@ void main()
         }
     }else if(u_TerrainDebug == 11){
         // Lava Volume debug view
-        // Show lava volume as color intensity with better scaling to show differences
-        // Use different color ranges for different volume levels
-        if (lavaVolume < 0.01) {
-            fcol = vec3(lavaVolume * 100.0, 0.0, 0.0); // Red for small volumes
-        } else if (lavaVolume < 0.1) {
-            fcol = vec3(1.0, lavaVolume * 10.0, 0.0); // Yellow for medium volumes
+        // Use square root scaling to emphasize differences in small volumes
+        // More aggressive scaling to make pooling differences clearly visible
+        if (lavaVolume < 0.0001) {
+            fcol = vec3(0.0, 0.0, 0.0); // Black for no lava
         } else {
-            fcol = vec3(1.0, 1.0, lavaVolume * 2.0); // White for large volumes
+            // Square root scaling: sqrt(volume) expands small differences
+            // Map volumes 0.0001 to 2.0 to 0-1 range with sqrt
+            float sqrtVolume = sqrt(lavaVolume);
+            // Normalize: sqrt(0.0001) = 0.01, sqrt(2.0) = 1.414
+            // Map 0.01 to 1.414 -> 0 to 1
+            float normalized = (sqrtVolume - 0.01) / (1.414 - 0.01);
+            normalized = clamp(normalized, 0.0, 1.0);
+            
+            // Use distinct color bands with sharp transitions for better visibility
+            // Black -> Dark Red -> Red -> Orange -> Yellow -> White
+            if (normalized < 0.2) {
+                // 0-0.2: Black to dark red (very thin lava)
+                float t = normalized / 0.2;
+                fcol = vec3(t * 0.5, 0.0, 0.0);
+            } else if (normalized < 0.4) {
+                // 0.2-0.4: Dark red to bright red (thin lava)
+                float t = (normalized - 0.2) / 0.2;
+                fcol = vec3(0.5 + t * 0.5, 0.0, 0.0);
+            } else if (normalized < 0.6) {
+                // 0.4-0.6: Red to orange (moderate lava)
+                float t = (normalized - 0.4) / 0.2;
+                fcol = vec3(1.0, t * 0.5, 0.0);
+            } else if (normalized < 0.8) {
+                // 0.6-0.8: Orange to yellow (thick lava)
+                float t = (normalized - 0.6) / 0.2;
+                fcol = vec3(1.0, 0.5 + t * 0.5, 0.0);
+            } else {
+                // 0.8-1.0: Yellow to white (very thick lava/pools)
+                float t = (normalized - 0.8) / 0.2;
+                fcol = vec3(1.0, 1.0, t);
+            }
         }
         fcol = clamp(fcol, vec3(0.0), vec3(1.0));
     }else if(u_TerrainDebug == 12){
@@ -623,88 +651,140 @@ void main()
         float solidificationRange = u_LavaInitialTemp - u_LavaSolidificationTemp;
         float solidificationNorm = clamp((lavaTemp - u_LavaSolidificationTemp) / max(solidificationRange, 1.0), -1.0, 1.0);
         
-        // Simplified flow pattern - only calculate if lava exists
-        vec2 flowUv1 = fs_Uv + vec2(1.5, -1.5) * u_Time * 0.02;
-        vec2 flowUv2 = fs_Uv + vec2(-0.5, 2.0) * u_Time * 0.01;
-        float noise1 = fbm(flowUv1 * 2.0);
-        float noise2 = fbm(flowUv2 * 2.0);
-        float flowPattern = (noise1 + noise2 * 0.5) * 0.5;
-        flowPattern = flowPattern * 0.3 + 0.7; // Scale to 0.7-1.0 range
+        // Match Three.js lava shader pattern exactly
+        // Reference: https://github.com/mrdoob/three.js/blob/master/examples/webgl_shader_lava.html
+        // Two animated UV coordinates with noise distortion
+        vec2 position = -1.0 + 2.0 * fs_Uv;
         
-        // Base colors - reduced brightness for hottest to avoid overexposure
-        vec3 hottestLavaCol = vec3(0.9, 0.6, 0.2);  // Reduced brightness - orange-yellow
-        vec3 hotLavaCol = vec3(0.9, 0.4, 0.05);     // Orange-red (reduced brightness)
-        vec3 coolLavaCol = vec3(0.7, 0.15, 0.0);    // Deep orange-red
-        vec3 coldestLavaCol = vec3(0.3, 0.03, 0.0); // Dark red (cooling)
-        vec3 nearSolidCol = vec3(0.15, 0.01, 0.0);  // Very dark red-brown (near solidification)
-        vec3 belowSolidCol = vec3(0.08, 0.005, 0.0); // Almost black (below solidification, still liquid)
+        // Get base noise for UV distortion (like texture1 in reference)
+        vec4 noise = vec4(
+            fbm(fs_Uv * 2.0),
+            fbm(fs_Uv * 2.0 + vec2(10.0, 5.0)),
+            fbm(fs_Uv * 2.0 + vec2(5.0, 10.0)),
+            fbm(fs_Uv * 2.0 + vec2(15.0, 15.0))
+        );
         
-        // Multi-stage color gradient based on solidification-normalized temp
-        // This ensures color transitions happen at meaningful temperature points
+        // Animated UV coordinates (matching reference shader)
+        vec2 T1 = fs_Uv + vec2(1.5, -1.5) * u_Time * 0.02;
+        vec2 T2 = fs_Uv + vec2(-0.5, 2.0) * u_Time * 0.01;
+        
+        // Add noise distortion to UVs (matching reference)
+        T1.x += noise.x * 2.0;
+        T1.y += noise.y * 2.0;
+        T2.x -= noise.y * 0.2;
+        T2.y += noise.z * 0.2;
+        
+        // Base colors - keep visible and vibrant even when cooling
+        // Lava should stay bright and animated until fully solidified
+        vec3 hottestLavaCol = vec3(1.0, 0.7, 0.3);  // Bright yellow-orange
+        vec3 hotLavaCol = vec3(1.0, 0.5, 0.1);      // Orange-red
+        vec3 coolLavaCol = vec3(0.8, 0.2, 0.0);    // Deep orange-red
+        vec3 coldestLavaCol = vec3(0.6, 0.1, 0.0);  // Dark red (but still visible)
+        vec3 nearSolidCol = vec3(0.4, 0.08, 0.0);   // Dark red (visible, not black)
+        vec3 belowSolidCol = vec3(0.3, 0.05, 0.0); // Very dark red (still visible)
+        
+        // Color gradient - keep lava bright and visible throughout cooling
+        // Don't let it go black until actually fully cooled
         vec3 baseLavaCol;
-        if (solidificationNorm > 0.75) {
-            // Hottest range (above ~1100°C): bright yellow-orange
-            float t = (solidificationNorm - 0.75) / 0.25;
+        if (solidificationNorm > 0.8) {
+            // Hottest range (above ~1120°C): bright yellow-orange
+            float t = (solidificationNorm - 0.8) / 0.2;
             baseLavaCol = mix(hotLavaCol, hottestLavaCol, t);
-        } else if (solidificationNorm > 0.5) {
-            // Hot range (1000-1100°C): orange-red (typical lava color)
-            float t = (solidificationNorm - 0.5) / 0.25;
+        } else if (solidificationNorm > 0.6) {
+            // Hot range (1040-1120°C): orange-red
+            float t = (solidificationNorm - 0.6) / 0.2;
             baseLavaCol = mix(coolLavaCol, hotLavaCol, t);
-        } else if (solidificationNorm > 0.25) {
-            // Cool range (900-1000°C): deep red to dark red
-            float t = (solidificationNorm - 0.25) / 0.25;
+        } else if (solidificationNorm > 0.4) {
+            // Cool range (920-1040°C): deep red
+            float t = (solidificationNorm - 0.4) / 0.2;
             baseLavaCol = mix(coldestLavaCol, coolLavaCol, t);
-        } else if (solidificationNorm > 0.0) {
-            // Near solidification (800-900°C): very dark red-brown
-            float t = solidificationNorm / 0.25;
+        } else if (solidificationNorm > 0.2) {
+            // Near solidification (840-920°C): dark red (but visible)
+            float t = (solidificationNorm - 0.2) / 0.2;
             baseLavaCol = mix(nearSolidCol, coldestLavaCol, t);
-        } else {
-            // Below solidification but still liquid (ambient to 800°C): fade to almost black
-            // Map from -1.0 (ambient) to 0.0 (solidification) smoothly
-            float t = clamp((solidificationNorm + 1.0) / 1.0, 0.0, 1.0);
+        } else if (solidificationNorm > 0.0) {
+            // Below solidification but still liquid (800-840°C): dark red (still visible)
+            float t = solidificationNorm / 0.2;
             baseLavaCol = mix(belowSolidCol, nearSolidCol, t);
+        } else {
+            // Well below solidification but still liquid: dark red (still visible)
+            // Only go black when isFullyCooled is true (handled by isSolidifiedRock check)
+            baseLavaCol = belowSolidCol;
         }
         
-        // Apply flow pattern variation to color (like Three.js shader)
+        // Enhanced flow pattern with multiple scales for visible chunks
+        vec2 flowUv1 = fs_Uv + vec2(1.5, -1.5) * u_Time * 0.02;
+        vec2 flowUv2 = fs_Uv + vec2(-0.5, 2.0) * u_Time * 0.01;
+        
+        // Multiple scales for chunkier patterns - create visible texture
+        float noise1 = fbm(flowUv1 * 2.0);
+        float noise2 = fbm(flowUv2 * 2.0);
+        float noise3 = fbm(flowUv1 * 1.0); // Larger scale for chunks
+        float noise4 = fbm(flowUv2 * 0.5 + vec2(u_Time * 0.01, u_Time * 0.015)); // Even larger, animated
+        
+        // Combine patterns - larger scales create visible chunks
+        float flowPattern = (noise1 + noise2 * 0.5 + noise3 * 0.3 + noise4 * 0.2) / 2.0;
+        flowPattern = flowPattern * 0.5 + 0.5; // Range: 0.5 to 1.0 (wider variation)
+        
+        // Add crust chunks - darker patches that move around (but don't make it too dark)
+        float crustChunk = fbm(flowUv1 * 0.4 + vec2(u_Time * 0.015, u_Time * 0.02));
+        float crustFactor = 1.0 - solidificationNorm;
+        // Only apply crust darkness when actually cooling - keep it subtle
+        float crustDarkness = 1.0 - (crustChunk * crustFactor * 0.4); // Reduced to 40% darker
+        flowPattern = flowPattern * mix(1.0, crustDarkness, clamp(crustFactor * 1.0, 0.0, 1.0));
+        
+        // Apply flow pattern variation to color
         vec3 lavaCol = baseLavaCol * flowPattern;
         
         // Add self-multiplication effect (color * color - 0.1) like Three.js shader
-        vec3 multiplied = lavaCol * (flowPattern * 2.0) + (lavaCol * lavaCol - 0.1);
-        lavaCol = mix(lavaCol, multiplied, 0.7);
+        // This creates the visible chunks and variation - make it stronger
+        vec3 multiplied = lavaCol * (flowPattern * 2.5) + (lavaCol * lavaCol - 0.15);
+        lavaCol = mix(lavaCol, multiplied, 0.8); // Strong effect for visible chunks
+        
+        // Add additional texture variation for chunks - multiple scales
+        float chunkNoise1 = fbm(flowUv1 * 0.6 + vec2(u_Time * 0.02, u_Time * 0.01));
+        float chunkNoise2 = fbm(flowUv1 * 0.3 + vec2(u_Time * 0.03, u_Time * 0.02));
+        float chunkVariation = (chunkNoise1 + chunkNoise2 * 0.6) / 1.6;
+        chunkVariation = chunkVariation * 0.4 + 0.6; // 0.6 to 1.0 variation (keeps it bright)
+        lavaCol *= chunkVariation;
+        
+        // Color overflow effect (matching Three.js lava shader)
+        vec3 lavaTemp = lavaCol;
+        
+        // Three.js lava shader overflow logic:
+        if (lavaTemp.r > 1.0) {
+            float overflow = clamp(lavaTemp.r - 2.0, 0.0, 100.0);
+            lavaTemp.b += overflow;
+            lavaTemp.g += overflow;
+        }
+        if (lavaTemp.g > 1.0) {
+            float overflow = lavaTemp.g - 1.0;
+            lavaTemp.r += overflow;
+            lavaTemp.b += overflow;
+        }
+        if (lavaTemp.b > 1.0) {
+            float overflow = lavaTemp.b - 1.0;
+            lavaTemp.r += overflow;
+            lavaTemp.g += overflow;
+        }
+        
+        lavaCol = clamp(lavaTemp, vec3(0.0), vec3(5.0));
         
         // Make deeper pools appear brighter (more volume = brighter, like real lava)
         float volumeBrightness = sqrt(lavaVolume) * 1.5;
         volumeBrightness = clamp(volumeBrightness, 0.5, 2.0);
-        
-        // Color overflow effect (matching Three.js lava shader)
-        vec3 temp = lavaCol * volumeBrightness;
-        
-        // Three.js lava shader overflow logic:
-        if (temp.r > 1.0) {
-            float overflow = clamp(temp.r - 2.0, 0.0, 100.0);
-            temp.b += overflow;
-            temp.g += overflow;
-        }
-        if (temp.g > 1.0) {
-            float overflow = temp.g - 1.0;
-            temp.r += overflow;
-            temp.b += overflow;
-        }
-        if (temp.b > 1.0) {
-            float overflow = temp.b - 1.0;
-            temp.r += overflow;
-            temp.g += overflow;
-        }
-        
-        lavaCol = clamp(temp, vec3(0.0), vec3(5.0));
+        lavaCol *= volumeBrightness;
         
         // Make lava completely opaque - replace surface color
-        float lavaOpacity = 1.0;
-        fcol = mix(fcol, lavaCol, lavaOpacity);
+        // CRITICAL: Use full replacement, not mix, to ensure lava color is visible
+        // This should completely override the terrain color
+        fcol = lavaCol;
         
-        // Add intense emissive glow
-        float glowFactor = tempNorm * volumeBrightness * u_LavaGlowIntensity;
-        glowFactor = clamp(glowFactor, 0.5, 3.0);
+        // Add emissive glow - keep it visible even when cooling
+        // Reduce glow intensity as it cools, but keep it visible
+        float glowIntensity = mix(0.3, 1.0, tempNorm); // Minimum 30% glow even when cool
+        float glowFactor = glowIntensity * volumeBrightness * u_LavaGlowIntensity;
+        glowFactor = clamp(glowFactor, 0.3, 3.0); // Minimum 0.3 to keep it visible
         vec3 lavaGlow = lavaCol * glowFactor * 0.5;
         fcol += lavaGlow;
     }

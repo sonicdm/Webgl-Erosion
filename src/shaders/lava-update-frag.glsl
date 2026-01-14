@@ -18,6 +18,7 @@ uniform float u_LavaWaterTemp;            // Water temperature (default: 10.0 °
 uniform float u_LavaDensity;              // Density (default: 2700 kg/m³)
 uniform float u_LavaSpecificHeat;        // Specific heat capacity (default: 1200 J/(kg·K))
 uniform float u_LavaInitialTemp;         // Initial temperature for new lava (default: 1200.0 °C)
+uniform float u_LavaSolidificationTemp;  // Temperature threshold for solidification (default: 800.0 °C)
 uniform float u_Time;                    // Time for source variation
 
 // Lava sources (similar to water sources)
@@ -82,6 +83,19 @@ void main() {
     vec4 curLava = texture(readLava, curuv);
     vec4 curFlux = texture(readLavaFlux, curuv);
 
+    bool isAtSource = false;
+    int sourceCount = min(u_LavaSourceCount, 16);
+    for (int i = 0; i < sourceCount; i++) {
+        vec2 sourcePos = u_LavaSourcePositions[i];
+        float sourceSize = u_LavaSourceSizes[i];
+        float distToSource = distance(sourcePos, curuv);
+        float sourceRadius = 0.015 * sourceSize;
+        if (distToSource < sourceRadius) {
+            isAtSource = true;
+            break;
+        }
+    }
+
     // Get neighbor fluxes
     vec4 topflux = texture(readLavaFlux, curuv + vec2(0.0f, div));
     vec4 rightflux = texture(readLavaFlux, curuv + vec2(div, 0.0f));
@@ -92,6 +106,43 @@ void main() {
     vec4 rightLava = texture(readLava, curuv + vec2(div, 0.0f));
     vec4 bottomLava = texture(readLava, curuv + vec2(0.0f, -div));
     vec4 leftLava = texture(readLava, curuv + vec2(-div, 0.0f));
+
+    // Detect if this cell is on the edge of a lava flow
+    // Edge = cell with neighbors that have significantly less or no lava
+    // This matches NRC finding: surface/crust cools faster than interior
+    // Matches SPH paper: edges solidify due to higher cooling rates
+    // Strong edge = neighbor has no lava or very little (<30% of current)
+    // Weak edge = neighbor has some lava but less than current
+    float edgeFactor = 0.0;
+    int emptyNeighborCount = 0;
+    int lowNeighborCount = 0;
+    float currentLavaVolume = curLava.x;
+    
+    // Check each neighbor - distinguish between empty and low-volume neighbors
+    if (topLava.x < 0.001) {
+        emptyNeighborCount++; // Completely empty neighbor = strong edge
+    } else if (topLava.x < currentLavaVolume * 0.3) {
+        lowNeighborCount++; // Low volume neighbor = weak edge
+    }
+    if (rightLava.x < 0.001) {
+        emptyNeighborCount++;
+    } else if (rightLava.x < currentLavaVolume * 0.3) {
+        lowNeighborCount++;
+    }
+    if (bottomLava.x < 0.001) {
+        emptyNeighborCount++;
+    } else if (bottomLava.x < currentLavaVolume * 0.3) {
+        lowNeighborCount++;
+    }
+    if (leftLava.x < 0.001) {
+        emptyNeighborCount++;
+    } else if (leftLava.x < currentLavaVolume * 0.3) {
+        lowNeighborCount++;
+    }
+    
+    // Edge factor: 0.0 = interior, 0.5 = weak edge, 1.0 = strong edge
+    // Strong edges (empty neighbors) contribute more to edge factor
+    edgeFactor = clamp((float(emptyNeighborCount) * 0.6 + float(lowNeighborCount) * 0.3) / 2.0, 0.0, 1.0);
 
     // Outflow flux
     float ftopout = curFlux.x;
@@ -109,24 +160,62 @@ void main() {
     float newLavaVolume = max(0.0f, curLava.x + deltavol);
     newLavaVolume = min(newLavaVolume, LAVA_MAX_VOLUME);
     
+    // Check if we're at a source FIRST - sources should always be hot, no mixing with cooler neighbors
+    bool isAtSourceForTemp = false;
+    for (int i = 0; i < sourceCount; i++) {
+        vec2 sourcePos = u_LavaSourcePositions[i];
+        float sourceSize = u_LavaSourceSizes[i];
+        float distToSource = distance(sourcePos, curuv);
+        float sourceRadius = 0.02 * sourceSize; // Larger radius for temperature protection
+        if (distToSource < sourceRadius) {
+            isAtSourceForTemp = true;
+            break;
+        }
+    }
+    
     // If lava is flowing in (positive delta), mix temperature with incoming lava
-    // Use inflow-weighted neighbor temperatures so cooled lava stays cool.
+    // CRITICAL: Only allow mixing when incoming lava is HOTTER than current cell
+    // This prevents downstream cooling from affecting upstream lava
+    // Physics: Conservation of energy for identical materials
+    // For two masses of the same material: T_final = (m1*T1 + m2*T2) / (m1 + m2)
+    // Since density is constant: T_final = (V1*T1 + V2*T2) / (V1 + V2)
+    // This allows hot lava to heat up cooler lava, enabling it to flow further
     float incomingVolume = u_timestep * fin / (u_PipeLen * u_PipeLen);
     float lavaTemp = curLava.y;
     if (incomingVolume > 0.0001f) {
         float incomingTemp = curLava.y;
         if (fin > 0.0001f) {
+            // Calculate flux-weighted average temperature of incoming lava
+            // This gives the temperature of the lava flowing into this cell
             incomingTemp = (topLava.y * inputflux.x +
                 rightLava.y * inputflux.y +
                 bottomLava.y * inputflux.z +
                 leftLava.y * inputflux.w) / fin;
         }
 
+        // ALWAYS favor hot over cold in temperature mixing
+        // If incoming is hotter, mix normally. If incoming is cooler, bias toward current (hotter) temp
         if (curLava.x > 0.0001f) {
-            lavaTemp = (curLava.y * curLava.x + incomingTemp * incomingVolume)
-                / max(curLava.x + incomingVolume, 0.0001f);
+            // Conservation of energy: volume-weighted temperature mixing
+            // T_final = (V1*T1 + V2*T2) / (V1 + V2)
+            float totalVolume = curLava.x + incomingVolume;
+            float mixedTemp = (curLava.y * curLava.x + incomingTemp * incomingVolume) / max(totalVolume, 0.0001f);
+            
+            // ALWAYS favor hot over cold: if mixed temp is cooler than current, bias toward current
+            // This ensures hot lava heats up cold lava, but cold lava never cools hot lava
+            if (mixedTemp < curLava.y) {
+                // Incoming is cooler - bias toward current (hotter) temperature
+                // Use 70% current, 30% mixed to favor hot
+                float hotBias = 0.7;
+                mixedTemp = mix(mixedTemp, curLava.y, hotBias);
+            }
+            // If mixed is hotter, use it (hot lava heats up cold lava)
+            
+            // Cap temperature at initial temp to prevent infinite gain
+            lavaTemp = min(mixedTemp, u_LavaInitialTemp);
         } else {
-            lavaTemp = incomingTemp;
+            // No existing lava, use incoming temperature (but cap it)
+            lavaTemp = min(incomingTemp, u_LavaInitialTemp);
         }
     }
 
@@ -213,45 +302,79 @@ void main() {
         float totalFlux = abs(curFlux.x) + abs(curFlux.y) + abs(curFlux.z) + abs(curFlux.w);
         float flowSpeed = totalFlux / max(lavaVolume, 0.001f); // Flux per volume = flow speed
         
-        // For ambient cooling (no water), only slightly increase the effective heat transfer
-        // so cooling is visible but not instant, especially for thick pools.
+        // For ambient cooling (no water), keep cooling visible but not freezing
         if (waterContact < 0.5f) {
-            h_effective *= 1.5;
+            h_effective *= 3.0;
         }
         
-        // Let the basic physics (surface area vs mass) handle pool vs thin-flow differences.
-        // Avoid extra volume-based boosts that were making lava cool unrealistically fast.
-        float volumeCoolingFactor = 1.0;
+        // Simple mass-based cooling: thicker volumes take longer to cool
+        // This is already handled by the mass calculation above (mass = volume * density)
+        // Edge-first cooling: edges cool faster, interior slower (matches NRC/SPH findings)
+        
+        // Apply edge cooling boost: edges cool 3-5x faster due to surface exposure
+        // Interior cools slower (insulated by crust, convection keeps it hot)
+        // This matches NRC finding: surface cools faster, interior stays hot due to convection
+        // Matches SPH paper: edges solidify due to higher cooling rates
+        float edgeCoolingMultiplier = 1.0 + edgeFactor * 4.0; // 1x to 5x for edges
+        float interiorCoolingMultiplier = 1.0 - edgeFactor * 0.7; // 1x to 0.3x for interior (insulated)
+        float effectiveCoolingMultiplier = mix(interiorCoolingMultiplier, edgeCoolingMultiplier, edgeFactor);
+        
+        // Prevent cooling at sources (sources should stay hot)
+        // Also reduce cooling in a MUCH larger area around sources to prevent receding rings
+        // The cooling reduction radius must be larger than the emission radius to prevent the inner cool ring
+        float sourceProximityFactor = 1.0;
+        for(int i = 0; i < u_LavaSourceCount; i++) {
+            vec2 sourcePos = u_LavaSourcePositions[i];
+            float sourceSize = u_LavaSourceSizes[i];
+            float distToSource = distance(sourcePos, curuv);
+            // Make cooling reduction radius 3x larger than emission radius (0.01 * sourceSize)
+            // This ensures the area around sources stays hot even when emission varies
+            float sourceRadius = 0.03 * sourceSize; // Increased from 0.015 to 0.03
+            if (distToSource < sourceRadius) {
+                // Reduce cooling based on proximity to source
+                // More aggressive reduction: 95% at source, 80% at edge of radius
+                float proximity = 1.0 - (distToSource / sourceRadius);
+                sourceProximityFactor = min(sourceProximityFactor, mix(0.05, 0.2, proximity)); // 95% to 80% cooling reduction
+            }
+        }
+        if (isAtSource) {
+            sourceProximityFactor = 0.05; // Sources cool very slowly (95% reduction, increased from 90%)
+        }
         
         // Newton's law of cooling
+        // Simple mass-based cooling: thicker volumes take longer to cool (handled by mass calculation)
         if (mass > 0.0f) {
             float coolingRate = (h_effective * surfaceArea * (lavaTemp - T_ambient_effective)) / (mass * u_LavaSpecificHeat);
-            coolingRate *= volumeCoolingFactor;
             
-            // Flowing lava cools faster due to increased air exposure,
-            // but keep the boost moderate so hot streams stay hot for a while.
-            if (flowSpeed > 0.1) {
-                float flowCoolingBoost = 1.0 + flowSpeed * 10.0; // Softer scaling
-                coolingRate *= min(flowCoolingBoost, 2.5);       // Cap at 2.5x
+            // Flowing lava cools faster due to increased air exposure.
+            if (flowSpeed > 0.15) {
+                coolingRate *= 4.0;
+            } else if (flowSpeed > 0.08) {
+                coolingRate *= 2.5;
             } else if (flowSpeed > 0.05) {
-                coolingRate *= 1.5; // Moderate flows cool 1.5x faster
+                coolingRate *= 1.8;
             }
             
-            // Add additional cooling boost for very thin flows (edges),
-            // but keep it lower so edges don't freeze instantly.
+            // Thin flows cool quickly
             if (lavaVolume < 0.005) {
                 float thinnessFactor = 0.005 / max(lavaVolume, 0.0001f);
-                coolingRate *= min(thinnessFactor * 2.0, 8.0); // Cap edge boost
+                coolingRate *= min(thinnessFactor * 2.0, 8.0);
             } else if (lavaVolume < 0.01) {
                 coolingRate *= 2.0;
             }
             
-            // Make water cooling stronger than air, but still smooth.
+            // Make water cooling MUCH stronger and apply it early
+            // Water contact should cause rapid cooling (15x multiplier)
             if (waterContact > 0.5f) {
-                coolingRate *= 4.0f;   // With water, faster cooling
+                // Apply water cooling multiplier - water cools lava much faster than air
+                coolingRate *= 15.0f;   // Increased from 12.0f to make it more obvious
             } else {
-                coolingRate *= 1.2f;   // Small ambient-only boost
+                coolingRate *= 1.3f;    // Small ambient-only boost
             }
+
+            // Apply edge-first cooling: edges cool faster, interior slower
+            // Then reduce cooling near sources to prevent receding rings
+            coolingRate *= effectiveCoolingMultiplier * sourceProximityFactor;
             
             lavaTemp -= coolingRate * u_timestep;
         }
@@ -277,7 +400,7 @@ void main() {
             density = max(0.0f, density);
             
             float sourceAmount = 0.0006 * sourceStrength;
-            float sourceLava = sourceAmount * density * 200.0; // Reduced from 280.0 to control growth
+            float sourceLava = sourceAmount * density * 300.0; // Increased from 200.0 to prevent receding rings
             
             // Add time-based variation for bubbling effect (match water source pattern)
             // Use FBM noise with time to create natural variation
@@ -289,10 +412,23 @@ void main() {
             lavaVolume += sourceLava; // Match water source: no timestep multiplication
             
             // New lava from sources starts at high temperature
-            // Mix temperature: if adding significant lava, set to initial temp
+            // At sources, SET temperature to initial temp (don't mix with cooler existing temp)
+            // This ensures the center is always hotter than the outside
             if (sourceLava > 0.001f) {
-                float mixFactor = min(1.0f, sourceLava / max(lavaVolume, 0.001f));
-                lavaTemp = mix(lavaTemp, u_LavaInitialTemp, mixFactor);
+                // If adding significant new lava, set temperature to initial temp
+                // Don't mix - sources must stay hot
+                float newLavaRatio = sourceLava / max(lavaVolume, 0.001f);
+                if (newLavaRatio > 0.1) {
+                    // Significant new lava: set to initial temp
+                    lavaTemp = u_LavaInitialTemp;
+                } else {
+                    // Small amount: mix but bias heavily toward initial temp
+                    lavaTemp = mix(lavaTemp, u_LavaInitialTemp, 0.8);
+                }
+            } else if (lavaVolume > 0.001f) {
+                // At source but no new lava this frame: maintain high temperature
+                // Don't let it cool below 95% of initial temp
+                lavaTemp = max(lavaTemp, u_LavaInitialTemp * 0.95);
             }
         }
     }
@@ -318,9 +454,11 @@ void main() {
             if (u_BrushOperation == 0) {
                 // Add lava at high temperature (apply directly, no timestep multiplication)
                 lavaVolume += brushAmount;
-                // Set temperature to initial temp when adding lava
+                // ALWAYS favor hot: when adding lava, bias heavily toward initial temp
                 if (brushAmount > 0.001f) {
                     float mixFactor = min(1.0f, brushAmount / max(lavaVolume, 0.001f));
+                    // Bias 90% toward initial temp to ensure hot always wins
+                    mixFactor = max(mixFactor, 0.9);
                     lavaTemp = mix(lavaTemp, u_LavaInitialTemp, mixFactor);
                 }
             } else {
@@ -331,6 +469,9 @@ void main() {
     }
 
     // Clamp lava volume to reasonable range
+    if (isAtSource) {
+        lavaTemp = max(lavaTemp, u_LavaSolidificationTemp + 100.0);
+    }
     lavaVolume = clamp(lavaVolume, 0.0, LAVA_MAX_VOLUME);
 
     writeLava = vec4(lavaVolume, lavaTemp, 0.0, 0.0);

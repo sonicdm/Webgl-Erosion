@@ -25,8 +25,11 @@ This document consolidates all lava simulation features, implementation details,
 - **Flow Speed**: Lava flows roughly 5-25x slower than water (temperature + yield threshold).
 - **Temperature System**: Lava temperature ranges from 800°C (solidification) to 1200°C (initial)
 - **Cooling System**: 
-  - Air cooling: tuned for visible cooling in tens of seconds for pools
-  - Water cooling: ~15x faster than air cooling
+  - Air cooling: moderate (ambient ~3x) so lava cools over distance without freezing the source
+  - Flow cooling: boosted when moving fast (up to ~4x) and for thin edges
+  - Water cooling: strong (up to ~12x) so contact rapidly chills lava, but not instant at the source
+  - Hot-core insulation: thick/slow pools cap per-frame cooling so the interior stays mobile
+  - Vent heating: source cells clamp above solidification temp to prevent spires
 - **Water Interaction**: 
   - Hot lava rapidly cools when in contact with water
   - Water evaporates when in contact with hot lava (15x evaporation rate)
@@ -147,11 +150,14 @@ Where:
 - `c_p` = Specific heat capacity
 
 **Cooling Multipliers**:
-- Air cooling: `LavaAirHeatTransfer` (default: 200 W/(mA?A?K)) with ~60x ambient multiplier
-- Water cooling: `LavaWaterHeatTransfer` (default: 2000 W/(mA?A?K)) with ~15x multiplier
-- Large pools: volume-dependent boost (1.0 + sqrt(volume) * 2.0)
-- Flowing lava: Up to 5x faster cooling based on flow speed
-- Thin flows (edges): Up to 10x faster cooling for very thin flows (< 0.005 volume)
+- Air cooling: `LavaAirHeatTransfer` (default: 200 W/(m²·K)) with ~1.3x ambient multiplier
+- Water cooling: `LavaWaterHeatTransfer` (default: 2000 W/(m²·K)) with 15x multiplier (increased from 12x)
+- **Crust insulation**: Thick flows (volume > 0.2) have insulating crust - interior cools 5x slower than surface
+- **Flow-based reduction**: High incoming flux reduces cooling by up to 70% to prevent upstream cooling propagation
+- Large pools: volume-dependent boost (1.0 + sqrt(volume) * 0.8)
+- Flowing lava: Up to 4x faster cooling based on flow speed
+- Thin flows (edges): Up to 8x faster cooling for very thin flows (< 0.005 volume)
+- Sources: Cool very slowly (80% reduction) to maintain flow
 
 ### Thermal Erosion (Melting)
 
@@ -211,18 +217,20 @@ Where:
 Cooled lava solidifies into rock material:
 
 ```
-Solidification rate = baseRate * (1.0 + tempFactor * 1.2) * poolFactor * waterBoost
+Solidification rate = baseRate * (1.0 + tempFactor * 1.3) * poolFactor * waterBoost
 ```
 
 Where:
-- `baseRate` = 0.08 (base solidification rate)
-- `tempFactor` = 1.2 (temperature factor multiplier)
+- `baseRate` = 0.09 (base solidification rate)
+- `tempFactor` = 1.3 (temperature factor multiplier)
 - `solidificationTemp` = 800°C (solidification temperature)
-- `poolFactor` = 1.0 + sqrt(volume) * 0.08
+- `poolFactor` = 1.0 + sqrt(volume) * 0.1
 - `waterBoost` = 5x direct contact, 2x adjacent
 - Rate capped at 0.25 maximum
 
 Solidified lava:
+- Solidification is skipped at the vent and when flow speed is above a small threshold
+
 - Converts to rock material (scale factor 1.0, value 0.5-1.0)
 - Raises terrain height to fill channels
 - Removed from liquid lava volume
@@ -250,10 +258,12 @@ Solidified lava:
 4. Calculate viscosity using Arrhenius law
 5. Calculate viscosity ratio (relative to water)
 6. Scale effective pipe length based on viscosity
-7. Calculate flux for each direction: `flux = (height_diff * gravity * area) / (effectivePipeLen)`
+7. Calculate flux for each direction: `flux = (height_diff + pressure + momentum) * gravity / (effectivePipeLen)`
 8. Allow fresh lava to flow over solidified rock (treat as zero lava height)
-9. Apply a temperature-based flow threshold so cooler lava requires more slope
-10. Dampen previous flux to reduce sloshing and help pooling
+9. **Temperature-based viscosity override**: When current cell is much hotter than neighbor (>0.3 normalized temp difference), use current cell's viscosity instead of minimum. This allows hot lava to push through cold barriers.
+10. Apply a temperature-based flow threshold so cooler lava requires more slope
+11. Add pressure from piled lava (volume, temp) and momentum from prior flux to punch through cooled edges; allow small uphill allowance when hot/thick
+12. Apply a small yield threshold (colder lava resists movement) so crust stiffens; damp previous flux to reduce sloshing and help pooling
 
 **Uniforms**:
 - `u_LavaViscosityPreExp`: Pre-exponential factor
@@ -279,11 +289,15 @@ Solidified lava:
 3. Mix temperatures when fresh lava flows into existing lava
 4. Check for water contact (current pixel and neighbors)
 5. Calculate surface area (accounts for thin flows)
-6. Apply Newton's law of cooling (air or water)
-7. Apply cooling boost for flowing lava (based on flow speed)
-8. Apply cooling boosts for thin flows and large pools
-9. Handle lava brush (brush type 7)
-10. Handle lava sources with FBM noise variation
+6. **Model crust insulation**: For thick flows (volume > 0.2), reduce cooling by 5x to represent insulating crust
+7. **Flow-based cooling reduction**: Reduce cooling when there's significant upstream flux to prevent upstream cooling propagation
+8. Apply Newton's law of cooling (air or water)
+9. Apply cooling boost for flowing lava (based on flow speed)
+10. Apply cooling boosts for thin flows and large pools
+11. Apply water cooling multiplier (15x for water contact)
+12. Prevent cooling at sources (sources stay hot)
+13. Handle lava brush (brush type 7)
+14. Handle lava sources with FBM noise variation
 
 **Uniforms**:
 - `u_LavaAirHeatTransfer`: Air heat transfer coefficient
@@ -307,6 +321,7 @@ Solidified lava:
 **Inputs**:
 - `readTerrain`: Terrain texture
 - `readLava`: Lava texture
+- `readLavaFlux`: Lava flux texture (used to gate solidification by flow speed)
 
 **Outputs**:
 - `writeTerrain`: Updated terrain texture (height, rock material)
@@ -328,7 +343,8 @@ Solidified lava:
    - Reduce water volume (20x boost when water directly on top)
 
 3. **Solidification**:
-   - If lava temp < solidification temp (800°C)
+   - If lava temp < solidification temp (800?C) and flow speed is low
+   - Skip solidification near active vents to avoid spires
    - Calculate temperature-dependent solidification rate
    - Convert solidified volume to rock material
    - Raise terrain height (only solidified volume, not liquid lava)
@@ -349,13 +365,14 @@ Solidified lava:
 2. Validate lava data (volume 0-50.0, temp 0-2000°C)
 3. Calculate temperature-normalized value (0-1 range)
 4. Generate animated flow patterns using FBM noise
-5. Multi-stage color gradient (yellow-orange to deep red)
-6. Apply flow pattern variation
-7. Self-multiplication effect (color * color - 0.1)
-8. Volume-based brightness
-9. Color overflow effects (channels exceeding 1.0 bleed into others)
-10. Make lava fully opaque (replace surface color)
-11. Add emissive glow based on temperature
+5. **Compressed color gradient**: Deep red range compressed from 0.25-0.5 to 0.4-0.6 (20% instead of 25%) to prevent long stays in deep red
+6. Multi-stage color gradient (yellow-orange to deep red to dark brown)
+7. Apply flow pattern variation
+8. Self-multiplication effect (color * color - 0.1)
+9. Volume-based brightness
+10. Color overflow effects (channels exceeding 1.0 bleed into others)
+11. Make lava fully opaque (replace surface color)
+12. Add emissive glow based on temperature
 
 **Steam Effect**:
 - Triggered when lava + water + hot temp (> 800°C)
@@ -476,6 +493,16 @@ All lava physics parameters are in the "Lava Physics Parameters" folder in the G
 2. **Edge cooling**: Edges of lava pools may not cool as fast as desired
 3. **Volume pooling**: Lava volume may not pool correctly (similar to water pooling issue)
 
+### Resolved Issues
+
+1. **Flow over cold lava**: Fixed by using temperature difference check - when current cell is much hotter than neighbor (>0.3 normalized temp difference), use current cell's viscosity instead of minimum. This allows hot lava to push through cold barriers.
+
+2. **Upstream cooling propagation**: Fixed by modeling crust insulation physics. Thick flows (volume > 0.2) have insulating crust that reduces interior cooling by 5x. Added flow-based cooling reduction when there's significant upstream flux, preventing cooling from propagating to source.
+
+3. **Water cooling**: Fixed by increasing water cooling multiplier from 12.0x to 15.0x to make it more obvious. Water contact detection already works correctly with low threshold (0.0001f).
+
+4. **Color gradient**: Fixed by compressing deep red range from 0.25-0.5 to 0.4-0.6 (20% instead of 25%), and expanding hot orange range to compensate. This prevents lava from spending too long in deep red while cooling.
+
 
 ### Fix Notes (Latest)
 
@@ -570,4 +597,3 @@ Lava sources are similar to water sources:
 ## Summary
 
 The lava system is a comprehensive physics-based simulation with three main shader passes, temperature-dependent viscosity, thermal erosion, water interaction, and solidification. The ghosting issue is resolved by binding lava/terrain textures for the scene depth pass, so lava pooling now works. Lava simulation and rendering are re-enabled in code.
-
