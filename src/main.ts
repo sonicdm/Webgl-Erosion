@@ -1100,6 +1100,9 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaSpecificHeat"), controls.LavaSpecificHeat);
     gl_context.uniform1f(getCachedUniformLocation(lavaUpdate.prog,"u_LavaInitialTemp"), controls.LavaInitialTemp);
     gl_context.uniform1i(getCachedUniformLocation(lavaUpdate.prog,"u_LavaSourceCount"), lavaSourceCount);
+    gl_context.uniform2fv(getCachedUniformLocation(lavaUpdate.prog,"u_LavaSourcePositions"), lavaSourcePositions);
+    gl_context.uniform1fv(getCachedUniformLocation(lavaUpdate.prog,"u_LavaSourceSizes"), lavaSourceSizes);
+    gl_context.uniform1fv(getCachedUniformLocation(lavaUpdate.prog,"u_LavaSourceStrengths"), lavaSourceStrengths);
     
     // Lava brush uniforms - MUST be set here while shader is active
     lavaUpdate.setMouseWorldPos(reusableMousePoint);
@@ -1110,7 +1113,7 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     lavaUpdate.setBrushPressed(controls.brushPressed);
     lavaUpdate.setBrushPos(reusablePos);
     lavaUpdate.setBrushOperation(controls.brushOperation);
-    // Note: Lava source arrays are populated in tick() function and passed here via uniforms set in tick()
+    // Lava source arrays are populated in tick() and passed into this function.
 
     renderer.render(camera,lavaUpdate,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -1522,6 +1525,8 @@ function main() {
         Render2Texture(renderer, gl_context, camera, clean, write_sediment_blend, square, noiseterrain);
         Render2Texture(renderer, gl_context, camera, clean, sediment_advect_a, square, noiseterrain);
         Render2Texture(renderer, gl_context, camera, clean, sediment_advect_b, square, noiseterrain);
+        // CRITICAL: Initialize lava textures to zero to prevent ghosting from uninitialized data
+        // The vertex shader reads from lavamap, so it must contain valid (zero) data
         Render2Texture(renderer, gl_context, camera, clean, read_lava_tex, square, noiseterrain);
         Render2Texture(renderer, gl_context, camera, clean, write_lava_tex, square, noiseterrain);
         Render2Texture(renderer, gl_context, camera, clean, read_lava_flux_tex, square, noiseterrain);
@@ -2023,6 +2028,10 @@ function main() {
     lambert.setInt(controls.TerrainPlatte, "u_TerrainPlatte");
     lambert.setInt(controls.ShowFlowTrace ? 0 : 1,"u_FlowTrace");
     lambert.setInt(controls.SedimentTrace ? 0 : 1,"u_SedimentTrace");
+    lambert.setFloat(controls.LavaGlowIntensity, "u_LavaGlowIntensity");
+    lambert.setFloat(controls.LavaSolidificationTemp, "u_LavaSolidificationTemp");
+    lambert.setInt(1, "u_LavaEnabled");
+    lambert.setTime(timer);
     // Fill reusable arrays with source data (reuse instead of creating new ones)
     for (let i = 0; i < MAX_WATER_SOURCES; i++) {
         if (i < waterSources.length) {
@@ -2050,10 +2059,12 @@ function main() {
             reusableLavaSourcePositions[i * 2] = lavaSources[i].position[0];
             reusableLavaSourcePositions[i * 2 + 1] = lavaSources[i].position[1];
             reusableLavaSourceSizes[i] = lavaSources[i].size;
+            reusableLavaSourceStrengths[i] = lavaSources[i].strength;
         } else {
             reusableLavaSourcePositions[i * 2] = 0.0;
             reusableLavaSourcePositions[i * 2 + 1] = 0.0;
             reusableLavaSourceSizes[i] = 0.0;
+            reusableLavaSourceStrengths[i] = 0.0;
         }
     }
     
@@ -2489,6 +2500,18 @@ function main() {
 
       renderer.clear();// clear when attached to scene depth map
       gl_context.viewport(0,0,window.innerWidth, window.innerHeight);
+      // Bind terrain textures for the depth pass so vertex displacement matches terrain render.
+      gl_context.activeTexture(gl_context.TEXTURE0);
+      gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+      gl_context.uniform1i(getCachedUniformLocation(sceneDepthShader.prog, "hightmap"), 0);
+
+      gl_context.activeTexture(gl_context.TEXTURE1);
+      gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
+      gl_context.uniform1i(getCachedUniformLocation(sceneDepthShader.prog, "sedimap"), 1);
+
+      gl_context.activeTexture(gl_context.TEXTURE2);
+      gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_tex);
+      gl_context.uniform1i(getCachedUniformLocation(sceneDepthShader.prog, "lavamap"), 2);
       renderer.render(camera, sceneDepthShader, [
           plane,
       ]);
@@ -2553,23 +2576,27 @@ function main() {
     gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "sediBlend"), 7);
 
 
-    gl_context.activeTexture(gl_context.TEXTURE8);
+    gl_context.activeTexture(gl_context.TEXTURE0 + 8);
     gl_context.bindTexture(gl_context.TEXTURE_2D, shadowMap_tex);
-    gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "shadowMap"), 8);
+    const shadowMapUniformLoc = getCachedUniformLocation(lambert.prog, "shadowMap");
+    gl_context.uniform1i(shadowMapUniformLoc, 8);
 
     gl_context.activeTexture(gl_context.TEXTURE9);
     gl_context.bindTexture(gl_context.TEXTURE_2D, scene_depth_tex);
     gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "sceneDepth"), 9);
 
-    // Lava rendering texture - use TEXTURE10 to avoid conflict with shadowMap (TEXTURE8)
-    gl_context.activeTexture(gl_context.TEXTURE0 + 10);
+    // Bind lava texture for vertex shader pooling (like water)
+    // CRITICAL: Use TEXTURE11 to avoid conflicts with TEXTURE10 (used for heightmap)
+    // Must bind to a texture unit that's not used by fragment shader
+    gl_context.activeTexture(gl_context.TEXTURE0 + 11);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_tex);
-    gl_context.uniform1i(getCachedUniformLocation(lambert.prog,"lavamap"), 10);
-    gl_context.uniform1f(getCachedUniformLocation(lambert.prog,"u_LavaGlowIntensity"), controls.LavaGlowIntensity);
+    const lavamapUniformLoc = getCachedUniformLocation(lambert.prog, "lavamap");
+    if (lavamapUniformLoc) {
+        gl_context.uniform1i(lavamapUniformLoc, 11);
+    }
 
     gl_context.uniformMatrix4fv(getCachedUniformLocation(lambert.prog,'u_sproj'),false,reusableLightProjMat);
     gl_context.uniformMatrix4fv(getCachedUniformLocation(lambert.prog,'u_sview'),false,reusableLightViewMat);
-
 
       renderer.render(camera, lambert, [
       plane,

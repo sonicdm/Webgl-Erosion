@@ -24,6 +24,7 @@ uniform sampler2D sceneDepth;
 uniform sampler2D lavamap;
 
 #define PI 3.1415926
+const float LAVA_MAX_VOLUME = 10.0;
 
 
 layout (location = 0) out vec4 out_Col; // This is the final output color that you will see on your
@@ -52,6 +53,9 @@ uniform vec2 u_LavaSourcePositions[16];  // Max 16 lava sources
 uniform float u_LavaSourceSizes[16];
 uniform int u_FlowTrace;
 uniform float u_LavaGlowIntensity;
+uniform float u_Time; // Time for steam effect animation
+uniform float u_LavaSolidificationTemp; // Temperature threshold for solidification (default: 800.0 °C)
+uniform int u_LavaEnabled; // Flag to enable/disable lava rendering (1 = enabled, 0 = disabled)
 
 
 uniform mat4 u_sproj;
@@ -243,10 +247,54 @@ void main()
     float rockVal = fH.z; // Rock material value (1.0 = rock, 0.0 = normal)
     float sval = texture(sediBlend, fs_Uv).x;
     
-    // Sample lava data
-    vec4 lavaData = texture(lavamap, fs_Uv);
-    float lavaVolume = lavaData.x;
-    float lavaTemp = lavaData.y; // Temperature in Celsius
+    // Sample lava data - CRITICAL: Always initialize to zero to prevent ghosting
+    // This prevents reading garbage/shadow map data when texture is uninitialized
+    float lavaVolume = 0.0;
+    float lavaTemp = 0.0;
+    
+    // Only sample lava texture if lava rendering is enabled
+    // This prevents reading uninitialized or invalid texture data
+    if (u_LavaEnabled == 1) {
+        // Try to sample lava texture - use try-catch equivalent (validation)
+        // If texture read fails or returns invalid data, we'll catch it below
+        vec4 lavaData = texture(lavamap, fs_Uv);
+        
+        // CRITICAL VALIDATION: Check if this looks like valid lava data
+        // Shadow map data typically has values in 0-1 range for depth
+        // Lava volume should be >= 0, temperature should be 800-1200°C typically
+        // If we see values that look like shadow map (very small, uniform), reject them
+        
+        float sampledVolume = lavaData.x;
+        float sampledTemp = lavaData.y;
+        float clampedVolume = clamp(sampledVolume, 0.0, LAVA_MAX_VOLUME);
+        
+        // Reject if volume is negative
+        if (sampledVolume < 0.0) {
+            clampedVolume = 0.0;
+            sampledTemp = 0.0;
+        }
+        
+        // Reject if temperature is out of valid range (0-2000°C)
+        // This catches shadow map data which would be in 0-1 range
+        if (sampledTemp < 0.0 || sampledTemp > 2000.0) {
+            clampedVolume = 0.0;
+            sampledTemp = 0.0;
+        }
+        
+        // Additional check: if temperature is suspiciously low (< 100°C) but volume exists,
+        // this might be shadow map data masquerading as lava - reject it
+        if (clampedVolume > 0.001 && sampledTemp > 0.0 && sampledTemp < 100.0) {
+            // Suspicious: has volume but very low temp - likely not real lava
+            clampedVolume = 0.0;
+            sampledTemp = 0.0;
+        }
+        
+        // Only use if both are valid and volume is significant
+        if (clampedVolume > 0.001 && sampledTemp >= 100.0) {
+            lavaVolume = clampedVolume;
+            lavaTemp = sampledTemp;
+        }
+    }
 
     vec3 finalcol = vec3(0);
 
@@ -392,9 +440,15 @@ void main()
         }
     }else if(u_TerrainDebug == 11){
         // Lava Volume debug view
-        // Show lava volume as color intensity (red = high volume, black = no lava)
-        float vol = lavaVolume;
-        fcol = vec3(vol * 10.0, 0.0, 0.0); // Red intensity based on volume
+        // Show lava volume as color intensity with better scaling to show differences
+        // Use different color ranges for different volume levels
+        if (lavaVolume < 0.01) {
+            fcol = vec3(lavaVolume * 100.0, 0.0, 0.0); // Red for small volumes
+        } else if (lavaVolume < 0.1) {
+            fcol = vec3(1.0, lavaVolume * 10.0, 0.0); // Yellow for medium volumes
+        } else {
+            fcol = vec3(1.0, 1.0, lavaVolume * 2.0); // White for large volumes
+        }
         fcol = clamp(fcol, vec3(0.0), vec3(1.0));
     }else if(u_TerrainDebug == 12){
         // Lava Temperature debug view
@@ -546,27 +600,127 @@ void main()
 
     // ========== LAVA RENDERING WITH GLOW EFFECT ==========
     // Add glowing red/orange lava visualization based on temperature and volume
-    if(lavaVolume > 0.001){
+    // Only show orange glow for hot, active lava (not solidified rock)
+    float solidificationTemp = u_LavaSolidificationTemp; // Use uniform from controls
+    bool isFullyCooled = lavaTemp <= solidificationTemp + 50.0; // Within 50°C of solidification
+    bool isSolidifiedRock = rockVal > 0.1 && isFullyCooled;
+    
+    // Only process lava if volume is significant to avoid artifacts
+    if(lavaVolume > 0.001 && !isSolidifiedRock){
         // Convert temperature to normalized 0-1 range (800-1200°C)
         float tempNorm = clamp((lavaTemp - 800.0) / 400.0, 0.0, 1.0);
         
-        // Color gradient: hot = bright red/orange, cool = dark red/black
-        vec3 hotLavaCol = vec3(1.0, 0.3, 0.0);  // Bright red/orange (1200°C)
-        vec3 coolLavaCol = vec3(0.3, 0.0, 0.0); // Dark red (800°C)
-        vec3 lavaCol = mix(coolLavaCol, hotLavaCol, tempNorm);
+        // Simplified flow pattern - only calculate if lava exists
+        vec2 flowUv1 = fs_Uv + vec2(1.5, -1.5) * u_Time * 0.02;
+        vec2 flowUv2 = fs_Uv + vec2(-0.5, 2.0) * u_Time * 0.01;
+        float noise1 = fbm(flowUv1 * 2.0);
+        float noise2 = fbm(flowUv2 * 2.0);
+        float flowPattern = (noise1 + noise2 * 0.5) * 0.5;
+        flowPattern = flowPattern * 0.3 + 0.7; // Scale to 0.7-1.0 range
         
-        // Glow intensity based on temperature and volume
-        // Hotter and thicker lava glows more
-        float glowFactor = tempNorm * sqrt(lavaVolume) * u_LavaGlowIntensity;
-        glowFactor = clamp(glowFactor, 0.0, 2.0); // Limit glow intensity
+        // Base colors - reduced brightness for hottest to avoid overexposure
+        vec3 hottestLavaCol = vec3(0.9, 0.6, 0.2);  // Reduced brightness - orange-yellow
+        vec3 hotLavaCol = vec3(0.9, 0.4, 0.05);     // Orange-red (reduced brightness)
+        vec3 coolLavaCol = vec3(0.7, 0.15, 0.0);    // Deep orange-red
+        vec3 coldestLavaCol = vec3(0.3, 0.03, 0.0); // Dark red (cooling)
         
-        // Add emissive glow effect (additive blending)
-        vec3 lavaGlow = lavaCol * glowFactor;
+        // Multi-stage color gradient
+        vec3 baseLavaCol;
+        if (tempNorm > 0.75) {
+            // Hottest range: bright yellow-orange (matches Three.js brightest areas)
+            baseLavaCol = mix(hotLavaCol, hottestLavaCol, (tempNorm - 0.75) / 0.25);
+        } else if (tempNorm > 0.5) {
+            // Hot range: orange-red (typical lava color)
+            baseLavaCol = mix(coolLavaCol, hotLavaCol, (tempNorm - 0.5) / 0.25);
+        } else {
+            // Cool range: deep red to dark red
+            baseLavaCol = mix(coldestLavaCol, coolLavaCol, tempNorm / 0.5);
+        }
+        
+        // Apply flow pattern variation to color (like Three.js shader)
+        vec3 lavaCol = baseLavaCol * flowPattern;
+        
+        // Add self-multiplication effect (color * color - 0.1) like Three.js shader
+        vec3 multiplied = lavaCol * (flowPattern * 2.0) + (lavaCol * lavaCol - 0.1);
+        lavaCol = mix(lavaCol, multiplied, 0.7);
+        
+        // Make deeper pools appear brighter (more volume = brighter, like real lava)
+        float volumeBrightness = sqrt(lavaVolume) * 1.5;
+        volumeBrightness = clamp(volumeBrightness, 0.5, 2.0);
+        
+        // Color overflow effect (matching Three.js lava shader)
+        vec3 temp = lavaCol * volumeBrightness;
+        
+        // Three.js lava shader overflow logic:
+        if (temp.r > 1.0) {
+            float overflow = clamp(temp.r - 2.0, 0.0, 100.0);
+            temp.b += overflow;
+            temp.g += overflow;
+        }
+        if (temp.g > 1.0) {
+            float overflow = temp.g - 1.0;
+            temp.r += overflow;
+            temp.b += overflow;
+        }
+        if (temp.b > 1.0) {
+            float overflow = temp.b - 1.0;
+            temp.r += overflow;
+            temp.g += overflow;
+        }
+        
+        lavaCol = clamp(temp, vec3(0.0), vec3(5.0));
+        
+        // Make lava completely opaque - replace surface color
+        float lavaOpacity = 1.0;
+        fcol = mix(fcol, lavaCol, lavaOpacity);
+        
+        // Add intense emissive glow
+        float glowFactor = tempNorm * volumeBrightness * u_LavaGlowIntensity;
+        glowFactor = clamp(glowFactor, 0.5, 3.0);
+        vec3 lavaGlow = lavaCol * glowFactor * 0.5;
         fcol += lavaGlow;
+    }
+    // =====================================================
+    
+    // ========== STEAM EFFECT FOR WATER EVAPORATION ==========
+    // Check if water is evaporating (lava + water + hot temp)
+    bool isEvaporating = lavaVolume > 0.001 && wval > 0.001 && lavaTemp > 800.0; // Lower from 1000.0 to 800.0
+    
+    if (isEvaporating) {
+        // Calculate steam intensity based on temperature and water volume
+        float tempFactor = min(1.0, (lavaTemp - 800.0) / 200.0); // Updated threshold
+        float volumeFactor = min(1.0, wval * 10.0);
+        float baseIntensity = tempFactor * volumeFactor;
         
-        // Also tint the surface color where lava is present
-        float lavaSurfaceFactor = min(lavaVolume * 10.0, 1.0); // Surface coverage factor
-        fcol = mix(fcol, lavaCol, lavaSurfaceFactor * 0.3); // Blend lava color into surface
+        // Use multi-octave FBM noise for realistic steam swirling
+        // Animate noise over time with upward movement (steam rises)
+        vec2 steamUV = fs_Uv * 8.0; // Scale for steam detail
+        vec2 timeOffset = vec2(u_Time * 0.3, -u_Time * 0.5); // Horizontal drift, upward movement
+        float steamNoise = fbm(steamUV + timeOffset);
+        
+        // Add secondary noise layer for more complex patterns
+        float steamNoise2 = fbm(steamUV * 1.5 + timeOffset * 0.7 + vec2(10.0));
+        steamNoise = mix(steamNoise, steamNoise2, 0.4);
+        
+        // Create density variation (steam is thicker in center, thinner at edges)
+        float density = steamNoise * baseIntensity;
+        density = pow(density, 1.5); // Sharpen the density distribution
+        
+        // Steam color gradient (white to light gray, slightly blue-tinted)
+        vec3 steamColorLight = vec3(0.95, 0.95, 1.0); // Slight blue tint
+        vec3 steamColorDark = vec3(0.85, 0.85, 0.9);  // Slightly darker gray
+        vec3 steamColor = mix(steamColorDark, steamColorLight, density);
+        
+        // Alpha based on density (semi-transparent, thicker = more opaque)
+        float steamAlpha = density * 0.7; // Increase from 0.4 to 0.7 (70% max opacity) for better visibility
+        
+        // Blend steam with background (alpha blending)
+        fcol = mix(fcol, steamColor, steamAlpha);
+        
+        // Optional: Add slight additive glow for hot steam
+        if (lavaTemp > 1100.0) {
+            fcol += steamColor * density * 0.1; // Subtle additive glow
+        }
     }
     // =====================================================
 

@@ -157,6 +157,7 @@ export function setupFramebufferandtextures(context: WebGL2RenderingContext, sim
     sediment_advect_a = LE_create_texture(simres, simres, simulationTextureSampler);
     sediment_advect_b = LE_create_texture(simres, simres, simulationTextureSampler);
 
+    // Create lava textures
     read_lava_tex = LE_create_texture(simres, simres, simulationTextureSampler);
     write_lava_tex = LE_create_texture(simres, simres, simulationTextureSampler);
     read_lava_flux_tex = LE_create_texture(simres, simres, simulationTextureSampler);
@@ -315,4 +316,3 @@ export function swapLavaFluxTextures(): void {
     read_lava_flux_tex = write_lava_flux_tex;
     write_lava_flux_tex = tmp;
 }
-
