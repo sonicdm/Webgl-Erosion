@@ -25,7 +25,7 @@ out vec4 fs_Col;
 out vec2 fs_Uv;
 out vec4 fs_shadowPos;
 
-const float LAVA_MAX_VOLUME = 10.0;
+const float LAVA_MAX_VOLUME = 50.0;
 
 
 
@@ -36,23 +36,27 @@ void main()
   float sval = 1.f*texture(sedimap,vs_Uv).x;
   float yval = 1.f*texture(hightmap,vs_Uv).x;
   float wval = 1.f*texture(hightmap,vs_Uv).y;
-  // Sample lava volume for pooling (like water)
-  // CRITICAL: Use a safe sampling approach to prevent ghosting
-  // Try-catch equivalent: sample and immediately validate
+  // Sample lava volume for pooling (like water), but DO NOT raise terrain by water volume.
+  // Terrain geometry should be based on terrain height + sediment + lava only.
+  // Water bulges are rendered by the separate water mesh (water-vert.glsl).
   float lval = 0.0;
   vec4 lavaData = texture(lavamap, vs_Uv);
   float sampledVolume = lavaData.x;
   float sampledTemp = lavaData.y;
   // Only use lava volume if it's valid (prevents reading garbage/shadow map data)
   // Valid lava: volume >= 0 (clamped), temp >= 0 and <= 2000.0
-  // Also check that if volume exists, temp must be reasonable (> 100°C to avoid shadow map data)
   float clampedVolume = clamp(sampledVolume, 0.0, LAVA_MAX_VOLUME);
-  if (sampledVolume >= 0.0 && 
-      sampledTemp >= 0.0 && sampledTemp <= 2000.0 &&
-      (clampedVolume < 0.001 || sampledTemp > 100.0)) {
+  if (sampledVolume >= 0.0 &&
+      sampledTemp >= 0.0 && sampledTemp <= 2000.0) {
       lval = clampedVolume;
   }
-  vec4 modelposition = vec4(vs_Pos.x, (yval + sval + wval + lval)/u_SimRes, vs_Pos.z, 1.0);
+  // IMPORTANT:
+  // - yval: base terrain height
+  // - sval: deposited sediment height
+  // - lval: lava volume for pooling
+  // We intentionally exclude wval here so the water surface (water-vert.glsl),
+  // which uses (yval + sval + wval), can properly bulge above the terrain.
+  vec4 modelposition = vec4(vs_Pos.x, (yval + sval + lval)/u_SimRes, vs_Pos.z, 1.0);
   fs_Pos = modelposition.xyz;
 
 

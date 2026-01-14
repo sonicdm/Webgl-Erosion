@@ -136,7 +136,7 @@ void main() {
             float evaporationSurfaceArea = waterDirectlyOnLava ? max(lavaVolume, 0.1) : surfaceArea;
             
             // Calculate heat flux - use higher heat transfer for direct contact
-            float contactHeatTransfer = waterDirectlyOnLava ? u_LavaContactHeatTransfer * 5.0 : u_LavaContactHeatTransfer;
+            float contactHeatTransfer = waterDirectlyOnLava ? u_LavaContactHeatTransfer * 8.0 : u_LavaContactHeatTransfer;
             float heatFlux = contactHeatTransfer * evaporationSurfaceArea * (lavaTemp - u_LavaWaterTemp);
             float heatTransferred = heatFlux * u_timestep; // Total heat transferred this timestep
             
@@ -165,9 +165,9 @@ void main() {
                 adjacentWaterBoost = 3.0; // 3x boost for adjacent water
             }
             
-            // Make evaporation much more aggressive for water directly on top
-            float topWaterBoost = waterDirectlyOnLava ? 20.0 : 1.0; // 20x boost for water on top
-            volumeVaporized *= 10.0 * evaporationMultiplier * adjacentWaterBoost * topWaterBoost;
+            // Make evaporation more aggressive for water directly on top, but not insanely so
+            float topWaterBoost = waterDirectlyOnLava ? 3.0 : 1.0; // 3x boost for water on top (was 20x - too aggressive)
+            volumeVaporized *= 2.0 * evaporationMultiplier * adjacentWaterBoost * topWaterBoost; // Reduced from 15.0 to 2.0
             
             // Reduce water from current cell
             // Note: Neighbor water will be reduced when lava flows into those cells
@@ -180,8 +180,13 @@ void main() {
         // Use a threshold to prevent all lava from solidifying when temp is raised
         // More stable solidification with larger buffer and adaptive rate
         // Increase threshold buffer to prevent sudden changes when slider moves
-        float solidificationThreshold = u_LavaSolidificationTemp - 100.0; // Increase from 50.0 to 100.0
-        if (lavaTemp < solidificationThreshold && newLavaVolume > 0.001) {
+        float solidificationThreshold = u_LavaSolidificationTemp - 10.0; // Start solidifying slightly below target
+        // Only solidify when the remaining lava layer is thin enough; this prevents
+        // thick flowing lava from freezing in place before it has a chance to move.
+        float solidificationVolumeThreshold = 0.05; // thin sheet/edge
+        if (lavaTemp < solidificationThreshold &&
+            newLavaVolume > 0.001 &&
+            newLavaVolume < solidificationVolumeThreshold) {
             // Make solidification rate more gradual and adaptive
             // Cooler lava solidifies faster, but cap the rate to prevent spikes
             float tempBelowSolidification = solidificationThreshold - lavaTemp;
@@ -189,13 +194,16 @@ void main() {
             float tempFactor = clamp(tempBelowSolidification / max(maxTempDiff, 1.0), 0.0, 1.0);
             
             // Base rate - keep it gradual
-            float baseSolidificationRate = 0.1; // Reduce from 0.15 to 0.1 for more gradual solidification
+            float baseSolidificationRate = 0.08; // Gradual solidification rate
             // Scale by temperature difference, but cap the multiplier
-            float rateMultiplier = 1.0 + tempFactor * 0.5; // Reduce from 1.0 to 0.5
+            float rateMultiplier = 1.0 + tempFactor * 1.2;
             float solidificationRate = baseSolidificationRate * rateMultiplier;
             
             // Cap solidification rate to prevent sudden spikes
-            solidificationRate = min(solidificationRate, 0.2); // Max 0.2 per timestep
+            solidificationRate = min(solidificationRate, 0.25);
+            float poolFactor = 1.0 + sqrt(newLavaVolume) * 0.08;
+            float waterSolidifyBoost = waterDirectlyOnLava ? 5.0 : (hasAdjacentWater ? 2.0 : 1.0);
+            solidificationRate *= poolFactor * waterSolidifyBoost;
             
             float solidifiedVolume = min(newLavaVolume, solidificationRate * u_timestep);
 
@@ -213,9 +221,10 @@ void main() {
                 // Terrain should rise to match the new lava surface level
                 // Solidified volume raises terrain by that amount (from top down)
                 // Use a blend factor to prevent sudden spikes
-                float heightBlendFactor = 0.3; // Keep at 0.3 to prevent terrain spikes
+                float heightBlendFactor = 1.0; // Fill to full lava depth
                 float targetHeight = newTerrainHeight + solidifiedVolume * heightBlendFactor;
                 newTerrainHeight = max(newTerrainHeight, targetHeight);
+                baseRockSurfaceHeight = max(baseRockSurfaceHeight, newTerrainHeight);
                 
                 // Mark as rock material
                 // Rock material is stored in B channel (0.0 to 1.0)
