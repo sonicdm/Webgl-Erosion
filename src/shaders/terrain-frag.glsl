@@ -53,6 +53,7 @@ uniform vec2 u_LavaSourcePositions[16];  // Max 16 lava sources
 uniform float u_LavaSourceSizes[16];
 uniform int u_FlowTrace;
 uniform float u_LavaGlowIntensity;
+uniform float u_LavaPatternFrequency;
 uniform float u_Time; // Time for steam effect animation
 uniform float u_LavaSolidificationTemp; // Temperature threshold for solidification (default: 800.0 °C)
 uniform float u_LavaInitialTemp; // Initial temperature for new lava (default: 1200.0 °C)
@@ -651,12 +652,34 @@ void main()
         float solidificationRange = u_LavaInitialTemp - u_LavaSolidificationTemp;
         float solidificationNorm = clamp((lavaTemp - u_LavaSolidificationTemp) / max(solidificationRange, 1.0), -1.0, 1.0);
         
-        // Match Three.js lava shader pattern exactly
-        // Reference: https://github.com/mrdoob/three.js/blob/master/examples/webgl_shader_lava.html
-        // Two animated UV coordinates with noise distortion
-        vec2 position = -1.0 + 2.0 * fs_Uv;
+        // Realistic lava shader: dense, viscous, with crust formation and swirling motion
+        // Based on geological references: thick syrup texture, white-hot centers, dark crust
         
-        // Get base noise for UV distortion (like texture1 in reference)
+        // Very slow, viscous motion - lava moves like thick syrup, not water
+        float flowSpeed = mix(0.2, 0.8, tempNorm); // Even slower for viscous feel
+        float slowTime = u_Time * 0.003 * flowSpeed; // Very slow, geological timescale
+        
+        // Swirling motion - lazy spirals underneath, like ice floes on a fiery sea
+        vec2 center = fs_Uv - 0.5;
+        float angle = atan(center.y, center.x);
+        float radius = length(center);
+        
+        // Create swirling UV coordinates - slow rotation with flow
+        vec2 swirlOffset = vec2(
+            cos(angle + slowTime * 0.5) * radius * 0.3,
+            sin(angle + slowTime * 0.5) * radius * 0.3
+        );
+        
+        // Add directional flow on top of swirl - folds rather than splashes
+        vec2 flowDirection = normalize(vec2(1.0, -0.5));
+        vec2 flowOffset = flowDirection * slowTime * 0.5;
+        
+        // Combine swirl and flow for viscous, folding motion
+        vec2 worldOffset = u_PlanePos * 0.1;
+        vec2 T1 = fs_Uv + swirlOffset + flowOffset + worldOffset;
+        vec2 T2 = fs_Uv + swirlOffset * 0.7 + flowOffset * 0.6 + worldOffset;
+        
+        // Get noise for distortion and crust patterns
         vec4 noise = vec4(
             fbm(fs_Uv * 2.0),
             fbm(fs_Uv * 2.0 + vec2(10.0, 5.0)),
@@ -664,89 +687,85 @@ void main()
             fbm(fs_Uv * 2.0 + vec2(15.0, 15.0))
         );
         
-        // Animated UV coordinates (matching reference shader)
-        vec2 T1 = fs_Uv + vec2(1.5, -1.5) * u_Time * 0.02;
-        vec2 T2 = fs_Uv + vec2(-0.5, 2.0) * u_Time * 0.01;
+        // Realistic lava colors based on temperature
+        // White-hot at most active points, bright orange-yellow interior, deep reds/embers
+        vec3 whiteHotCol = vec3(1.0, 0.95, 0.85);      // White-hot at most active
+        vec3 brightOrangeCol = vec3(1.0, 0.6, 0.2);    // Bright orange-yellow
+        vec3 orangeCol = vec3(1.0, 0.4, 0.1);          // Orange-red
+        vec3 deepRedCol = vec3(0.9, 0.2, 0.05);         // Deep red (ember tones)
+        vec3 darkRedCol = vec3(0.6, 0.1, 0.0);         // Dark red
+        vec3 crustCol = vec3(0.15, 0.08, 0.05);        // Charcoal black/dark brown crust
         
-        // Add noise distortion to UVs (matching reference)
-        T1.x += noise.x * 2.0;
-        T1.y += noise.y * 2.0;
-        T2.x -= noise.y * 0.2;
-        T2.y += noise.z * 0.2;
-        
-        // Base colors - keep visible and vibrant even when cooling
-        // Lava should stay bright and animated until fully solidified
-        vec3 hottestLavaCol = vec3(1.0, 0.7, 0.3);  // Bright yellow-orange
-        vec3 hotLavaCol = vec3(1.0, 0.5, 0.1);      // Orange-red
-        vec3 coolLavaCol = vec3(0.8, 0.2, 0.0);    // Deep orange-red
-        vec3 coldestLavaCol = vec3(0.6, 0.1, 0.0);  // Dark red (but still visible)
-        vec3 nearSolidCol = vec3(0.4, 0.08, 0.0);   // Dark red (visible, not black)
-        vec3 belowSolidCol = vec3(0.3, 0.05, 0.0); // Very dark red (still visible)
-        
-        // Color gradient - keep lava bright and visible throughout cooling
-        // Don't let it go black until actually fully cooled
+        // Color gradient - white-hot centers, orange interior, deep reds when cooler
         vec3 baseLavaCol;
-        if (solidificationNorm > 0.8) {
-            // Hottest range (above ~1120°C): bright yellow-orange
-            float t = (solidificationNorm - 0.8) / 0.2;
-            baseLavaCol = mix(hotLavaCol, hottestLavaCol, t);
-        } else if (solidificationNorm > 0.6) {
-            // Hot range (1040-1120°C): orange-red
-            float t = (solidificationNorm - 0.6) / 0.2;
-            baseLavaCol = mix(coolLavaCol, hotLavaCol, t);
-        } else if (solidificationNorm > 0.4) {
-            // Cool range (920-1040°C): deep red
-            float t = (solidificationNorm - 0.4) / 0.2;
-            baseLavaCol = mix(coldestLavaCol, coolLavaCol, t);
-        } else if (solidificationNorm > 0.2) {
-            // Near solidification (840-920°C): dark red (but visible)
-            float t = (solidificationNorm - 0.2) / 0.2;
-            baseLavaCol = mix(nearSolidCol, coldestLavaCol, t);
-        } else if (solidificationNorm > 0.0) {
-            // Below solidification but still liquid (800-840°C): dark red (still visible)
-            float t = solidificationNorm / 0.2;
-            baseLavaCol = mix(belowSolidCol, nearSolidCol, t);
+        if (solidificationNorm > 0.9) {
+            // White-hot range: brightest, most active points
+            float t = (solidificationNorm - 0.9) / 0.1;
+            baseLavaCol = mix(brightOrangeCol, whiteHotCol, t);
+        } else if (solidificationNorm > 0.7) {
+            // Bright orange-yellow interior
+            float t = (solidificationNorm - 0.7) / 0.2;
+            baseLavaCol = mix(orangeCol, brightOrangeCol, t);
+        } else if (solidificationNorm > 0.5) {
+            // Orange-red
+            float t = (solidificationNorm - 0.5) / 0.2;
+            baseLavaCol = mix(deepRedCol, orangeCol, t);
+        } else if (solidificationNorm > 0.3) {
+            // Deep red (ember tones)
+            float t = (solidificationNorm - 0.3) / 0.2;
+            baseLavaCol = mix(darkRedCol, deepRedCol, t);
         } else {
-            // Well below solidification but still liquid: dark red (still visible)
-            // Only go black when isFullyCooled is true (handled by isSolidifiedRock check)
-            baseLavaCol = belowSolidCol;
+            // Dark red - transitioning to crust
+            baseLavaCol = darkRedCol;
         }
         
-        // Enhanced flow pattern with multiple scales for visible chunks
-        vec2 flowUv1 = fs_Uv + vec2(1.5, -1.5) * u_Time * 0.02;
-        vec2 flowUv2 = fs_Uv + vec2(-0.5, 2.0) * u_Time * 0.01;
+        // Crust formation - forms almost immediately, fractured like broken pottery
+        // Crust is darker where lava is cooler or has been exposed longer
+        float crustFactor = 1.0 - tempNorm; // More crust when cooler
+        float crustPattern = fbm(T1 * 0.3 + vec2(slowTime * 0.2, slowTime * 0.15)); // Large-scale crust plates
+        float crustCracks = fbm(T1 * 2.0 + vec2(slowTime * 0.5, slowTime * 0.4)); // Fine cracks
         
-        // Multiple scales for chunkier patterns - create visible texture
-        float noise1 = fbm(flowUv1 * 2.0);
-        float noise2 = fbm(flowUv2 * 2.0);
-        float noise3 = fbm(flowUv1 * 1.0); // Larger scale for chunks
-        float noise4 = fbm(flowUv2 * 0.5 + vec2(u_Time * 0.01, u_Time * 0.015)); // Even larger, animated
+        // Crust forms in patches - plates drift and collide
+        float crustThickness = smoothstep(0.3, 0.7, crustPattern) * crustFactor;
+        crustThickness = pow(crustThickness, 1.5); // Sharper transitions for plate-like appearance
         
-        // Combine patterns - larger scales create visible chunks
-        float flowPattern = (noise1 + noise2 * 0.5 + noise3 * 0.3 + noise4 * 0.2) / 2.0;
-        flowPattern = flowPattern * 0.5 + 0.5; // Range: 0.5 to 1.0 (wider variation)
+        // Cracks pulse with light - reveal bright orange, then seal to black
+        float crackPulse = sin(slowTime * 2.0 + crustCracks * 10.0) * 0.5 + 0.5;
+        float crackReveal = smoothstep(0.4, 0.6, crustCracks) * crackPulse;
+        crustThickness = mix(crustThickness, crustThickness * 0.3, crackReveal * 0.5); // Cracks reveal glow
         
-        // Add crust chunks - darker patches that move around (but don't make it too dark)
-        float crustChunk = fbm(flowUv1 * 0.4 + vec2(u_Time * 0.015, u_Time * 0.02));
-        float crustFactor = 1.0 - solidificationNorm;
-        // Only apply crust darkness when actually cooling - keep it subtle
-        float crustDarkness = 1.0 - (crustChunk * crustFactor * 0.4); // Reduced to 40% darker
-        flowPattern = flowPattern * mix(1.0, crustDarkness, clamp(crustFactor * 1.0, 0.0, 1.0));
+        // Pattern for interior glow - swirling, folding motion
+        float patternFreq = u_LavaPatternFrequency;
+        vec2 patternUv = T1 * patternFreq;
+        float p = fbm(patternUv);
         
-        // Apply flow pattern variation to color
-        vec3 lavaCol = baseLavaCol * flowPattern;
+        // Add multiple scales for dense, heavy texture
+        float p2 = fbm(patternUv * 0.5) * 0.5;
+        float p3 = fbm(patternUv * 0.25) * 0.25; // Large-scale folds
+        p = p * 0.5 + p2 * 0.3 + p3 * 0.2; // Combine for dense texture
         
-        // Add self-multiplication effect (color * color - 0.1) like Three.js shader
-        // This creates the visible chunks and variation - make it stronger
-        vec3 multiplied = lavaCol * (flowPattern * 2.5) + (lavaCol * lavaCol - 0.15);
-        lavaCol = mix(lavaCol, multiplied, 0.8); // Strong effect for visible chunks
+        // Color variation - threaded with deep reds and ember tones
+        vec2 colorUv = T2 * patternFreq;
+        float colorVar = fbm(colorUv);
+        float colorVar2 = fbm(colorUv * 0.5) * 0.5;
+        colorVar = colorVar * 0.7 + colorVar2 * 0.3;
         
-        // Add additional texture variation for chunks - multiple scales
-        float chunkNoise1 = fbm(flowUv1 * 0.6 + vec2(u_Time * 0.02, u_Time * 0.01));
-        float chunkNoise2 = fbm(flowUv1 * 0.3 + vec2(u_Time * 0.03, u_Time * 0.02));
-        float chunkVariation = (chunkNoise1 + chunkNoise2 * 0.6) / 1.6;
-        chunkVariation = chunkVariation * 0.4 + 0.6; // 0.6 to 1.0 variation (keeps it bright)
-        lavaCol *= chunkVariation;
+        // Reduce variation when cooler - but keep some for ember tones
+        float variationStrength = mix(0.4, 1.0, tempNorm);
+        p = mix(0.5, p, variationStrength);
+        colorVar = mix(0.0, colorVar, variationStrength * 0.8);
+        
+        // Apply color variation - deep reds threaded through
+        vec3 color = baseLavaCol * (0.85 + colorVar * 0.3);
+        
+        // Interior glow pattern - bright spots reveal through crust
+        vec3 interiorGlow = color * (p * 2.0) + (color * color - 0.1);
+        
+        // Mix crust with interior - crust is dark, but cracks reveal bright glow
+        vec3 lavaCol = mix(interiorGlow, crustCol, crustThickness);
+        
+        // Enhance cracks - pulse with bright orange light
+        lavaCol = mix(lavaCol, baseLavaCol * 1.5, crackReveal * 0.3);
         
         // Color overflow effect (matching Three.js lava shader)
         vec3 lavaTemp = lavaCol;

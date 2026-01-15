@@ -201,6 +201,7 @@ const controls = {
     LavaSolidificationTemp : 800.0,
     LavaInitialTemp : 1200.0,
     LavaGlowIntensity : 2.0,
+    LavaPatternFrequency : 8.0, // Pattern frequency/scale for lava texture detail
     LavaSourceCount : 0, // Number of active lava sources
     'Reset Erosion Parameters': () => {
         // Reset all erosion parameters to defaults
@@ -2045,6 +2046,7 @@ function main() {
     lambert.setFloat(controls.LavaSolidificationTemp, "u_LavaSolidificationTemp");
     lambert.setFloat(controls.LavaInitialTemp, "u_LavaInitialTemp");
     lambert.setFloat(controls.LavaAmbientTemp, "u_LavaAmbientTemp");
+    lambert.setFloat(controls.LavaPatternFrequency, "u_LavaPatternFrequency");
     lambert.setInt(1, "u_LavaEnabled");
     lambert.setTime(timer);
     // Fill reusable arrays with source data (reuse instead of creating new ones)

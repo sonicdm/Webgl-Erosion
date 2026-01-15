@@ -121,6 +121,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavapara.add(controls, 'LavaSolidificationTemp', 700.0, 1000.0);
     lavapara.add(controls, 'LavaInitialTemp', 1000.0, 1300.0);
     lavapara.add(controls, 'LavaGlowIntensity', 0.5, 5.0);
+    lavapara.add(controls, 'LavaPatternFrequency', 1.0, 32.0);
     lavapara.close();
     
     // Terrain Editor
