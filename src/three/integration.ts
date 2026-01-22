@@ -436,6 +436,7 @@ export class ThreeJSSimulationRuntime {
     }
     
     renderer.setRenderTarget(null);
+    renderer.state.reset();
     
     // CRITICAL FIX: Reset viewport to match renderer size
     // GPGPU passes set viewport to simres (1024x1024), but we need full canvas size for scene rendering
@@ -529,4 +530,3 @@ export class ThreeJSSimulationRuntime {
     (this.terrainMesh?.material as THREE.Material)?.dispose();
   }
 }
-
