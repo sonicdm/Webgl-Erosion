@@ -1332,12 +1332,117 @@ function main() {
   setGlContext(gl_context);
   setClientDimensions(canvas.clientWidth, canvas.clientHeight);
 
+  // Load settings (from localStorage or defaults) - must be done before creating event handlers
+  controlsConfig = loadSettings();
+  
+  // Apply raycast method from settings
+  controls.raycastMethod = controlsConfig.raycast.method;
+  
+  // Heightfield raycasting uses the CPU heightmap buffer
+  
+  // Create camera first (needed for event handlers)
+  const brushUsesLeftClickForCamera = controlsConfig.mouse.brushActivate === 'LEFT' || 
+                                       (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
+
+  const setupInputHandlers = (camera: Camera) => {
+    // Create event handlers (must be done after controlsConfig and camera are loaded)
+    const eventHandlers = createEventHandlers(controls, controlsConfig, camera);
+    const { onKeyDown, onKeyUp, onMouseDown, onMouseUp } = eventHandlers;
+  
+    // Disabled mouseChange to prevent coordinate conflicts with pointer events
+    // Pointer events now handle all mouse position tracking directly
+    // mouseChange(canvas, handleInteraction);
+    document.addEventListener('keydown', onKeyDown, false);
+    document.addEventListener('keyup', onKeyUp, false);
+    
+    // Note: controlsConfig will be loaded in main() before event listeners are set up
+    window.addEventListener('pointerdown', (e) => {
+      const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][e.button];
+      // Check if target is canvas or contains canvas
+      const target = e.target as HTMLElement;
+      const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
+      if (isCanvas) {
+        // Always update mouse position when clicking on canvas (needed for accurate brush positioning)
+        setLastMousePosition(e.clientX, e.clientY);
+        
+        // Check if this is a brush action BEFORE calling handler
+        const action = getMouseButtonAction(e.button, controlsConfig);
+        if (action === 'brushActivate') {
+          // Stop propagation IMMEDIATELY to prevent OrbitControls from seeing it
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          e.stopPropagation();
+          // Now call our handler
+          onMouseDown(e);
+          return;
+        }
+      }
+    }, true);
+    window.addEventListener('pointerup', (e) => {
+      const target = e.target as HTMLElement;
+      if (target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas) {
+        const action = getMouseButtonAction(e.button, controlsConfig);
+        if (action === 'brushActivate') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          e.stopPropagation();
+          onMouseUp(e);
+        }
+      }
+    }, true);
+    
+    // Handle pointermove to update brush position (both when active and for preview)
+    window.addEventListener('pointermove', (e) => {
+      const target = e.target as HTMLElement;
+      const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
+      if (isCanvas) {
+        // Always update mouse position for ray casting (needed for brush preview circle)
+        // Store client coordinates directly
+        setLastMousePosition(e.clientX, e.clientY);
+        
+        // Only check modifier state when brush is actively pressed
+        if (controls.brushPressed === 1) {
+          // Continuously check modifier state while brush is active
+          const invertModifier = controlsConfig.modifiers.brushInvert;
+          if (invertModifier) {
+            const modifierPressed = isModifierPressed(invertModifier, e);
+            
+            if (modifierPressed && getOriginalBrushOperation() === null) {
+              // Modifier is pressed but operation not inverted yet - invert it
+              setOriginalBrushOperation(controls.brushOperation);
+              controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
+            } else if (!modifierPressed && getOriginalBrushOperation() !== null) {
+              // Modifier released - restore original operation
+              const original = getOriginalBrushOperation();
+              if (original !== null) {
+                  controls.brushOperation = original;
+                  setOriginalBrushOperation(null);
+              }
+            }
+          }
+        }
+      }
+    }, true);
+    
+    // Handle pointercancel to deactivate brush if pointer is lost
+    window.addEventListener('pointercancel', (e) => {
+      if (controls.brushPressed === 1) {
+        controls.brushPressed = 0;
+      }
+    }, true);
+  };
+
   // Check if Three.js runtime is enabled
   let threeRuntime: ThreeJSSimulationRuntime | undefined;
   if (THREEJS_CONFIG.USE_THREEJS_RUNTIME) {
     try {
       threeRuntime = new ThreeJSSimulationRuntime(canvas, gl_context, simres);
       threeRuntime.initializeSimulation();
+      threeRuntime.setControlsConfig(controlsConfig, brushUsesLeftClickForCamera);
+      const threeCamera = threeRuntime.getCamera();
+      if (threeCamera) {
+        setupInputHandlers(threeCamera);
+      }
       
       // Set controls config on threeRuntime (must be done before creating event handlers)
       // This will be set later when controlsConfig is loaded, but we need to prepare it
@@ -1396,6 +1501,7 @@ function main() {
           let frameCount = 0;
           const animate = () => {
             requestAnimationFrame(animate);
+            stats.begin();
             
             // Only run simulation and render if terrain is initialized
             if (!terrainInitialized) {
@@ -1407,11 +1513,13 @@ function main() {
                   terrainInitialized = true;
                 } catch (error) {
                   // Still initializing, skip this frame
+                  stats.end();
                   return;
                 }
               } else {
                 // Give up after 10 frames
                 console.error('Failed to initialize terrain after 10 frames');
+                stats.end();
                 return;
               }
             }
@@ -1436,6 +1544,7 @@ function main() {
             if (terrainInitialized) {
               threeRuntime.render();
             }
+            stats.end();
           };
           
           animate();
@@ -1458,18 +1567,6 @@ function main() {
   controls['Import Height Map'] = loadHeightMap;
   controls['Clear Height Map'] = clearHeightMap;
   controls['Export Height Map'] = exportHeightMap;
-
-  // Load settings (from localStorage or defaults) - must be done before creating event handlers
-  controlsConfig = loadSettings();
-  
-  // Apply raycast method from settings
-  controls.raycastMethod = controlsConfig.raycast.method;
-  
-  // Heightfield raycasting uses the CPU heightmap buffer
-  
-  // Create camera first (needed for event handlers)
-  const brushUsesLeftClickForCamera = controlsConfig.mouse.brushActivate === 'LEFT' || 
-                                       (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
   
   // Use Three.js runtime camera if available, otherwise create WebGL camera
   let camera: Camera;
@@ -1487,92 +1584,7 @@ function main() {
     // WebGL pipeline: create camera normally
     camera = new Camera(vec3.fromValues(-0.18, 0.3, 0.6), vec3.fromValues(0, 0, 0), controlsConfig.camera, brushUsesLeftClickForCamera);
   }
-  
-  // Create event handlers (must be done after controlsConfig and camera are loaded)
-  const eventHandlers = createEventHandlers(controls, controlsConfig, camera);
-  const { onKeyDown, onKeyUp, onMouseDown, onMouseUp } = eventHandlers;
-
-  // Disabled mouseChange to prevent coordinate conflicts with pointer events
-  // Pointer events now handle all mouse position tracking directly
-  // mouseChange(canvas, handleInteraction);
-  document.addEventListener('keydown', onKeyDown, false);
-  document.addEventListener('keyup', onKeyUp, false);
-  
-  // Note: controlsConfig will be loaded in main() before event listeners are set up
-  window.addEventListener('pointerdown', (e) => {
-    const buttonName = ['LEFT', 'MIDDLE', 'RIGHT'][e.button];
-    // Check if target is canvas or contains canvas
-    const target = e.target as HTMLElement;
-    const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
-    if (isCanvas) {
-      // Always update mouse position when clicking on canvas (needed for accurate brush positioning)
-      setLastMousePosition(e.clientX, e.clientY);
-      
-      // Check if this is a brush action BEFORE calling handler
-      const action = getMouseButtonAction(e.button, controlsConfig);
-      if (action === 'brushActivate') {
-        // Stop propagation IMMEDIATELY to prevent OrbitControls from seeing it
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        e.stopPropagation();
-        // Now call our handler
-        onMouseDown(e);
-        return;
-      }
-    }
-  }, true);
-  window.addEventListener('pointerup', (e) => {
-    const target = e.target as HTMLElement;
-    if (target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas) {
-      const action = getMouseButtonAction(e.button, controlsConfig);
-      if (action === 'brushActivate') {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        e.stopPropagation();
-        onMouseUp(e);
-      }
-    }
-  }, true);
-  
-  // Handle pointermove to update brush position (both when active and for preview)
-  window.addEventListener('pointermove', (e) => {
-    const target = e.target as HTMLElement;
-    const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
-    if (isCanvas) {
-      // Always update mouse position for ray casting (needed for brush preview circle)
-      // Store client coordinates directly
-      setLastMousePosition(e.clientX, e.clientY);
-      
-      // Only check modifier state when brush is actively pressed
-      if (controls.brushPressed === 1) {
-        // Continuously check modifier state while brush is active
-        const invertModifier = controlsConfig.modifiers.brushInvert;
-        if (invertModifier) {
-          const modifierPressed = isModifierPressed(invertModifier, e);
-          
-          if (modifierPressed && getOriginalBrushOperation() === null) {
-            // Modifier is pressed but operation not inverted yet - invert it
-            setOriginalBrushOperation(controls.brushOperation);
-            controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
-          } else if (!modifierPressed && getOriginalBrushOperation() !== null) {
-            // Modifier released - restore original operation
-            const original = getOriginalBrushOperation();
-            if (original !== null) {
-                controls.brushOperation = original;
-                setOriginalBrushOperation(null);
-            }
-          }
-        }
-      }
-    }
-  }, true);
-  
-  // Handle pointercancel to deactivate brush if pointer is lost
-  window.addEventListener('pointercancel', (e) => {
-    if (controls.brushPressed === 1) {
-      controls.brushPressed = 0;
-    }
-  }, true);
+  setupInputHandlers(camera);
   
   // Handle wheel events for brush size adjustment (configurable modifier + Scroll)
   // Attach to canvas in capture phase to intercept before OrbitControls
