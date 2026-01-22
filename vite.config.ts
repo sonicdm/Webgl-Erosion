@@ -4,6 +4,9 @@ import glsl from 'vite-plugin-glsl';
 export default defineConfig({
   root: './',
   base: '',
+  optimizeDeps: {
+    exclude: ['three.terrain.js'], // Don't pre-bundle THREE.Terrain - it needs THREE to be global
+  },
   build: {
     outDir: './dist',
     sourcemap: true,

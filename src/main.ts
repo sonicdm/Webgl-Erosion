@@ -57,6 +57,9 @@ import {
 } from './simulation/texture-management';
 import { Render2Texture } from './rendering/render-utils';
 import { createShaders, Shaders } from './rendering/shader-factory';
+import { THREEJS_CONFIG } from './three/config';
+import { ThreeJSSimulationRuntime } from './three/integration';
+import { createTerrainIO } from './three/utils/terrain-io';
 
 // Note: Most state variables are now imported from simulation-state.ts
 // Additional local variables
@@ -1328,6 +1331,127 @@ function main() {
   gl_context = <WebGL2RenderingContext> canvas.getContext('webgl2');
   setGlContext(gl_context);
   setClientDimensions(canvas.clientWidth, canvas.clientHeight);
+
+  // Check if Three.js runtime is enabled
+  let threeRuntime: ThreeJSSimulationRuntime | undefined;
+  if (THREEJS_CONFIG.USE_THREEJS_RUNTIME) {
+    try {
+      threeRuntime = new ThreeJSSimulationRuntime(canvas, gl_context, simres);
+      threeRuntime.initializeSimulation();
+      
+      // Set controls config on threeRuntime (must be done before creating event handlers)
+      // This will be set later when controlsConfig is loaded, but we need to prepare it
+      
+      // Initialize terrain textures with procedural generation (async)
+      const timer = 0;
+      const terrainRandom = {
+        seedOffset: [0, 0],
+        duneDir: [1, 0],
+        craterDensity: 1.0,
+        canyonDepth: 1.0
+      };
+
+      const { importHeightmap, clearHeightmap, exportHeightmap } = createTerrainIO({
+        simres,
+        controls,
+        getTerrainGeometry: () => threeRuntime.getTerrainGeometry(),
+        onHeightmapChange: async (heightmap) => {
+          await threeRuntime.initializeTextures(controls, timer, heightmap, terrainRandom);
+          const heightData = threeRuntime.readCombinedHeight();
+          threeRuntime.updateTerrainGeometry(heightData);
+        }
+      });
+
+      controls['Import Height Map'] = importHeightmap;
+      controls['Clear Height Map'] = clearHeightmap;
+      controls['Export Height Map'] = exportHeightmap;
+      
+      // Use async IIFE to handle async operations
+      (async () => {
+        try {
+          // Initialize terrain textures with procedural generation (await to ensure THREE.Terrain loads)
+          console.log('Starting texture initialization...');
+          await threeRuntime.initializeTextures(controls, timer, null, terrainRandom);
+          console.log('Texture initialization complete');
+          
+          // Wait a frame for GPU to finish processing
+          await new Promise(resolve => requestAnimationFrame(resolve));
+          
+          // Read initial height data and create terrain geometry immediately
+          let terrainInitialized = false;
+          try {
+            console.log('Reading combined height data...');
+            const initialHeightData = threeRuntime.readCombinedHeight();
+            console.log('Height data read, length:', initialHeightData.length, 'first 16 values:', Array.from(initialHeightData.slice(0, 16)));
+            threeRuntime.updateTerrainGeometry(initialHeightData);
+            terrainInitialized = true;
+            console.log('Terrain geometry initialized successfully');
+          } catch (error) {
+            console.error('Failed to create initial terrain geometry:', error);
+            console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+          }
+          
+          // Set up animation loop that runs simulation and updates terrain
+          // Don't call threeRuntime.start() - we handle the loop ourselves
+          let frameCount = 0;
+          const animate = () => {
+            requestAnimationFrame(animate);
+            
+            // Only run simulation and render if terrain is initialized
+            if (!terrainInitialized) {
+              // Try to initialize terrain on first few frames
+              if (frameCount < 10) {
+                try {
+                  const heightData = threeRuntime.readCombinedHeight();
+                  threeRuntime.updateTerrainGeometry(heightData);
+                  terrainInitialized = true;
+                } catch (error) {
+                  // Still initializing, skip this frame
+                  return;
+                }
+              } else {
+                // Give up after 10 frames
+                console.error('Failed to initialize terrain after 10 frames');
+                return;
+              }
+            }
+            
+            // Run simulation steps
+            for (let i = 0; i < controls.SimulationSpeed; i++) {
+              threeRuntime.executeSimulationStep(controls);
+            }
+            
+            // Update terrain geometry periodically
+            frameCount++;
+            if (frameCount % 60 === 0) { // Update every 60 frames
+              try {
+                const heightData = threeRuntime.readCombinedHeight();
+                threeRuntime.updateTerrainGeometry(heightData);
+              } catch (error) {
+                console.error('Failed to update terrain geometry:', error);
+              }
+            }
+            
+            // Render the scene (only if terrain is initialized)
+            if (terrainInitialized) {
+              threeRuntime.render();
+            }
+          };
+          
+          animate();
+          console.log('Three.js runtime started successfully');
+        } catch (error) {
+          console.error('Failed to initialize textures:', error);
+        }
+      })();
+      
+      return; // Exit early - Three.js runtime handles its own loop
+    } catch (error) {
+      console.error('Failed to initialize Three.js runtime:', error);
+      console.error('Falling back to WebGL pipeline');
+      // Continue with WebGL pipeline below
+    }
+  }
   
   // Create heightmap loader functions
   const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(gl_context, simres, controls);
@@ -1346,7 +1470,23 @@ function main() {
   // Create camera first (needed for event handlers)
   const brushUsesLeftClickForCamera = controlsConfig.mouse.brushActivate === 'LEFT' || 
                                        (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
-  const camera = new Camera(vec3.fromValues(-0.18, 0.3, 0.6), vec3.fromValues(0, 0, 0), controlsConfig.camera, brushUsesLeftClickForCamera);
+  
+  // Use Three.js runtime camera if available, otherwise create WebGL camera
+  let camera: Camera;
+  if (typeof threeRuntime !== 'undefined' && threeRuntime) {
+    // Set controls config on Three.js runtime and get its camera
+    threeRuntime.setControlsConfig(controlsConfig, brushUsesLeftClickForCamera);
+    const threeCamera = threeRuntime.getCamera();
+    if (threeCamera) {
+      camera = threeCamera;
+    } else {
+      // Fallback: create WebGL camera if Three.js camera not ready
+      camera = new Camera(vec3.fromValues(-0.18, 0.3, 0.6), vec3.fromValues(0, 0, 0), controlsConfig.camera, brushUsesLeftClickForCamera);
+    }
+  } else {
+    // WebGL pipeline: create camera normally
+    camera = new Camera(vec3.fromValues(-0.18, 0.3, 0.6), vec3.fromValues(0, 0, 0), controlsConfig.camera, brushUsesLeftClickForCamera);
+  }
   
   // Create event handlers (must be done after controlsConfig and camera are loaded)
   const eventHandlers = createEventHandlers(controls, controlsConfig, camera);

@@ -61,16 +61,16 @@ export class LoadProgressTracker {
         };
         this.progress.phaseTimings.set(phase, timing);
         
-        // Calculate the START of this phase (end of previous phase, or 0.0 if first phase)
+        // Calculate phase progress bounds
         const phases = Object.values(LoadPhase);
         const currentPhaseIndex = phases.indexOf(phase);
-        const phaseStartProgress = currentPhaseIndex > 0 
+        const phaseStartProgress = currentPhaseIndex > 0
             ? PHASE_PROGRESS[phases[currentPhaseIndex - 1] as LoadPhase]
             : 0.0;
         const phaseEndProgress = PHASE_PROGRESS[phase];
-        
-        // Start at the beginning of this phase, not the end
-        this.progress.progress = phaseStartProgress;
+
+        // Immediately advance to the start-of-phase completion to keep UI responsive
+        this.progress.progress = phaseEndProgress;
         console.log(`[Progress] Phase started: ${phase}, progress: ${(phaseStartProgress * 100).toFixed(1)}% -> ${(phaseEndProgress * 100).toFixed(1)}%`);
         
         if (this.onProgressUpdate) {

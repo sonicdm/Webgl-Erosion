@@ -38,6 +38,7 @@
     "stats-js": "^1.0.1",
     "three": "^0.159.0",
     "three-mesh-bvh": "^0.9.5",
-    "three-orbitcontrols": "^2.110.3"
+    "three-orbitcontrols": "^2.110.3",
+    "three.terrain.js": "^2.0.0"
   }
 }

@@ -54,7 +54,8 @@ export function createTerrainGeometry(
             const heightValue = sampleHeightBilinear(uv, simres, heightMapBuffer);
             
             // Convert height to world space (matching terrain-vert.glsl calculation)
-            // In shader: yval = texture(hightmap, vs_Uv).x / u_SimRes
+            // In shader: vec4 modelposition = vec4(vs_Pos.x, (yval + sval + lval)/u_SimRes, vs_Pos.z, 1.0);
+            // So we divide by simres to match the shader
             const worldHeight = heightValue / simres;
             
             // Position vertices in world space
