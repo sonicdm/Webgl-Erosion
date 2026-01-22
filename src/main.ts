@@ -277,12 +277,21 @@ function StartGeneration(){
 }
 
 
+// Reset function - receives threeRuntime via closure from main()
+// This is set up after threeRuntime is created
+let resetWithThreeRuntime: ((threeRuntime: ThreeJSSimulationRuntime | undefined) => void) | null = null;
+
 function Reset(){
     setSimFramecnt(0);
     setTerrainRandom();
     setTerrainGeometryDirty(true);
     // Resolution change will be handled in the TerrainGeometryDirty block
     //PauseGeneration = true;
+    
+    // Call the injected reset handler if available
+    if (resetWithThreeRuntime) {
+        resetWithThreeRuntime(threeRuntime);
+    }
 }
 
 function setTerrainRandom() {
@@ -1322,9 +1331,14 @@ function main() {
 
     //HightMapCpuBuf = new Float32Array(simresolution * simresolution * 4);
 
-  // Setup GUI
-  const { gui, controllers } = setupGUI(controls);
-  const { brushTypeController, brushSizeController, brushStrengthController, brushOperationController } = controllers;
+  // Setup GUI - will be called after threeRuntime is created (dependency injection)
+  // Declare variables first, will be initialized after threeRuntime is available
+  let gui: DAT.GUI;
+  let controllers: GUIControllers;
+  let brushTypeController: DAT.GUIController;
+  let brushSizeController: DAT.GUIController;
+  let brushStrengthController: DAT.GUIController;
+  let brushOperationController: DAT.GUIController;
 
   // get canvas and webgl context
   const canvas = <HTMLCanvasElement> document.getElementById('canvas');
@@ -1434,6 +1448,11 @@ function main() {
 
   // Check if Three.js runtime is enabled
   let threeRuntime: ThreeJSSimulationRuntime | undefined;
+  
+  // Setup GUI with dependency injection (threeRuntime will be injected if available)
+  // This follows dependency injection best practices - dependencies are passed explicitly
+  let guiResult: { gui: DAT.GUI, controllers: GUIControllers };
+  
   if (THREEJS_CONFIG.USE_THREEJS_RUNTIME) {
     try {
       threeRuntime = new ThreeJSSimulationRuntime(canvas, gl_context, simres);
@@ -1444,6 +1463,49 @@ function main() {
         setupInputHandlers(threeCamera);
       }
       
+      // Inject threeRuntime into Reset function via closure (dependency injection)
+      resetWithThreeRuntime = (rt: ThreeJSSimulationRuntime | undefined) => {
+        if (rt) {
+          console.log('[Reset] ===== RESET BUTTON CLICKED =====');
+          const terrainRandom = {
+            seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
+            duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
+            craterDensity: 0.8 + Math.random() * 0.7,
+            canyonDepth: 0.45 + Math.random() * 0.5
+          };
+          console.log('[Reset] Calling regenerateTerrain with random:', terrainRandom);
+          rt.regenerateTerrain(controls, terrainRandom).catch((error) => {
+            console.error('[Reset] ERROR: Failed to regenerate terrain:', error);
+          });
+        } else {
+          console.warn('[Reset] WARNING: threeRuntime not available!');
+        }
+      };
+      
+      // Setup GUI with dependency injection (threeRuntime now available)
+      // This ensures terrain type changes and reset work properly
+      guiResult = setupGUI(controls, { threeRuntime: threeRuntime });
+    } catch (error) {
+      console.error('Failed to initialize Three.js runtime:', error);
+      // Fallback: setup GUI without threeRuntime
+      guiResult = setupGUI(controls);
+    }
+  } else {
+    // Setup GUI without threeRuntime (WebGL pipeline)
+    guiResult = setupGUI(controls);
+  }
+  
+  // Extract GUI and controllers (dependency injection pattern)
+  gui = guiResult.gui;
+  controllers = guiResult.controllers;
+  brushTypeController = controllers.brushTypeController;
+  brushSizeController = controllers.brushSizeController;
+  brushStrengthController = controllers.brushStrengthController;
+  brushOperationController = controllers.brushOperationController;
+  
+  // If Three.js runtime is enabled, set it up and exit early (it handles its own loop)
+  if (THREEJS_CONFIG.USE_THREEJS_RUNTIME && threeRuntime) {
+    try {
       // Set controls config on threeRuntime (must be done before creating event handlers)
       // This will be set later when controlsConfig is loaded, but we need to prepare it
       
@@ -1529,18 +1591,9 @@ function main() {
               threeRuntime.executeSimulationStep(controls);
             }
             
-            // Update terrain geometry periodically
-            frameCount++;
-            if (frameCount % 60 === 0) { // Update every 60 frames
-              try {
-                const heightData = threeRuntime.readCombinedHeight();
-                threeRuntime.updateTerrainGeometry(heightData);
-              } catch (error) {
-                console.error('Failed to update terrain geometry:', error);
-              }
-            }
-            
             // Render the scene (only if terrain is initialized)
+            // Note: We don't update terrain geometry every frame anymore since we use THREE.Terrain mesh directly
+            // Geometry is only updated when terrain is regenerated (ResetTerrain) or heightmap is imported
             if (terrainInitialized) {
               threeRuntime.render();
             }
@@ -1554,9 +1607,10 @@ function main() {
         }
       })();
       
-      return; // Exit early - Three.js runtime handles its own loop
+      // Exit early - Three.js runtime handles its own loop
+      return;
     } catch (error) {
-      console.error('Failed to initialize Three.js runtime:', error);
+      console.error('Failed to set up Three.js runtime:', error);
       console.error('Falling back to WebGL pipeline');
       // Continue with WebGL pipeline below
     }

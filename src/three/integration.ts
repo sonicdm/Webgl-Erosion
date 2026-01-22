@@ -40,8 +40,9 @@ export class ThreeJSSimulationRuntime {
     this.controlsConfig = controlsConfig;
     
     // Create Camera instance - it creates its own Three.js camera internally
-    // Use initial position that matches the runtime's camera
-    const initialPos = [0, 15, 15] as [number, number, number];
+    // Use initial position that provides a good view of the terrain
+    // Terrain spans ~1024 units, so camera should be far enough to see it
+    const initialPos = [0, 500, 500] as [number, number, number];
     const initialTarget = [0, 0, 0] as [number, number, number];
     
     this.camera = new Camera(
@@ -236,28 +237,68 @@ export class ThreeJSSimulationRuntime {
    * Uses THREE.Terrain mesh if available, otherwise creates geometry from heightmap
    */
   public updateTerrainGeometry(heightData: Float32Array): void {
-    console.log('updateTerrainGeometry called, heightData length:', heightData.length);
-    
-    // Check if height data is valid (not all zeros)
-    const hasValidData = heightData.some((val, i) => i % 4 === 0 && val !== 0);
-    if (!hasValidData) {
-      console.warn('Height data appears to be all zeros, terrain may not render correctly');
-    }
-    
     // Use THREE.Terrain mesh directly (as per official GitHub documentation)
     // THREE.Terrain() returns a Scene with mesh - use it directly
     const terrainMesh = this.passManager?.getTerrainMesh();
     if (terrainMesh && !this.terrainMesh) {
-      console.log('Using THREE.Terrain generated mesh for rendering (official usage)');
+      console.log('[Terrain Update] Using THREE.Terrain generated mesh for rendering (official usage)');
       // Use the mesh directly from THREE.Terrain - it already has geometry and material
       this.terrainMesh = terrainMesh;
       this.terrainGeometry = terrainMesh.geometry;
       
+      // Replace MeshBasicMaterial with procedural terrain material for better visualization
+      const oldMaterial = this.terrainMesh.material;
+      
+      // Calculate height range from geometry for procedural material
+      const positions = this.terrainMesh.geometry.attributes.position.array as Float32Array;
+      let minHeight = Infinity;
+      let maxHeight = -Infinity;
+      for (let i = 1; i < positions.length; i += 3) { // y is at index 1
+        const y = positions[i];
+        if (y < minHeight) minHeight = y;
+        if (y > maxHeight) maxHeight = y;
+      }
+      
+      // Create procedural terrain material with height-based coloring
+      this.terrainMesh.material = createTerrainProceduralMaterial({
+        minHeight: minHeight,
+        maxHeight: maxHeight,
+        snowRange: this.controls?.SnowRange || 0.0,
+        forestRange: this.controls?.ForestRange || 0.0,
+        terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
+      });
+      
+      // Dispose old material
+      if (oldMaterial instanceof THREE.Material) {
+        oldMaterial.dispose();
+      }
+      console.log('[Terrain Update] Material replaced with procedural terrain material');
+      
       // THREE.Terrain mesh is already properly configured, just add to scene
       const scene = this.runtime.getScene();
       scene.add(this.terrainMesh);
-      console.log('THREE.Terrain mesh added to scene (using official THREE.Terrain mesh)');
+      console.log('[Terrain Update] THREE.Terrain mesh added to scene');
+      console.log('[Terrain Update] Mesh details:', {
+        visible: this.terrainMesh.visible,
+        position: this.terrainMesh.position,
+        scale: this.terrainMesh.scale,
+        material: this.terrainMesh.material.type,
+        geometryVertices: this.terrainMesh.geometry.attributes.position.count
+      });
       return;
+    }
+    
+    // If mesh already exists, don't update it (THREE.Terrain mesh is static)
+    // Only update if explicitly regenerating terrain
+    if (this.terrainMesh) {
+      // Mesh already exists, no need to update
+      return;
+    }
+    
+    // Check if height data is valid (not all zeros)
+    const hasValidData = heightData.some((val, i) => i % 4 === 0 && val !== 0);
+    if (!hasValidData) {
+      console.warn('[Terrain Update] Height data appears to be all zeros, terrain may not render correctly');
     }
     
     if (!this.terrainGeometry) {
@@ -459,15 +500,102 @@ export class ThreeJSSimulationRuntime {
       // This must be called every frame, just like in the original tick() function
       if (this.camera && this.controlsConfig) {
         this.camera.update(this.controlsConfig.camera);
+        const threeCamera = this.camera.threeCamera;
+        
+        // Debug camera position on first frame
+        if (this.renderFrameCount === 1) {
+          console.log('[Render] Camera position:', threeCamera.position);
+          console.log('[Render] Camera target (looking at):', threeCamera.position.clone().add(threeCamera.getWorldDirection(new THREE.Vector3()).multiplyScalar(100)));
+          console.log('[Render] Camera near/far:', threeCamera.near, threeCamera.far);
+          console.log('[Render] Terrain mesh bounds:', this.terrainMesh.geometry.boundingBox);
+        }
+        
         // Use the Camera's Three.js camera for rendering
-        renderer.render(scene, this.camera.threeCamera);
+        renderer.render(scene, threeCamera);
       } else {
         // Fallback to runtime camera if Camera wrapper not available
+        console.warn('[Render] Using fallback camera');
         renderer.render(scene, camera);
       }
     } catch (error) {
       console.error('Error during render:', error);
       // Don't throw - just log the error
+    }
+  }
+
+  /**
+   * Regenerates terrain with new parameters
+   */
+  public async regenerateTerrain(controls: any, terrainRandom?: any): Promise<void> {
+    console.log('[RegenerateTerrain] ===== START REGENERATE ====');
+    if (!this.passManager) {
+      console.error('[RegenerateTerrain] ERROR: Simulation not initialized');
+      return;
+    }
+
+    try {
+      // Store controls for use in material updates
+      this.controls = controls;
+
+      // Reinitialize textures with new parameters (this regenerates THREE.Terrain geometry)
+      await this.passManager.initializeTextures(controls, 0, null, terrainRandom);
+      console.log('[RegenerateTerrain] initializeTextures completed');
+
+      // Wait a frame for GPU to finish processing
+      await new Promise(resolve => requestAnimationFrame(resolve));
+
+      // Get the new mesh from passManager
+      const newMesh = this.passManager.getTerrainMesh();
+      if (newMesh) {
+        // Remove old mesh from scene
+        if (this.terrainMesh) {
+          const scene = this.runtime.getScene();
+          scene.remove(this.terrainMesh);
+          if (this.terrainMesh.geometry) {
+            this.terrainMesh.geometry.dispose();
+          }
+          if (this.terrainMesh.material instanceof THREE.Material) {
+            this.terrainMesh.material.dispose();
+          }
+        }
+
+        // Use the new mesh
+        this.terrainMesh = newMesh;
+        this.terrainGeometry = newMesh.geometry;
+
+        // Replace material with procedural terrain material
+        const positions = this.terrainMesh.geometry.attributes.position.array as Float32Array;
+        let minHeight = Infinity;
+        let maxHeight = -Infinity;
+        for (let i = 1; i < positions.length; i += 3) {
+          const y = positions[i];
+          if (y < minHeight) minHeight = y;
+          if (y > maxHeight) maxHeight = y;
+        }
+
+        const oldMaterial = this.terrainMesh.material;
+        this.terrainMesh.material = createTerrainProceduralMaterial({
+          minHeight: minHeight,
+          maxHeight: maxHeight,
+          snowRange: controls.SnowRange || 0.0,
+          forestRange: controls.ForestRange || 0.0,
+          terrainPalette: controls.TerrainPlatte !== undefined ? controls.TerrainPlatte : 1,
+        });
+
+        if (oldMaterial instanceof THREE.Material) {
+          oldMaterial.dispose();
+        }
+
+        // Add new mesh to scene
+        const scene = this.runtime.getScene();
+        scene.add(this.terrainMesh);
+        console.log('[RegenerateTerrain] Terrain regenerated successfully');
+      } else {
+        console.warn('[RegenerateTerrain] WARNING: No mesh from passManager');
+      }
+    } catch (error) {
+      console.error('[RegenerateTerrain] ERROR: Failed to regenerate terrain:', error);
+      throw error;
     }
   }
 

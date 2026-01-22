@@ -37,6 +37,7 @@ export class SimulationPassManager {
   private passRunner: PassRunner;
   private simres: number;
   private initialHeightmap: Float32Array | null = null; // Store initial heightmap for readback
+  private terrainMesh: THREE.Mesh | null = null; // Store generated mesh for rendering
 
   // Ping-pong targets
   private terrainPP: PingPongTarget;
@@ -128,40 +129,68 @@ export class SimulationPassManager {
   }
 
   /**
-   * Maps TerrainBaseType enum to THREE.Terrain generation method
+   * Maps TerrainBaseType (number or string) to a THREE.Terrain generation function.
+   * Fallback to DiamondSquare.
    */
-  private getTerrainGenerationMethod(baseType: number): any {
-    // Ensure THREE.Terrain is loaded
+  /**
+   * Maps TerrainBaseType (number or string) to a THREE.Terrain generation function.
+   * Handles both string method names (direct THREE.Terrain methods) and legacy numeric IDs.
+   * Fallback to DiamondSquare.
+   */
+  private getTerrainGenerationMethod(baseType: number | string): any {
     const globalTHREE = typeof window !== 'undefined' ? (window as any).THREE : null;
-    if (!globalTHREE || !globalTHREE.Terrain) {
-      // Fallback to simple procedural if THREE.Terrain not available
-      return (x: number, y: number): number => {
-        const scale = 0.1;
-        const n1 = Math.sin(x * scale * 2) * Math.cos(y * scale * 2);
-        const n2 = Math.sin(x * scale * 4) * Math.cos(y * scale * 4) * 0.5;
-        const n3 = Math.sin(x * scale * 8) * Math.cos(y * scale * 8) * 0.25;
-        return (n1 + n2 + n3) * 0.5 + 0.5;
-      };
+    const Terrain = globalTHREE?.Terrain;
+    if (!Terrain) {
+      console.warn('[Terrain Method] THREE.Terrain not available');
+      return null;
     }
-    
-    // Map TerrainBaseType to THREE.Terrain methods
-    const methodMap: { [key: number]: string } = {
-      0: 'DiamondSquare',  // ordinaryFBM
-      1: 'Simplex',        // domainWarp
-      2: 'Value',          // terrace
-      3: 'Worley',         // voroni
-      4: 'Perlin',         // ridgenoise
-      5: 'Simplex',        // billowNoise
-      6: 'Perlin',         // turbulence
-      7: 'Feature',       // craters
-      8: 'Simplex',        // dunes
-      9: 'Fault',          // canyons
-      10: 'DiamondSquare', // mountains
-      11: 'Simplex',       // billowyRidges
+
+    // If caller passed a string that matches exactly, use it directly
+    if (typeof baseType === 'string') {
+      if (Terrain[baseType]) {
+        console.log('[Terrain Method] Using string method name:', baseType);
+        return Terrain[baseType];
+      }
+      // If numeric string, parse and fall through to numeric handling
+      const parsed = Number(baseType);
+      if (!Number.isNaN(parsed)) {
+        baseType = parsed;
+      } else {
+        console.warn('[Terrain Method] Unknown string method:', baseType, 'falling back to DiamondSquare');
+        return Terrain.DiamondSquare;
+      }
+    }
+
+    // Legacy numeric IDs mapped to THREE.Terrain methods
+    const methodMap: Record<number, string> = {
+      0: 'CosineLayers',   // Ordinary FBM - use CosineLayers (multi-octave noise)
+      1: 'Perlin',          // Domain Warp - use Perlin
+      2: 'DiamondSquare',   // Terrace - use DiamondSquare (post-processed)
+      3: 'Worley',          // Voronoi - use Worley
+      4: 'PerlinDiamond',   // Ridge Noise - use PerlinDiamond
+      5: 'SimplexLayers',   // Billow Noise - use SimplexLayers
+      6: 'PerlinLayers',    // Turbulence - use PerlinLayers
+      7: 'Hill',            // Craters - use Hill
+      8: 'DiamondSquare',   // Dunes - use DiamondSquare
+      9: 'Fault',           // Canyons - use Fault
+      10: 'HillIsland',     // Mountains - use HillIsland
+      11: 'Simplex',        // Billowy Ridges - use Simplex
     };
-    
-    const methodName = methodMap[baseType] || 'DiamondSquare';
-    return globalTHREE.Terrain[methodName] || globalTHREE.Terrain.DiamondSquare;
+
+    if (typeof baseType === 'number' && Number.isFinite(baseType)) {
+      const methodName = methodMap[baseType] || 'DiamondSquare';
+      console.log('[Terrain Method] Mapped legacy ID', baseType, 'to method:', methodName);
+      
+      if (Terrain[methodName]) {
+        return Terrain[methodName];
+      } else {
+        console.warn('[Terrain Method] Method', methodName, 'not found, falling back to DiamondSquare');
+        return Terrain.DiamondSquare;
+      }
+    }
+
+    console.warn('[Terrain Method] Invalid baseType:', baseType, 'falling back to DiamondSquare');
+    return Terrain.DiamondSquare;
   }
 
 
@@ -174,18 +203,16 @@ export class SimulationPassManager {
     heightmapSource: CanvasImageSource | ((heightmap: Float32Array, options: any) => void) | null = null,
     terrainRandom?: any
   ): THREE.BufferGeometry {
-    const terrainBaseType = typeof controls.TerrainBaseType === 'number' 
-      ? controls.TerrainBaseType 
-      : (typeof controls.TerrainBaseType === 'string' ? parseInt(controls.TerrainBaseType) || 0 : 0);
+    // Handle both string method names (new) and numeric IDs (legacy)
+    const terrainBaseType = controls.TerrainBaseType;
     
     const terrainScale = controls.TerrainScale || 3.2;
     const terrainHeight = controls.TerrainHeight || 2.0;
-    const frequency = terrainScale; // Map scale to frequency
     
-    // Calculate height range
-    // Original shader uses: terrain_hight *= u_TerrainHeight*120.0
-    const maxHeight = terrainHeight * 120.0;
-    const minHeight = 0; // Original starts from 0
+    // Match demo EXACTLY: maxHeight: that.maxHeight - 100, minHeight: -100
+    const baseMaxHeight = terrainHeight * 120.0;
+    const maxHeight = baseMaxHeight - 100; // Match demo: that.maxHeight - 100
+    const minHeight = -100; // Match demo: -100
 
     // Try to use THREE.Terrain if available
     const globalTHREE = typeof window !== 'undefined' ? (window as any).THREE : null;
@@ -199,23 +226,37 @@ export class SimulationPassManager {
         const easing = globalTHREE.Terrain.Linear || ((t: number) => t);
         
         // Generate terrain using THREE.Terrain (returns a Scene)
+        // THREE.Terrain creates (segments + 1) x (segments + 1) vertices
+        // For a simres x simres heightmap, we need exactly simres x simres height values
+        // To avoid edge artifacts, we should create exactly simres x simres vertices
+        // So: segments + 1 = simres, therefore segments = simres - 1
+        const terrainSize = terrainScale * 320.0; // Match demo: scale 3.2 = 1024 units
+        const segments = this.simres - 1; // Creates exactly simres x simres vertices (no extra edge row/column)
+        
         const terrainScene = globalTHREE.Terrain({
           easing: easing,
-          frequency: frequency,
           heightmap: heightmap,
+          maxHeight: maxHeight - 100, // Match demo: that.maxHeight - 100
+          minHeight: -100, // Match demo: -100
+          xSize: terrainSize,
+          ySize: terrainSize,
+          xSegments: segments,
+          ySegments: segments,
           material: new THREE.MeshBasicMaterial({ color: 0x888888 }), // Temporary material
-          maxHeight: maxHeight,
-          minHeight: minHeight,
-          xSegments: this.simres,
-          xSize: this.simres,
-          ySegments: this.simres,
-          ySize: this.simres,
+          steps: controls.TerrainSteps || 1,
+          turbulent: controls.TerrainTurbulent || false,
+          stretch: true,
         });
         
         // Extract geometry from the scene (THREE.Terrain returns a Scene with a mesh)
         const terrainMesh = terrainScene.children[0] as THREE.Mesh;
         if (terrainMesh && terrainMesh.geometry) {
-          return terrainMesh.geometry.clone(); // Clone to avoid disposing the original
+          const geom = terrainMesh.geometry.clone();
+          // Orient to XZ plane (Y up) to match renderer and heightmap extractor expectations
+          geom.rotateX(-Math.PI / 2);
+          geom.computeVertexNormals();
+          geom.computeBoundingBox();
+          return geom; // Clone to avoid disposing the original
         }
       } catch (error) {
         console.warn('Failed to use THREE.Terrain, falling back to simple procedural:', error);
@@ -229,11 +270,12 @@ export class SimulationPassManager {
       this.simres,
       this.simres
     );
+    geometry.rotateX(-Math.PI / 2); // Lay flat on XZ
     
     const positions = geometry.attributes.position.array as Float32Array;
     const heightFunction = typeof heightmapSource === 'function'
       ? heightmapSource
-      : this.getTerrainGenerationMethod(terrainBaseType);
+      : this.getTerrainGenerationMethod(terrainBaseType, terrainRandom);
     
     // Modify vertex heights procedurally
     for (let i = 0; i < positions.length; i += 3) {
@@ -310,15 +352,18 @@ export class SimulationPassManager {
         throw new Error('THREE.Terrain not available');
       }
       
-      const terrainBaseType = typeof controls.TerrainBaseType === 'number' 
-        ? controls.TerrainBaseType 
-        : (typeof controls.TerrainBaseType === 'string' ? parseInt(controls.TerrainBaseType) || 0 : 0);
+      // Handle both string method names (new) and numeric IDs (legacy)
+      const terrainBaseType = controls.TerrainBaseType;
       
       const terrainScale = controls.TerrainScale || 3.2;
       const terrainHeight = controls.TerrainHeight || 2.0;
-      const frequency = terrainScale;
-      const maxHeight = terrainHeight * 120.0;
-      const minHeight = 0;
+      
+      // Match demo EXACTLY: maxHeight: that.maxHeight - 100, minHeight: -100
+      // Demo uses maxHeight: 200 - 100 = 100, minHeight: -100, so terrain spans -100 to 100
+      // We use terrainHeight * 120.0 as the base, then subtract 100 for maxHeight
+      const baseMaxHeight = terrainHeight * 120.0;
+      const maxHeight = baseMaxHeight - 100; // Match demo: that.maxHeight - 100
+      const minHeight = -100; // Match demo: -100
       
       // Get terrain generation method
       const heightmapMethod = this.getTerrainGenerationMethod(terrainBaseType);
@@ -326,17 +371,41 @@ export class SimulationPassManager {
       const easing = globalTHREE.Terrain.Linear || ((t: number) => t);
       
       // Generate terrain using THREE.Terrain (returns a Scene with mesh)
+      // THREE.Terrain creates (segments + 1) x (segments + 1) vertices
+      // For a simres x simres heightmap, we need exactly simres x simres height values
+      // To avoid edge artifacts, we should create exactly simres x simres vertices
+      // So: segments + 1 = simres, therefore segments = simres - 1
+      const terrainSize = terrainScale * 320.0; // Match demo: scale 3.2 = 1024 units
+      const segments = this.simres - 1; // Creates exactly simres x simres vertices (no extra edge row/column)
+      
+      console.log('[Terrain Generation] ===== START TERRAIN GENERATION (initializeTextures) =====');
+      console.log('[Terrain Generation] Parameters:', {
+        terrainBaseType: terrainBaseType,
+        terrainScale: terrainScale,
+        terrainHeight: terrainHeight,
+        terrainSize: terrainSize,
+        segments: segments,
+        simres: this.simres,
+        expectedVertices: (segments + 1) * (segments + 1),
+        maxHeight: maxHeight - 100,
+        minHeight: -100,
+        heightmapType: typeof heightmap,
+        easingType: typeof easing
+      });
+      
       const terrainScene = globalTHREE.Terrain({
         easing: easing,
-        frequency: frequency,
         heightmap: heightmap,
+        maxHeight: maxHeight - 100, // Match demo: that.maxHeight - 100
+        minHeight: -100, // Match demo: -100
+        xSize: terrainSize,
+        ySize: terrainSize,
+        xSegments: segments,
+        ySegments: segments,
         material: new THREE.MeshBasicMaterial({ color: 0x888888 }), // Will be replaced later
-        maxHeight: maxHeight,
-        minHeight: minHeight,
-        xSegments: this.simres,
-        xSize: this.simres,
-        ySegments: this.simres,
-        ySize: this.simres,
+        steps: controls.TerrainSteps || 1,
+        turbulent: controls.TerrainTurbulent || false,
+        stretch: true,
       });
       
       // Extract the mesh from the scene (THREE.Terrain returns Scene with mesh as first child)
@@ -345,14 +414,154 @@ export class SimulationPassManager {
         throw new Error('THREE.Terrain did not generate a valid mesh');
       }
       
-      console.log('Terrain generated, vertices:', terrainMesh.geometry.attributes.position.count);
+      console.log('[Terrain Generation] Mesh created:', {
+        vertexCount: terrainMesh.geometry.attributes.position.count,
+        expectedVertices: (segments + 1) * (segments + 1),
+        hasNormals: !!terrainMesh.geometry.attributes.normal,
+        hasUVs: !!terrainMesh.geometry.attributes.uv
+      });
+      
+      // Check bounds BEFORE rotation
+      terrainMesh.geometry.computeBoundingBox();
+      const bboxBefore = terrainMesh.geometry.boundingBox;
+      if (bboxBefore) {
+        console.log('[Terrain Generation] Bounds BEFORE rotation:', {
+          min: { x: bboxBefore.min.x.toFixed(2), y: bboxBefore.min.y.toFixed(2), z: bboxBefore.min.z.toFixed(2) },
+          max: { x: bboxBefore.max.x.toFixed(2), y: bboxBefore.max.y.toFixed(2), z: bboxBefore.max.z.toFixed(2) },
+          size: {
+            x: (bboxBefore.max.x - bboxBefore.min.x).toFixed(2),
+            y: (bboxBefore.max.y - bboxBefore.min.y).toFixed(2),
+            z: (bboxBefore.max.z - bboxBefore.min.z).toFixed(2)
+          }
+        });
+      }
+      
+      // Sample a few vertices before rotation
+      const posArrayBefore = terrainMesh.geometry.attributes.position.array as Float32Array;
+      console.log('[Terrain Generation] Sample vertices BEFORE rotation:', {
+        vertex0: { x: posArrayBefore[0].toFixed(2), y: posArrayBefore[1].toFixed(2), z: posArrayBefore[2].toFixed(2) },
+        vertexCenter: {
+          idx: Math.floor(terrainMesh.geometry.attributes.position.count / 2) * 3,
+          x: posArrayBefore[Math.floor(terrainMesh.geometry.attributes.position.count / 2) * 3].toFixed(2),
+          y: posArrayBefore[Math.floor(terrainMesh.geometry.attributes.position.count / 2) * 3 + 1].toFixed(2),
+          z: posArrayBefore[Math.floor(terrainMesh.geometry.attributes.position.count / 2) * 3 + 2].toFixed(2)
+        },
+        vertexLast: {
+          idx: (terrainMesh.geometry.attributes.position.count - 1) * 3,
+          x: posArrayBefore[(terrainMesh.geometry.attributes.position.count - 1) * 3].toFixed(2),
+          y: posArrayBefore[(terrainMesh.geometry.attributes.position.count - 1) * 3 + 1].toFixed(2),
+          z: posArrayBefore[(terrainMesh.geometry.attributes.position.count - 1) * 3 + 2].toFixed(2)
+        }
+      });
+      
+      // Orient geometry to XZ plane (Y up) to match renderer and extraction expectations
+      terrainMesh.geometry = terrainMesh.geometry.clone(); // avoid mutating original
+      terrainMesh.geometry.rotateX(-Math.PI / 2);
+      terrainMesh.geometry.computeVertexNormals();
+      terrainMesh.geometry.computeBoundingBox();
+      terrainMesh.updateMatrixWorld(true);
+      
+      // Check bounds AFTER rotation
+      const bboxAfter = terrainMesh.geometry.boundingBox;
+      if (bboxAfter) {
+        console.log('[Terrain Generation] Bounds AFTER rotation:', {
+          min: { x: bboxAfter.min.x.toFixed(2), y: bboxAfter.min.y.toFixed(2), z: bboxAfter.min.z.toFixed(2) },
+          max: { x: bboxAfter.max.x.toFixed(2), y: bboxAfter.max.y.toFixed(2), z: bboxAfter.max.z.toFixed(2) },
+          size: {
+            x: (bboxAfter.max.x - bboxAfter.min.x).toFixed(2),
+            y: (bboxAfter.max.y - bboxAfter.min.y).toFixed(2),
+            z: (bboxAfter.max.z - bboxAfter.min.z).toFixed(2)
+          }
+        });
+      }
+      
+      // Sample vertices after rotation
+      const posArrayAfter = terrainMesh.geometry.attributes.position.array as Float32Array;
+      
+      // Sample more vertices to check height distribution
+      const sampleIndices = [
+        0, // First vertex
+        Math.floor(terrainMesh.geometry.attributes.position.count / 4) * 3, // 25%
+        Math.floor(terrainMesh.geometry.attributes.position.count / 2) * 3, // 50% (center)
+        Math.floor(terrainMesh.geometry.attributes.position.count * 3 / 4) * 3, // 75%
+        (terrainMesh.geometry.attributes.position.count - 1) * 3 // Last vertex
+      ];
+      
+      const sampleVertices: any = {};
+      let heightSum = 0;
+      let heightCount = 0;
+      for (let i = 0; i < sampleIndices.length; i++) {
+        const idx = sampleIndices[i];
+        if (idx + 2 < posArrayAfter.length) {
+          const x = posArrayAfter[idx];
+          const y = posArrayAfter[idx + 1]; // Height
+          const z = posArrayAfter[idx + 2];
+          sampleVertices[`vertex_${i}`] = { 
+            idx: idx / 3, 
+            x: x.toFixed(2), 
+            y: y.toFixed(2), 
+            z: z.toFixed(2) 
+          };
+          heightSum += y;
+          heightCount++;
+        }
+      }
+      
+      // Check height distribution across all vertices
+      let allHeightsMin = Infinity;
+      let allHeightsMax = -Infinity;
+      let negativeCount = 0;
+      let positiveCount = 0;
+      for (let i = 1; i < posArrayAfter.length; i += 3) { // Y is at index 1, then every 3rd
+        const y = posArrayAfter[i];
+        if (y < allHeightsMin) allHeightsMin = y;
+        if (y > allHeightsMax) allHeightsMax = y;
+        if (y < 0) negativeCount++;
+        else positiveCount++;
+      }
+      
+      console.log('[Terrain Generation] Sample vertices AFTER rotation:', sampleVertices);
+      console.log('[Terrain Generation] Height distribution:', {
+        min: allHeightsMin.toFixed(2),
+        max: allHeightsMax.toFixed(2),
+        range: (allHeightsMax - allHeightsMin).toFixed(2),
+        negativeCount: negativeCount,
+        positiveCount: positiveCount,
+        expectedRange: `[${minHeight}, ${maxHeight - 100}]`,
+        averageHeight: (heightSum / heightCount).toFixed(2)
+      });
       
       // Extract heightmap data from geometry for GPU simulation
+      console.log('[Terrain Generation] Extracting heightmap from geometry...');
+      console.log('[Terrain Generation] Geometry info for extraction:', {
+        vertexCount: terrainMesh.geometry.attributes.position.count,
+        simres: this.simres,
+        expectedVertices: (this.simres + 1) * (this.simres + 1),
+        expectedHeightmapSize: this.simres * this.simres * 4
+      });
+      
       const heightmapData = extractHeightmapFromGeometry(terrainMesh.geometry, this.simres);
-      console.log('Heightmap extracted, size:', heightmapData.length, 'first few values:', Array.from(heightmapData.slice(0, 16)));
+      
+      console.log('[Terrain Generation] Heightmap extracted:', {
+        dataLength: heightmapData.length,
+        expectedLength: this.simres * this.simres * 4,
+        heightValues: this.simres * this.simres,
+        first16Values: Array.from(heightmapData.slice(0, 16)).map(v => v.toFixed(2)),
+        sampleIndices: {
+          topLeft: heightmapData[0].toFixed(2),
+          topRight: heightmapData[(this.simres - 1) * 4].toFixed(2),
+          center: heightmapData[Math.floor(this.simres * this.simres / 2) * 4].toFixed(2),
+          bottomLeft: heightmapData[(this.simres - 1) * this.simres * 4].toFixed(2),
+          bottomRight: heightmapData[(this.simres * this.simres - 1) * 4].toFixed(2)
+        }
+      });
       
       // Store heightmap for initial terrain geometry (avoid GPU readback issues)
       this.initialHeightmap = new Float32Array(heightmapData);
+      console.log('[Terrain Generation] Stored initial heightmap:', {
+        length: this.initialHeightmap.length,
+        sampleValues: Array.from(this.initialHeightmap.slice(0, 8)).map(v => v.toFixed(2))
+      });
       
       // Store the terrain mesh for later use (we'll use it for rendering)
       // THREE.Terrain returns a Scene with the mesh as first child - use it directly
@@ -363,7 +572,15 @@ export class SimulationPassManager {
       this.terrainMesh.position.set(0, 0, 0);
       this.terrainMesh.frustumCulled = false;
       
+      console.log('[Terrain Generation] Mesh stored and configured:', {
+        scale: { x: this.terrainMesh.scale.x, y: this.terrainMesh.scale.y, z: this.terrainMesh.scale.z },
+        position: { x: this.terrainMesh.position.x, y: this.terrainMesh.position.y, z: this.terrainMesh.position.z },
+        rotation: { x: this.terrainMesh.rotation.x, y: this.terrainMesh.rotation.y, z: this.terrainMesh.rotation.z },
+        frustumCulled: this.terrainMesh.frustumCulled
+      });
+      
       // Upload heightmap to terrainPP ping-pong target
+      console.log('[Terrain Generation] Uploading heightmap to GPU...');
       uploadHeightmapToRenderTarget(
         this.renderer,
         heightmapData,
@@ -371,11 +588,11 @@ export class SimulationPassManager {
         this.fullscreenQuad,
         this.camera
       );
-      console.log('Heightmap uploaded to GPU');
+      console.log('[Terrain Generation] Heightmap uploaded to GPU');
       
       // Swap ping-pong so initial terrain is in read position
       this.terrainPP.swap();
-      console.log('Initial terrain generation complete');
+      console.log('[Terrain Generation] ===== TERRAIN GENERATION COMPLETE =====');
     } catch (error) {
       console.error('Failed to generate terrain:', error);
       throw error;

@@ -7,8 +7,8 @@ import * as THREE from 'three';
 
 /**
  * Extracts height values from THREE.Terrain geometry and converts to heightmap texture
- * 
- * @param geometry - THREE.Terrain generated geometry
+ *
+ * @param geometry - THREE.Terrain generated geometry (rotated so Y is up)
  * @param simres - Simulation resolution (width/height of texture)
  * @returns Float32Array containing height data in RGBA format (height in R channel)
  */
@@ -16,6 +16,13 @@ export function extractHeightmapFromGeometry(
   geometry: THREE.BufferGeometry,
   simres: number
 ): Float32Array {
+  console.log('[Heightmap Extraction] ===== START EXTRACTION =====');
+  console.log('[Heightmap Extraction] Input parameters:', {
+    simres: simres,
+    expectedVertices: (simres + 1) * (simres + 1),
+    expectedHeightmapSize: simres * simres
+  });
+  
   const positions = geometry.attributes.position;
   if (!positions) {
     throw new Error('Geometry missing position attribute');
@@ -23,107 +30,130 @@ export function extractHeightmapFromGeometry(
 
   const positionArray = positions.array as Float32Array;
   const vertexCount = positions.count;
+  // For a simres x simres heightmap, we need simres x simres height values
+  // We can extract from either simres x simres vertices OR (simres + 1) x (simres + 1) vertices
+  // If we have exactly simres x simres vertices, use them directly
+  // If we have (simres + 1) x (simres + 1) vertices, sample the first simres x simres
+  const expectedVerticesExact = simres * simres;
+  const expectedVerticesGrid = (simres + 1) * (simres + 1);
   
-  // THREE.Terrain generates a plane with (xSegments+1) * (ySegments+1) vertices
-  // We need to extract z-values (heights) and reshape to simres × simres
-  const expectedVertices = (simres + 1) * (simres + 1);
+  console.log('[Heightmap Extraction] Geometry info:', {
+    vertexCount: vertexCount,
+    expectedVerticesExact: expectedVerticesExact,
+    expectedVerticesGrid: expectedVerticesGrid,
+    positionArrayLength: positionArray.length,
+    isExactMatch: vertexCount === expectedVerticesExact,
+    isGridMatch: vertexCount === expectedVerticesGrid
+  });
   
-  if (vertexCount !== expectedVertices) {
+  if (vertexCount !== expectedVerticesExact && vertexCount !== expectedVerticesGrid) {
     console.warn(
-      `Vertex count mismatch: expected ${expectedVertices} (for ${simres}x${simres} terrain), got ${vertexCount}`
+      `[Heightmap Extraction] Vertex count mismatch: expected ${expectedVerticesExact} (exact) or ${expectedVerticesGrid} (grid), got ${vertexCount}`
     );
   }
 
-  // Decide which axis actually stores height.
-  // THREE.Terrain may rotate the plane, so height isn't guaranteed to be Y.
-  const axisRanges = [
-    { axis: 0, name: 'x', min: Infinity, max: -Infinity },
-    { axis: 1, name: 'y', min: Infinity, max: -Infinity },
-    { axis: 2, name: 'z', min: Infinity, max: -Infinity },
-  ];
-
-  for (let i = 0; i < positionArray.length; i += 3) {
-    axisRanges[0].min = Math.min(axisRanges[0].min, positionArray[i]);
-    axisRanges[0].max = Math.max(axisRanges[0].max, positionArray[i]);
-    axisRanges[1].min = Math.min(axisRanges[1].min, positionArray[i + 1]);
-    axisRanges[1].max = Math.max(axisRanges[1].max, positionArray[i + 1]);
-    axisRanges[2].min = Math.min(axisRanges[2].min, positionArray[i + 2]);
-    axisRanges[2].max = Math.max(axisRanges[2].max, positionArray[i + 2]);
-  }
-
-  axisRanges.forEach(r => (r['range'] = r.max - r.min));
-
-  // Pick the axis with the smallest non‑zero range as height (width/depth ranges are much larger)
-  const SMALL_EPS = 1e-4;
-  const nonFlatAxes = axisRanges.filter(r => (r as any).range > SMALL_EPS);
-  const heightAxis =
-    nonFlatAxes.sort((a, b) => (a as any).range - (b as any).range)[0] ?? axisRanges[1]; // default to Y
-
+  // Geometry is oriented so height is in Y (index 1)
+  const heightAxisIndex = 1;
   const heights = new Float32Array(simres * simres);
-  const heightAxisIndex = heightAxis.axis;
-  const heightRange = (heightAxis as any).range;
-  const minHeight = (heightAxis as any).min;
-  const maxHeight = (heightAxis as any).max;
+  let minHeight = Infinity;
+  let maxHeight = -Infinity;
+  let zeroCount = 0;
+  let outOfBoundsCount = 0;
+
+  // Determine grid width based on actual vertex count
+  // If we have exactly simres x simres vertices, gridWidth = simres
+  // If we have (simres + 1) x (simres + 1) vertices, gridWidth = simres + 1
+  const gridWidth = vertexCount === expectedVerticesExact ? simres : (simres + 1);
   
-  // Reshape heights to 2D grid (simres × simres)
-  // THREE.Terrain generates vertices row by row: (xSegments+1) × (ySegments+1) vertices
-  // We need to sample simres × simres points from this grid
-  const gridWidth = simres + 1; // THREE.Terrain creates (segments+1) vertices per dimension
-  const gridHeight = simres + 1;
-  
+  console.log('[Heightmap Extraction] Starting extraction loop:', {
+    gridWidth: gridWidth,
+    rows: simres,
+    cols: simres,
+    totalSamples: simres * simres,
+    vertexLayout: vertexCount === expectedVerticesExact ? 'exact (simres x simres)' : 'grid ((simres+1) x (simres+1))'
+  });
+
   for (let row = 0; row < simres; row++) {
     for (let col = 0; col < simres; col++) {
-      // Map heightmap coordinates to vertex grid coordinates
-      // THREE.Terrain stores vertices row by row: vertex at (row, col) is at index row * gridWidth + col
-      const vertexRow = Math.min(row, gridHeight - 1);
-      const vertexCol = Math.min(col, gridWidth - 1);
-      const vertexIndex = vertexRow * gridWidth + vertexCol;
+      const vertexIndex = row * gridWidth + col;
       
-      if (vertexIndex < vertexCount) {
-        // Position array is interleaved: [x0, y0, z0, x1, y1, z1, ...]
-        // So vertex at index i has position at i * 3, i * 3 + 1, i * 3 + 2
-        const arrayIndex = vertexIndex * 3;
-        if (arrayIndex + 2 < positionArray.length) {
-          const x = positionArray[arrayIndex];
-          const y = positionArray[arrayIndex + heightAxisIndex]; // height coordinate (detected axis)
-          const z = positionArray[arrayIndex + 2];
-          
-          // Debug: Log first few vertices to understand structure
-          if (row < 2 && col < 2) {
-            console.log(`Vertex [${row},${col}]: x=${x.toFixed(2)}, y=${y.toFixed(2)}, z=${z.toFixed(2)}, vertexIndex=${vertexIndex}, arrayIndex=${arrayIndex}`);
-          }
-          
-          // The shader does: (yval + sval + lval) / u_SimRes to get world height
-          // So if we want world height of y (e.g., 0-240), we need to store y * simres
-          // This matches the format: stored value / simres = world height
-          // Example: store 240*1024 = 245760, then 245760/1024 = 240 (world height)
-          const heightmapIndex = row * simres + col;
-          heights[heightmapIndex] = y * simres; // Multiply by simres to match shader format
+      if (vertexIndex >= vertexCount) {
+        outOfBoundsCount++;
+        if (outOfBoundsCount <= 5) {
+          console.warn(`[Heightmap Extraction] Vertex index out of bounds: ${vertexIndex} >= ${vertexCount} at row=${row}, col=${col}`);
+        }
+        continue;
+      }
+
+      const arrayIndex = vertexIndex * 3;
+      if (arrayIndex + 2 >= positionArray.length) {
+        outOfBoundsCount++;
+        if (outOfBoundsCount <= 5) {
+          console.warn(`[Heightmap Extraction] Array index out of bounds: ${arrayIndex + 2} >= ${positionArray.length} at row=${row}, col=${col}`);
+        }
+        continue;
+      }
+
+      const y = positionArray[arrayIndex + heightAxisIndex];
+      const heightmapIndex = row * simres + col;
+      const storedHeight = y * simres; // store in simulation format (shader divides by u_SimRes)
+      heights[heightmapIndex] = storedHeight;
+
+      if (y < minHeight) minHeight = y;
+      if (y > maxHeight) maxHeight = y;
+      if (Math.abs(y) < 1e-6) zeroCount++;
+      
+      // Debug: log corner and edge samples to verify mapping
+      const isCorner = (row === 0 && col === 0) || (row === 0 && col === simres - 1) || 
+                       (row === simres - 1 && col === 0) || (row === simres - 1 && col === simres - 1);
+      const isEdge = (row === 0 || row === simres - 1 || col === 0 || col === simres - 1) && 
+                     (row < 5 || row > simres - 6 || col < 5 || col > simres - 6);
+      if (isCorner || (isEdge && heightmapIndex % 100 === 0)) {
+        console.log(`[Heightmap Extraction] ${isCorner ? 'CORNER' : 'EDGE'} sample: row=${row}, col=${col}, vertexIndex=${vertexIndex}, worldHeight=${y.toFixed(3)}, stored=${storedHeight.toFixed(1)}`);
+      }
+      
+      // Debug: log first few samples to verify extraction
+      if (heightmapIndex < 10) {
+        console.log(`[Heightmap Extraction] Sample ${heightmapIndex} (row=${row}, col=${col}): worldHeight=${y.toFixed(3)}, storedHeight=${storedHeight.toFixed(3)}, vertexIndex=${vertexIndex}`);
       }
     }
   }
+  
+  console.log('[Heightmap Extraction] Extraction complete:', {
+    extractedHeights: heights.length,
+    worldHeightRange: { min: minHeight.toFixed(2), max: maxHeight.toFixed(2) },
+    storedHeightRange: { min: (minHeight * simres).toFixed(2), max: (maxHeight * simres).toFixed(2) },
+    zeroHeights: zeroCount,
+    outOfBoundsCount: outOfBoundsCount,
+    sampleHeights: {
+      topLeft: { world: heights[0] / simres, stored: heights[0] },
+      topRight: { world: heights[simres - 1] / simres, stored: heights[simres - 1] },
+      center: { world: heights[Math.floor(simres * simres / 2)] / simres, stored: heights[Math.floor(simres * simres / 2)] },
+      bottomLeft: { world: heights[(simres - 1) * simres] / simres, stored: heights[(simres - 1) * simres] },
+      bottomRight: { world: heights[simres * simres - 1] / simres, stored: heights[simres * simres - 1] }
+    }
+  });
 
-  // Create RGBA format texture data (height in R channel, rest zeros)
   const textureData = new Float32Array(simres * simres * 4);
   for (let i = 0; i < simres * simres; i++) {
-    textureData[i * 4 + 0] = heights[i]; // R = height
-    textureData[i * 4 + 1] = 0.0;       // G = rainfall (initialized to 0)
-    textureData[i * 4 + 2] = 0.0;       // B = unused
-    textureData[i * 4 + 3] = 1.0;       // A = 1.0
+    textureData[i * 4 + 0] = heights[i];
+    textureData[i * 4 + 1] = 0.0;
+    textureData[i * 4 + 2] = 0.0;
+    textureData[i * 4 + 3] = 1.0;
   }
+  
+  console.log('[Heightmap Extraction] Texture data created:', {
+    textureDataLength: textureData.length,
+    expectedLength: simres * simres * 4,
+    first16Values: Array.from(textureData.slice(0, 16)).map(v => v.toFixed(2))
+  });
+  console.log('[Heightmap Extraction] ===== EXTRACTION COMPLETE =====');
 
   return textureData;
 }
 
-}
-
 /**
  * Creates a THREE.DataTexture from heightmap data
- * 
- * @param heightmapData - Float32Array with RGBA height data
- * @param width - Texture width
- * @param height - Texture height
- * @returns THREE.DataTexture ready for GPU use
  */
 export function createHeightmapTexture(
   heightmapData: Float32Array,
@@ -137,26 +167,19 @@ export function createHeightmapTexture(
     THREE.RGBAFormat,
     THREE.FloatType
   );
-  
+
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
-  
+
   return texture;
 }
 
 /**
  * Uploads heightmap data to a render target
- * Uses a simple copy shader to upload the data
- * 
- * @param renderer - Three.js renderer
- * @param heightmapData - Float32Array with RGBA height data
- * @param target - Render target to upload to
- * @param fullscreenQuad - Fullscreen quad geometry
- * @param camera - Orthographic camera for GPGPU
  */
 export function uploadHeightmapToRenderTarget(
   renderer: THREE.WebGLRenderer,
@@ -165,14 +188,8 @@ export function uploadHeightmapToRenderTarget(
   fullscreenQuad: THREE.BufferGeometry,
   camera: THREE.OrthographicCamera
 ): void {
-  // Create a data texture from the heightmap
-  const sourceTexture = createHeightmapTexture(
-    heightmapData,
-    target.width,
-    target.height
-  );
+  const sourceTexture = createHeightmapTexture(heightmapData, target.width, target.height);
 
-  // Create a simple copy shader to upload the texture to the render target
   const copyVertexShader = `
     #version 300 es
     precision highp float;
@@ -209,25 +226,11 @@ export function uploadHeightmapToRenderTarget(
   const scene = new THREE.Scene();
   scene.add(mesh);
 
-  // Render to target
   renderer.setRenderTarget(target);
   renderer.render(scene, camera);
-  
-  // Force GPU to finish before we try to read back
-  const gl = renderer.getContext() as WebGL2RenderingContext;
-  gl.finish();
-  
+  (renderer.getContext() as WebGL2RenderingContext).finish();
   renderer.setRenderTarget(null);
 
-  // Cleanup
   material.dispose();
   sourceTexture.dispose();
-  
-  // Verify the upload worked by checking texture
-  console.log('Heightmap upload complete, target texture:', {
-    type: target.texture.type,
-    format: target.texture.format,
-    width: target.width,
-    height: target.height
-  });
 }

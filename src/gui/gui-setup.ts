@@ -19,8 +19,13 @@ export interface GUIControllers {
     flattenTargetHeightController: DAT.GUIController;
 }
 
-export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUIControllers } {
+export interface GUISetupOptions {
+    threeRuntime?: any; // ThreeJSSimulationRuntime - injected dependency
+}
+
+export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: DAT.GUI, controllers: GUIControllers } {
     const gui = new DAT.GUI();
+    const threeRuntime = options?.threeRuntime;
     
     // Simulation Controls
     var simcontrols = gui.addFolder('Simulation Controls');
@@ -46,20 +51,54 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         Craters: 10,
         Dunes: 11
     });
-    terrainParameters.add(controls, 'TerrainBaseType', { 
-        ordinaryFBM: 0, 
-        domainWarp: 1, 
-        terrace: 2, 
-        voroni: 3, 
-        ridgeNoise: 4,
-        billowNoise: 5,
-        turbulence: 6,
-        craters: 7,
-        dunes: 8,
-        canyons: 9,
-        mountains: 10,
-        billowyRidges: 11
+    // Add ALL THREE.Terrain methods from the demo (matching demo exactly)
+    const terrainBaseTypeController = terrainParameters.add(controls, 'TerrainBaseType', { 
+        'Brownian': 'Brownian',
+        'Cosine': 'Cosine',
+        'CosineLayers': 'CosineLayers',
+        'DiamondSquare': 'DiamondSquare',
+        'Fault': 'Fault',
+        'Hill': 'Hill',
+        'HillIsland': 'HillIsland',
+        'Particles': 'Particles',
+        'Perlin': 'Perlin',
+        'PerlinDiamond': 'PerlinDiamond',
+        'PerlinLayers': 'PerlinLayers',
+        'Simplex': 'Simplex',
+        'SimplexLayers': 'SimplexLayers',
+        'Value': 'Value',
+        'Weierstrass': 'Weierstrass',
+        'Worley': 'Worley',
+        // Keep old numeric IDs for backward compatibility
+        'Ordinary FBM (Legacy)': 0, 
+        'Domain Warp (Legacy)': 1, 
+        'Terrace (Legacy)': 2, 
+        'Voroni (Legacy)': 3, 
+        'Ridge Noise (Legacy)': 4,
+        'Billow Noise (Legacy)': 5,
+        'Turbulence (Legacy)': 6,
+        'Craters (Legacy)': 7,
+        'Dunes (Legacy)': 8,
+        'Canyons (Legacy)': 9,
+        'Mountains (Legacy)': 10,
+        'Billowy Ridges (Legacy)': 11
     });
+    
+    // Add onChange handler to regenerate terrain when type changes (dependency injection)
+    if (threeRuntime) {
+        terrainBaseTypeController.onFinishChange((value: any) => {
+            console.log('[GUI] TerrainBaseType changed to:', value);
+            const terrainRandom = {
+                seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
+                duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
+                craterDensity: 0.8 + Math.random() * 0.7,
+                canyonDepth: 0.45 + Math.random() * 0.5
+            };
+            threeRuntime.regenerateTerrain(controls, terrainRandom).catch((error) => {
+                console.error('[GUI] ERROR: Failed to regenerate terrain:', error);
+            });
+        });
+    }
     terrainParameters.add(controls, 'ResetTerrain');
     terrainParameters.add(controls, 'Import Height Map');
     terrainParameters.add(controls, 'Clear Height Map');

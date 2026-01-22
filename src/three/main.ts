@@ -264,6 +264,13 @@ export class ThreeJSRuntime {
   }
 
   /**
+   * Replace the render camera (used by integration layer to supply its own).
+   */
+  public setCamera(cam: THREE.Camera): void {
+    this.camera = cam as THREE.PerspectiveCamera;
+  }
+
+  /**
    * Cleanup resources
    */
   public dispose(): void {

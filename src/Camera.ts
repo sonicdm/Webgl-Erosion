@@ -22,8 +22,8 @@ class Camera {
   viewMatrix: mat4 = mat4.create();
   fovy: number = 45;
   aspectRatio: number = 1;
-  near: number = 0.01;
-  far: number = 500;
+  near: number = 0.1;
+  far: number = 5000;
   position: vec3 = vec3.create();
   direction: vec3 = vec3.create();
   target: vec3 = vec3.create();
@@ -58,6 +58,10 @@ class Camera {
 
     this.threeCamera = new PerspectiveCamera(this.fovy,this.aspectRatio,this.near,this.far);
     this.threeCamera.position.set(position[0],position[1],position[2]);
+    // Ensure Three.js camera uses the correct near/far planes
+    this.threeCamera.near = this.near;
+    this.threeCamera.far = this.far;
+    this.threeCamera.updateProjectionMatrix();
     this.threeControls = new OrbitControls(this.threeCamera, document.getElementById('canvas'));
 
     // Apply camera configuration if provided
