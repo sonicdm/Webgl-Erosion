@@ -1,6 +1,17 @@
 /**
  * Utility to convert THREE.Terrain geometry to GPU texture format
  * Extracts height data from terrain geometry and creates a texture for GPU simulation
+ * 
+ * CONTRACT (must match shader exactly):
+ * - THREE.Terrain generates world heights (e.g., -100 to 100) in Y coordinate
+ * - We store as: storedHeight = worldHeight * simres
+ * - Shader reads and divides: worldHeight = yval / u_SimRes (see terrain-vert.glsl line 59)
+ * - This ensures: storedHeight / simres = worldHeight (round-trip is exact)
+ * 
+ * VERTEX COUNT CONTRACT:
+ * - THREE.Terrain with segments = simres - 1 creates exactly simres x simres vertices
+ * - We extract exactly simres x simres height values (one per vertex, no interpolation)
+ * - Grid width = simres for exact match, or simres + 1 if THREE.Terrain created extra row/column
  */
 
 import * as THREE from 'three';
@@ -19,7 +30,8 @@ export function extractHeightmapFromGeometry(
   console.log('[Heightmap Extraction] ===== START EXTRACTION =====');
   console.log('[Heightmap Extraction] Input parameters:', {
     simres: simres,
-    expectedVertices: (simres + 1) * (simres + 1),
+    expectedVerticesExact: simres * simres,
+    expectedVerticesGrid: (simres + 1) * (simres + 1),
     expectedHeightmapSize: simres * simres
   });
   
@@ -52,8 +64,9 @@ export function extractHeightmapFromGeometry(
     );
   }
 
-  // Geometry is oriented so height is in Y (index 1)
-  const heightAxisIndex = 1;
+  // THREE.Terrain creates terrain in XY plane (Z is height)
+  // So we need to read from Z (index 2), not Y (index 1)
+  const heightAxisIndex = 2;
   const heights = new Float32Array(simres * simres);
   let minHeight = Infinity;
   let maxHeight = -Infinity;
@@ -96,25 +109,37 @@ export function extractHeightmapFromGeometry(
 
       const y = positionArray[arrayIndex + heightAxisIndex];
       const heightmapIndex = row * simres + col;
-      const storedHeight = y * simres; // store in simulation format (shader divides by u_SimRes)
+      // CONTRACT: Store world height * simres (shader divides by u_SimRes to get world height back)
+      // This matches terrain-vert.glsl: (yval + sval + lval)/u_SimRes
+      // where yval is the stored height from texture (storedHeight)
+      const storedHeight = y * simres;
       heights[heightmapIndex] = storedHeight;
 
       if (y < minHeight) minHeight = y;
       if (y > maxHeight) maxHeight = y;
       if (Math.abs(y) < 1e-6) zeroCount++;
       
-      // Debug: log corner and edge samples to verify mapping
+      // Debug: log only corners and very few edge samples to reduce noise
       const isCorner = (row === 0 && col === 0) || (row === 0 && col === simres - 1) || 
                        (row === simres - 1 && col === 0) || (row === simres - 1 && col === simres - 1);
-      const isEdge = (row === 0 || row === simres - 1 || col === 0 || col === simres - 1) && 
-                     (row < 5 || row > simres - 6 || col < 5 || col > simres - 6);
-      if (isCorner || (isEdge && heightmapIndex % 100 === 0)) {
+      const isEdge = (row === 0 || row === simres - 1 || col === 0 || col === simres - 1) && !isCorner;
+      
+      // Log corners always, but only log a few edge samples (every 1000th or at specific intervals)
+      const shouldLogEdge = isEdge && (
+        heightmapIndex % 1000 === 0 || // Every 1000th edge sample
+        (row === 0 && col % 500 === 0) || // Every 500th column on top edge
+        (row === simres - 1 && col % 500 === 0) || // Every 500th column on bottom edge
+        (col === 0 && row % 500 === 0) || // Every 500th row on left edge
+        (col === simres - 1 && row % 500 === 0) // Every 500th row on right edge
+      );
+      
+      if (isCorner || shouldLogEdge) {
         console.log(`[Heightmap Extraction] ${isCorner ? 'CORNER' : 'EDGE'} sample: row=${row}, col=${col}, vertexIndex=${vertexIndex}, worldHeight=${y.toFixed(3)}, stored=${storedHeight.toFixed(1)}`);
       }
       
-      // Debug: log first few samples to verify extraction
-      if (heightmapIndex < 10) {
-        console.log(`[Heightmap Extraction] Sample ${heightmapIndex} (row=${row}, col=${col}): worldHeight=${y.toFixed(3)}, storedHeight=${storedHeight.toFixed(3)}, vertexIndex=${vertexIndex}`);
+      // Debug: log only first sample to verify extraction
+      if (heightmapIndex === 0) {
+        console.log(`[Heightmap Extraction] First sample (row=${row}, col=${col}): worldHeight=${y.toFixed(3)}, storedHeight=${storedHeight.toFixed(3)}, vertexIndex=${vertexIndex}`);
       }
     }
   }

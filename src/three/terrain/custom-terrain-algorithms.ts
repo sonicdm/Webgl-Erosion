@@ -15,8 +15,10 @@
  */
 
 // Noise functions (ported from GLSL)
+// Match GLSL fract() exactly - always returns [0, 1)
 function random(st: [number, number]): number {
-  return ((Math.sin(st[0] * 12.9898 + st[1] * 78.233) * 43758.5453123) % 1);
+  const val = Math.sin(st[0] * 12.9898 + st[1] * 78.233) * 43758.5453123;
+  return val - Math.floor(val); // Equivalent to GLSL fract()
 }
 
 function noise2d(st: [number, number]): number {
@@ -33,15 +35,16 @@ function noise2d(st: [number, number]): number {
   return a + (b - a) * u[0] + (c - a) * u[1] * (1.0 - u[0]) + (d - b) * u[0] * u[1];
 }
 
+// FBM function matching initial-frag.glsl exactly: OCTAVES 8, amplitude *= 0.47
 function fbm(p: [number, number], octaves: number = 8): number {
   let value = 0.0;
-  let amplitude = 0.5;
+  let amplitude = 0.5; // Match initial-frag.glsl: float amplitude = 0.5;
   let frequency = 1.0;
   
   for (let i = 0; i < octaves; i++) {
     value += amplitude * noise2d([p[0] * frequency, p[1] * frequency]);
-    frequency *= 2.0;
-    amplitude *= 0.47;
+    frequency *= 2.0; // Match initial-frag.glsl: st *= 2.0;
+    amplitude *= 0.47; // Match initial-frag.glsl: amplitude *= 0.47;
   }
   
   return value;
@@ -316,6 +319,7 @@ export function createCustomTerrainHeightmap(
     const terrainScale = (options.terrainScale || 3.2);
     const terrainHeight = (options.terrainHeight || 2.0);
     const terrainMask = (options.terrainMask || 0);
+    const timer = options.timer || 0; // Get timer from options (matching initial-frag.glsl u_Time)
     const seedOffset = terrainRandom?.seedOffset || [0, 0];
     const duneDir = terrainRandom?.duneDir || [1, 0];
     const craterDensity = terrainRandom?.craterDensity || 1.0;
@@ -331,21 +335,25 @@ export function createCustomTerrainHeightmap(
       for (let x = 0; x < xl; x++) {
         const idx = y * xl + x;
         
-        // Convert grid position to UV space [0, 1] (matching shader: uv = 0.5f*fs_Pos+vec2(0.5f))
+        // Convert grid position to UV space [0, 1] (matching terrain-geometry-builder.ts: u = x / (width - 1))
+        // Since xSegments = simres - 1, we have: u = x / xSegments = x / (simres - 1) ✓
         const u = x / xSegments;
         const v = y / ySegments;
       
-      // Calculate position with seed offset (matching shader exactly)
+      // Calculate position with seed offset and timer (matching initial-frag.glsl exactly)
+      // Shader: cpos = 1.5 * uv * u_TerrainScale + vec2(1.f*sin(u_Time / 3.0) + 2.1, 1.0 * cos(u_Time/17.0)+3.6) + u_TerrainSeedOffset
       const cpos: [number, number] = [
-        1.5 * u * terrainScale + Math.sin(0) * 2.1 + seedOffset[0],
-        1.5 * v * terrainScale + Math.cos(0) * 3.6 + seedOffset[1]
+        1.5 * u * terrainScale + (Math.sin(timer / 3.0) + 2.1) + seedOffset[0],
+        1.5 * v * terrainScale + (Math.cos(timer / 17.0) + 3.6) + seedOffset[1]
       ];
       
       let terrain_height = 0.0;
       
       // Generate base terrain based on type (matching initial-frag.glsl exactly)
       if (baseType === 0) {
-        // Ordinary FBM
+        // Ordinary FBM - match initial-frag.glsl exactly:
+        // vec2 cpos = 1.5 * uv * u_TerrainScale + vec2(1.f*sin(u_Time / 3.0) + 2.1, 1.0 * cos(u_Time/17.0)+3.6) + u_TerrainSeedOffset;
+        // float base_height = pow(fbm(cpos * 2.0) * 1.1, 3.0);
         const base_height = Math.pow(fbm([cpos[0] * 2.0, cpos[1] * 2.0]) * 1.1, 3.0);
         terrain_height = base_height;
       } else if (baseType === 1) {
@@ -398,7 +406,7 @@ export function createCustomTerrainHeightmap(
       }
       
       // Apply height scaling (matching shader: terrain_hight *= u_TerrainHeight*120.0)
-      // But we need to normalize this to [0,1] for THREE.Terrain
+      // Match initial-frag.glsl exactly: terrain_hight *= u_TerrainHeight*120.0
       terrain_height *= terrainHeight * 120.0;
       
       // Apply masks (matching shader masks)

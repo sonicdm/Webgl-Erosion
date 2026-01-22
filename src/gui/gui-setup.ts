@@ -86,8 +86,13 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
     
     // Add onChange handler to regenerate terrain when type changes (dependency injection)
     if (threeRuntime) {
+        console.log('[GUI] TerrainBaseType handler attached, threeRuntime available');
         terrainBaseTypeController.onFinishChange((value: any) => {
             console.log('[GUI] TerrainBaseType changed to:', value);
+            if (!threeRuntime) {
+                console.warn('[GUI] WARNING: threeRuntime not available when TerrainBaseType changed');
+                return;
+            }
             const terrainRandom = {
                 seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
                 duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
@@ -98,6 +103,8 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
                 console.error('[GUI] ERROR: Failed to regenerate terrain:', error);
             });
         });
+    } else {
+        console.warn('[GUI] WARNING: threeRuntime not available, TerrainBaseType handler not attached');
     }
     terrainParameters.add(controls, 'ResetTerrain');
     terrainParameters.add(controls, 'Import Height Map');
@@ -247,9 +254,22 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
     // Rendering Parameters
     var renderingpara = gui.addFolder('Rendering Parameters');
     renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);
-    renderingpara.add(controls, 'TerrainPlatte', { AlpineMtn: 0, Desert: 1, Jungle: 2 });
-    renderingpara.add(controls, 'SnowRange', 0.0, 100.0);
-    renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
+    const terrainPaletteController = renderingpara.add(controls, 'TerrainPlatte', { AlpineMtn: 0, Desert: 1, Jungle: 2 });
+    const snowRangeController = renderingpara.add(controls, 'SnowRange', 0.0, 100.0);
+    const forestRangeController = renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
+    
+    // Update terrain material when rendering parameters change
+    if (threeRuntime) {
+      terrainPaletteController.onFinishChange(() => {
+        threeRuntime.updateMaterialFromControls();
+      });
+      snowRangeController.onFinishChange(() => {
+        threeRuntime.updateMaterialFromControls();
+      });
+      forestRangeController.onFinishChange(() => {
+        threeRuntime.updateMaterialFromControls();
+      });
+    }
     renderingpara.add(controls, 'ShowFlowTrace');
     renderingpara.add(controls, 'SedimentTrace');
     renderingpara.add(controls, 'showScattering');

@@ -58,11 +58,10 @@ class Camera {
 
     this.threeCamera = new PerspectiveCamera(this.fovy,this.aspectRatio,this.near,this.far);
     this.threeCamera.position.set(position[0],position[1],position[2]);
-    // Ensure Three.js camera uses the correct near/far planes
-    this.threeCamera.near = this.near;
-    this.threeCamera.far = this.far;
-    this.threeCamera.updateProjectionMatrix();
     this.threeControls = new OrbitControls(this.threeCamera, document.getElementById('canvas'));
+    
+    // Set OrbitControls target to match the initial target position
+    this.threeControls.target.set(target[0], target[1], target[2]);
 
     // Apply camera configuration if provided
     if (cameraConfig) {
@@ -149,6 +148,10 @@ class Camera {
 
   setAspectRatio(aspectRatio: number) {
     this.aspectRatio = aspectRatio;
+    if (this.threeCamera) {
+      this.threeCamera.aspect = aspectRatio;
+      this.threeCamera.updateProjectionMatrix();
+    }
   }
 
   updateProjectionMatrix() {

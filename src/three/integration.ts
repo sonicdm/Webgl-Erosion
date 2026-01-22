@@ -7,6 +7,7 @@ import { ThreeJSRuntime } from './main';
 import { SimulationPassManager } from './simulation/SimulationPassManager';
 import { readCombinedHeight } from './utils/combined-height-readback';
 import * as THREE from 'three';
+import { vec3 } from 'gl-matrix';
 import Camera from '../Camera';
 import { ControlsConfig } from '../controls-config';
 import { createTerrainGeometry, updateTerrainGeometry } from '../utils/terrain-geometry-builder';
@@ -41,9 +42,11 @@ export class ThreeJSSimulationRuntime {
     
     // Create Camera instance - it creates its own Three.js camera internally
     // Use initial position that provides a good view of the terrain
-    // Terrain spans ~1024 units, so camera should be far enough to see it
-    const initialPos = [0, 500, 500] as [number, number, number];
-    const initialTarget = [0, 0, 0] as [number, number, number];
+    // Terrain will be scaled to ~300 units, so camera should be positioned accordingly
+    // Position camera at a reasonable distance to see the terrain clearly
+    // Camera constructor expects vec3 from gl-matrix, so create proper vec3 arrays
+    const initialPos = vec3.fromValues(150, 200, 150); // Closer position for scaled terrain
+    const initialTarget = vec3.fromValues(0, 0, 0); // Look at terrain center
     
     this.camera = new Camera(
       initialPos,
@@ -52,11 +55,19 @@ export class ThreeJSSimulationRuntime {
       brushUsesLeftClick
     );
     
+    // Ensure OrbitControls target is set to look at terrain center
+    if (this.camera.threeControls) {
+      this.camera.threeControls.target.set(initialTarget[0], initialTarget[1], initialTarget[2]);
+      this.camera.threeControls.update();
+    }
+    
     // Replace the runtime's camera with the Camera's Three.js camera
     // This way the Camera class owns the camera and controls it properly
     this.runtime.setCamera(this.camera.threeCamera);
     
     console.log('Custom Camera initialized with WASD movement support');
+    console.log('Camera position:', this.camera.threeCamera.position);
+    console.log('Camera target:', this.camera.threeControls?.target);
   }
   
   /**
@@ -123,8 +134,17 @@ export class ThreeJSSimulationRuntime {
   }
 
   /**
+   * Gets the heightmap CPU buffer for brush system access
+   * This buffer is kept in sync with GPU state via readCombinedHeight()
+   */
+  public getHeightMapCpuBuffer(): Float32Array {
+    return this.heightMapCpuBuffer;
+  }
+
+  /**
    * Gets combined height for raycasting/geometry updates
    * Uses stored initial heightmap if available to avoid GPU readback issues
+   * Updates heightMapCpuBuffer to keep it synchronized
    */
   public readCombinedHeight(): Float32Array {
     if (!this.passManager) {
@@ -190,13 +210,11 @@ export class ThreeJSSimulationRuntime {
         renderer.readRenderTargetPixels(lavaTarget, 0, 0, this.simres, this.simres, lavaBuffer);
       }
       
-      // Check if we got valid data
+      // Check if we got valid data (throttled logging - only log warnings)
       const hasTerrainData = terrainBuffer.some((val, i) => i % 4 === 0 && Math.abs(val) > 0.001);
-      console.log('Readback - terrain has data:', hasTerrainData);
-      if (hasTerrainData) {
-        console.log('Terrain buffer first 16 values:', Array.from(terrainBuffer.slice(0, 16)));
-      } else {
-        console.warn('Terrain buffer is all zeros - readback may have failed');
+      if (!hasTerrainData) {
+        // Only log if there's a problem (reduces noise)
+        console.warn('[Heightmap Readback] Terrain buffer is all zeros - readback may have failed');
       }
     } catch (error) {
       console.error('Error reading render targets:', error);
@@ -227,7 +245,7 @@ export class ThreeJSSimulationRuntime {
       combinedBuffer[i * 4 + 3] = terrainBuffer[i * 4 + 3]; // Base rock surface
     }
     
-    // Update internal buffer
+    // Update internal buffer (synchronized for brush raycasting)
     this.heightMapCpuBuffer.set(combinedBuffer);
     return combinedBuffer;
   }
@@ -237,80 +255,80 @@ export class ThreeJSSimulationRuntime {
    * Uses THREE.Terrain mesh if available, otherwise creates geometry from heightmap
    */
   public updateTerrainGeometry(heightData: Float32Array): void {
-    // Use THREE.Terrain mesh directly (as per official GitHub documentation)
-    // THREE.Terrain() returns a Scene with mesh - use it directly
+    // Use THREE.Terrain mesh directly (already properly configured in SimulationPassManager)
+    // The mesh is already rotated and ready to use - don't create new geometry
     const terrainMesh = this.passManager?.getTerrainMesh();
     if (terrainMesh && !this.terrainMesh) {
-      console.log('[Terrain Update] Using THREE.Terrain generated mesh for rendering (official usage)');
-      // Use the mesh directly from THREE.Terrain - it already has geometry and material
+      console.log('[Terrain Update] Using THREE.Terrain generated mesh for rendering');
       this.terrainMesh = terrainMesh;
       this.terrainGeometry = terrainMesh.geometry;
       
-      // Replace MeshBasicMaterial with procedural terrain material for better visualization
+      // Replace material with procedural terrain material
       const oldMaterial = this.terrainMesh.material;
       
       // Calculate height range from geometry for procedural material
       const positions = this.terrainMesh.geometry.attributes.position.array as Float32Array;
       let minHeight = Infinity;
       let maxHeight = -Infinity;
-      for (let i = 1; i < positions.length; i += 3) { // y is at index 1
+      for (let i = 1; i < positions.length; i += 3) { // y is at index 1 (after rotation)
         const y = positions[i];
         if (y < minHeight) minHeight = y;
         if (y > maxHeight) maxHeight = y;
       }
       
-      // Create procedural terrain material with height-based coloring
-      this.terrainMesh.material = createTerrainProceduralMaterial({
-        minHeight: minHeight,
-        maxHeight: maxHeight,
-        snowRange: this.controls?.SnowRange || 0.0,
-        forestRange: this.controls?.ForestRange || 0.0,
-        terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
-      });
+      try {
+        this.terrainMesh.material = createTerrainProceduralMaterial({
+          minHeight: minHeight,
+          maxHeight: maxHeight,
+          snowRange: this.controls?.SnowRange || 0.0,
+          forestRange: this.controls?.ForestRange || 0.0,
+          terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
+        });
+        console.log('[Terrain Update] Material replaced with procedural terrain material');
+      } catch (error) {
+        console.warn('[Terrain Update] Failed to create procedural material, using fallback:', error);
+        // Fallback to simple material
+        this.terrainMesh.material = new THREE.MeshStandardMaterial({
+          color: 0x888888,
+          wireframe: false,
+          side: THREE.DoubleSide,
+          flatShading: false
+        });
+      }
       
-      // Dispose old material
       if (oldMaterial instanceof THREE.Material) {
         oldMaterial.dispose();
       }
-      console.log('[Terrain Update] Material replaced with procedural terrain material');
       
-      // THREE.Terrain mesh is already properly configured, just add to scene
+      // Mesh is already configured (position, rotation, scale set in SimulationPassManager)
+      // Just add to scene
       const scene = this.runtime.getScene();
       scene.add(this.terrainMesh);
+      
       console.log('[Terrain Update] THREE.Terrain mesh added to scene');
       console.log('[Terrain Update] Mesh details:', {
         visible: this.terrainMesh.visible,
         position: this.terrainMesh.position,
         scale: this.terrainMesh.scale,
-        material: this.terrainMesh.material.type,
+        rotation: this.terrainMesh.rotation,
         geometryVertices: this.terrainMesh.geometry.attributes.position.count
       });
       return;
     }
     
-    // If mesh already exists, don't update it (THREE.Terrain mesh is static)
-    // Only update if explicitly regenerating terrain
+    // If mesh already exists, don't recreate it - just return
     if (this.terrainMesh) {
-      // Mesh already exists, no need to update
       return;
     }
     
-    // Check if height data is valid (not all zeros)
-    const hasValidData = heightData.some((val, i) => i % 4 === 0 && val !== 0);
-    if (!hasValidData) {
-      console.warn('[Terrain Update] Height data appears to be all zeros, terrain may not render correctly');
-    }
-    
+    // Fallback: Create geometry from heightmap if THREE.Terrain mesh not available
     if (!this.terrainGeometry) {
-      console.log('Creating new terrain geometry...');
+      console.log('[Terrain Update] THREE.Terrain mesh not available, creating geometry from heightmap');
       this.terrainGeometry = createTerrainGeometry(this.simres, heightData, 1.0);
-      console.log('Terrain geometry created, vertices:', this.terrainGeometry.attributes.position.count);
       
-      // Create terrain mesh
+      // Create terrain mesh from the geometry
       if (!this.terrainMesh) {
-        console.log('Creating terrain mesh...');
-        // Create procedural shader material based on height and slope
-        // Calculate height range from geometry
+        // Calculate height range from geometry for procedural material
         const positions = this.terrainGeometry.attributes.position.array as Float32Array;
         let minHeight = Infinity;
         let maxHeight = -Infinity;
@@ -320,79 +338,88 @@ export class ThreeJSSimulationRuntime {
           if (y > maxHeight) maxHeight = y;
         }
         
-        // Use procedural shader material
-        // TEMPORARY: Use simple material to verify 3D geometry is working
-        const useSimpleMaterial = true; // Set to true to test with basic material
-        const material = useSimpleMaterial 
-          ? new THREE.MeshStandardMaterial({ 
-              color: 0x888888, 
-              wireframe: false,
-              side: THREE.DoubleSide,
-              flatShading: false // Use smooth shading to see 3D
-            })
-          : createTerrainProceduralMaterial({
+        // Create procedural terrain material with height-based coloring
+        // TEMPORARY: Use simple material to verify geometry renders correctly
+        const useSimpleMaterialForDebugging = true;
+        
+        let material: THREE.Material;
+        if (useSimpleMaterialForDebugging) {
+          // Use simple material to verify geometry is visible
+          material = new THREE.MeshStandardMaterial({
+            color: 0x00ff00, // Bright green for visibility
+            wireframe: false,
+            side: THREE.DoubleSide,
+            flatShading: false
+          });
+          console.log('[Terrain Update] Using simple green material for debugging');
+        } else {
+          try {
+            material = createTerrainProceduralMaterial({
               minHeight: minHeight,
               maxHeight: maxHeight,
-              snowRange: 0.0, // Will be updated from controls
-              forestRange: 0.0, // Will be updated from controls
-              terrainPalette: 1, // Default to Desert, will be updated from controls
+              snowRange: this.controls?.SnowRange || 0.0,
+              forestRange: this.controls?.ForestRange || 0.0,
+              terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
             });
+            console.log('[Terrain Update] Material created with procedural terrain material');
+          } catch (error) {
+            console.warn('[Terrain Update] Failed to create procedural material, using fallback:', error);
+            material = new THREE.MeshStandardMaterial({
+              color: 0x888888,
+              wireframe: false,
+              side: THREE.DoubleSide,
+              flatShading: false
+            });
+          }
+        }
         
+        // Create mesh from geometry (geometry is already in correct XZ plane orientation)
         this.terrainMesh = new THREE.Mesh(this.terrainGeometry, material);
-        // Terrain geometry already lies in XZ with Y as height; keep identity rotation.
-        this.terrainMesh.rotation.set(0, 0, 0);
-        // Scale terrain to be more visible (make it 10x larger)
-        this.terrainMesh.scale.set(10, 10, 10);
         this.terrainMesh.position.set(0, 0, 0);
-        this.terrainMesh.frustumCulled = false; // Disable frustum culling for debugging
-        this.terrainMesh.matrixAutoUpdate = true;
+        this.terrainMesh.rotation.set(0, 0, 0); // No rotation needed - geometry is already correct
+        this.terrainMesh.scale.set(1, 1, 1);
+        this.terrainMesh.frustumCulled = false;
+        this.terrainMesh.updateMatrixWorld(true);
         
+        // Add to scene
         const scene = this.runtime.getScene();
         scene.add(this.terrainMesh);
-        console.log('Terrain mesh added to scene');
         
-        // Camera is already positioned by Camera class constructor
-        // Just log the position if Camera is available
-        if (this.camera) {
-          console.log('Camera positioned at:', this.camera.threeCamera.position, 'looking at:', this.camera.threeCamera.getWorldDirection(new THREE.Vector3()));
-        }
-      } else {
-        this.terrainMesh.geometry.dispose();
-        this.terrainMesh.geometry = this.terrainGeometry;
+        console.log('[Terrain Update] Terrain mesh created and added to scene using createTerrainGeometry');
+        console.log('[Terrain Update] Mesh details:', {
+          visible: this.terrainMesh.visible,
+          position: this.terrainMesh.position,
+          scale: this.terrainMesh.scale,
+          rotation: this.terrainMesh.rotation,
+          material: this.terrainMesh.material.type,
+          geometryVertices: this.terrainMesh.geometry.attributes.position.count,
+          boundingBox: this.terrainGeometry.boundingBox ? {
+            min: this.terrainGeometry.boundingBox.min,
+            max: this.terrainGeometry.boundingBox.max,
+            size: {
+              x: (this.terrainGeometry.boundingBox.max.x - this.terrainGeometry.boundingBox.min.x).toFixed(2),
+              y: (this.terrainGeometry.boundingBox.max.y - this.terrainGeometry.boundingBox.min.y).toFixed(2),
+              z: (this.terrainGeometry.boundingBox.max.z - this.terrainGeometry.boundingBox.min.z).toFixed(2)
+            }
+          } : 'No bounding box'
+        });
+        return;
       }
-    } else {
-      updateTerrainGeometry(this.terrainGeometry, this.simres, heightData, 1.0);
     }
+    
+    // If mesh already exists, update its geometry from simulation results
     if (this.terrainMesh && this.terrainGeometry) {
-      // Ensure geometry has proper indices and faces (not wireframe)
-      if (!this.terrainGeometry.index || this.terrainGeometry.index.count === 0) {
-        console.warn('Terrain geometry missing indices - computing them');
-        this.terrainGeometry.computeVertexNormals();
-      }
-      
+      // Update existing geometry from height data
+      updateTerrainGeometry(this.terrainGeometry, this.simres, heightData, 1.0);
       this.terrainMesh.geometry.attributes.position.needsUpdate = true;
-      // Ensure normals are computed for the shader
-      if (!this.terrainMesh.geometry.attributes.normal) {
-        this.terrainMesh.geometry.computeVertexNormals();
-      } else {
+      if (this.terrainMesh.geometry.attributes.normal) {
         this.terrainMesh.geometry.attributes.normal.needsUpdate = true;
+      } else {
+        this.terrainMesh.geometry.computeVertexNormals();
       }
       
-      // Ensure material is not wireframe and geometry has proper faces
-      if (this.terrainMesh.material instanceof THREE.Material) {
-        (this.terrainMesh.material as any).wireframe = false;
-        this.terrainMesh.material.needsUpdate = true;
-      }
-      
-      // Ensure geometry has indices (faces) - if missing, it will render as wireframe
-      if (!this.terrainGeometry.index || this.terrainGeometry.index.count === 0) {
-        console.error('Terrain geometry missing indices! This will cause wireframe rendering.');
-        // Geometry should have indices from terrain-geometry-builder, but check anyway
-      }
-      
-      // Update procedural material if it's a shader material
+      // Update material height range if using procedural material
       if ((this.terrainMesh.material instanceof THREE.ShaderMaterial || this.terrainMesh.material instanceof THREE.RawShaderMaterial) && this.controls) {
-        // Recalculate height range
         const positions = this.terrainGeometry.attributes.position.array as Float32Array;
         let minHeight = Infinity;
         let maxHeight = -Infinity;
@@ -410,14 +437,84 @@ export class ThreeJSSimulationRuntime {
           terrainPalette: this.controls.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
         });
       }
+      return;
+    }
+    
+    // Fallback: Create new geometry and mesh if neither exists
+    if (!this.terrainMesh) {
+      console.log('Creating new terrain geometry and mesh...');
+      this.terrainGeometry = createTerrainGeometry(this.simres, heightData, 1.0);
+      
+      // Calculate height range
+      const positions = this.terrainGeometry.attributes.position.array as Float32Array;
+      let minHeight = Infinity;
+      let maxHeight = -Infinity;
+      for (let i = 1; i < positions.length; i += 3) {
+        const y = positions[i];
+        if (y < minHeight) minHeight = y;
+        if (y > maxHeight) maxHeight = y;
+      }
+      
+      // Create material
+      const useSimpleMaterial = true;
+      const material = useSimpleMaterial 
+        ? new THREE.MeshStandardMaterial({ 
+            color: 0x888888, 
+            wireframe: false,
+            side: THREE.DoubleSide,
+            flatShading: false
+          })
+        : createTerrainProceduralMaterial({
+            minHeight: minHeight,
+            maxHeight: maxHeight,
+            snowRange: 0.0,
+            forestRange: 0.0,
+            terrainPalette: 1,
+          });
+      
+      this.terrainMesh = new THREE.Mesh(this.terrainGeometry, material);
+      // Terrain geometry already lies in XZ with Y as height; keep identity rotation.
+      this.terrainMesh.rotation.set(0, 0, 0);
+      this.terrainMesh.scale.set(1, 1, 1);
+      this.terrainMesh.position.set(0, 0, 0);
+      this.terrainMesh.frustumCulled = false;
+      this.terrainMesh.matrixAutoUpdate = true;
+      
+      const scene = this.runtime.getScene();
+      scene.add(this.terrainMesh);
+      console.log('Terrain mesh added to scene');
+    } else {
+      // Update existing geometry
+      if (this.terrainGeometry) {
+        updateTerrainGeometry(this.terrainGeometry, this.simres, heightData, 1.0);
+        if (this.terrainMesh) {
+          this.terrainMesh.geometry.attributes.position.needsUpdate = true;
+          if (this.terrainMesh.geometry.attributes.normal) {
+            this.terrainMesh.geometry.attributes.normal.needsUpdate = true;
+          } else {
+            this.terrainMesh.geometry.computeVertexNormals();
+          }
+        }
+      }
     }
   }
   
   /**
    * Updates material parameters from controls
+   * Can be called with controls parameter or use stored this.controls
    */
-  public updateMaterialFromControls(controls: any): void {
-    this.controls = controls;
+  public updateMaterialFromControls(controls?: any): void {
+    // Update stored controls if provided
+    if (controls) {
+      this.controls = controls;
+    }
+    
+    // Use stored controls if no parameter provided
+    const controlsToUse = controls || this.controls;
+    if (!controlsToUse) {
+      return;
+    }
+    
     if (this.terrainMesh && (this.terrainMesh.material instanceof THREE.ShaderMaterial || this.terrainMesh.material instanceof THREE.RawShaderMaterial) && this.terrainGeometry) {
       const positions = this.terrainGeometry.attributes.position.array as Float32Array;
       let minHeight = Infinity;
@@ -431,9 +528,9 @@ export class ThreeJSSimulationRuntime {
       updateTerrainProceduralMaterial(this.terrainMesh.material as THREE.ShaderMaterial | THREE.RawShaderMaterial, {
         minHeight: minHeight,
         maxHeight: maxHeight,
-        snowRange: controls.SnowRange || 0.0,
-        forestRange: controls.ForestRange || 0.0,
-        terrainPalette: controls.TerrainPlatte !== undefined ? controls.TerrainPlatte : 1,
+        snowRange: controlsToUse.SnowRange || 0.0,
+        forestRange: controlsToUse.ForestRange || 0.0,
+        terrainPalette: controlsToUse.TerrainPlatte !== undefined ? controlsToUse.TerrainPlatte : 1,
       });
     }
   }
@@ -484,11 +581,14 @@ export class ThreeJSSimulationRuntime {
     const rendererSize = renderer.getSize(new THREE.Vector2());
     renderer.setViewport(0, 0, rendererSize.x, rendererSize.y);
     
-    renderer.clear();
+    // Clear with a visible background color for debugging (can be removed later)
+    renderer.setClearColor(0x87CEEB, 1.0); // Sky blue background
+    renderer.clear(true, true, true); // Clear color, depth, and stencil
     
-    // Log scene contents for debugging (only first frame and every 5 seconds)
+    // Log scene contents for debugging (throttled to reduce noise)
     this.renderFrameCount++;
-    if (this.renderFrameCount === 1 || this.renderFrameCount % 300 === 0) {
+    if (this.renderFrameCount === 1 || this.renderFrameCount % 600 === 0) {
+      // Log only first frame and every 10 seconds (600 frames at 60fps)
       console.log('Render frame', this.renderFrameCount, '- Scene children:', scene.children.length, 'Terrain mesh in scene:', scene.children.includes(this.terrainMesh!));
       if (this.terrainMesh) {
         console.log('Terrain mesh - visible:', this.terrainMesh.visible, 'position:', this.terrainMesh.position, 'scale:', this.terrainMesh.scale, 'geometry vertices:', this.terrainMesh.geometry.attributes.position.count);
@@ -499,15 +599,51 @@ export class ThreeJSSimulationRuntime {
       // Update custom Camera (handles OrbitControls + WASD movement)
       // This must be called every frame, just like in the original tick() function
       if (this.camera && this.controlsConfig) {
+        // Update camera aspect ratio to match renderer size
+        const rendererSize = renderer.getSize(new THREE.Vector2());
+        const aspect = rendererSize.x / rendererSize.y;
+        if (this.camera.threeCamera.aspect !== aspect) {
+          this.camera.threeCamera.aspect = aspect;
+          this.camera.threeCamera.updateProjectionMatrix();
+        }
+        
         this.camera.update(this.controlsConfig.camera);
         const threeCamera = this.camera.threeCamera;
         
         // Debug camera position on first frame
         if (this.renderFrameCount === 1) {
+          const bbox = this.terrainMesh.geometry.boundingBox;
+          const terrainCenter = bbox ? new THREE.Vector3().addVectors(bbox.min, bbox.max).multiplyScalar(0.5) : new THREE.Vector3();
+          const terrainSize = bbox ? new THREE.Vector3().subVectors(bbox.max, bbox.min) : new THREE.Vector3();
+          const maxDim = Math.max(terrainSize.x, terrainSize.y, terrainSize.z);
+          
           console.log('[Render] Camera position:', threeCamera.position);
           console.log('[Render] Camera target (looking at):', threeCamera.position.clone().add(threeCamera.getWorldDirection(new THREE.Vector3()).multiplyScalar(100)));
           console.log('[Render] Camera near/far:', threeCamera.near, threeCamera.far);
-          console.log('[Render] Terrain mesh bounds:', this.terrainMesh.geometry.boundingBox);
+          console.log('[Render] Terrain mesh bounds:', bbox ? {
+            min: bbox.min,
+            max: bbox.max,
+            center: terrainCenter,
+            size: terrainSize,
+            maxDimension: maxDim
+          } : 'No bounding box');
+          
+          // Check if terrain is in view frustum
+          if (bbox) {
+            const distance = threeCamera.position.distanceTo(terrainCenter);
+            const isInFrustum = distance < threeCamera.far && distance > threeCamera.near;
+            console.log('[Render] Terrain visibility check:', {
+              distanceToCenter: distance.toFixed(2),
+              isInFrustum: isInFrustum,
+              cameraFar: threeCamera.far,
+              terrainMaxDim: maxDim.toFixed(2)
+            });
+            
+            // Suggest camera adjustment if terrain is too far
+            if (distance > threeCamera.far * 0.8) {
+              console.warn('[Render] WARNING: Terrain may be outside view frustum. Consider adjusting camera position or far plane.');
+            }
+          }
         }
         
         // Use the Camera's Three.js camera for rendering
@@ -608,6 +744,7 @@ export class ThreeJSSimulationRuntime {
       this.passManager.setSimRes(simres);
     }
   }
+
 
   /**
    * Gets the Three.js renderer

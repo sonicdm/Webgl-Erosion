@@ -13,7 +13,7 @@ import mouseChange from 'mouse-change';
 import { ControlsConfig, getMouseButtonAction, isModifierPressed } from './controls-config';
 import { loadSettings } from './settings';
 import { setupGUI, GUIControllers } from './gui/gui-setup';
-import { createEventHandlers } from './events/event-handlers';
+import { createEventHandlers, EventHandlerDependencies } from './events/event-handlers';
 import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
 import { updatePaletteSelection } from './brush-palette';
 import { MAX_WATER_SOURCES, waterSources, getWaterSourceCount } from './utils/water-sources';
@@ -279,7 +279,7 @@ function StartGeneration(){
 
 // Reset function - receives threeRuntime via closure from main()
 // This is set up after threeRuntime is created
-let resetWithThreeRuntime: ((threeRuntime: ThreeJSSimulationRuntime | undefined) => void) | null = null;
+// Note: resetWithThreeRuntime is declared at module level (line 1322)
 
 function Reset(){
     setSimFramecnt(0);
@@ -1317,6 +1317,10 @@ function handleInteraction (buttons : number, x : number, y : number){
 // controlsConfig will be loaded from settings in main() function
 let controlsConfig: ControlsConfig;
 
+// Module-level variables for dependency injection and scope access
+let threeRuntime: ThreeJSSimulationRuntime | undefined;
+let resetWithThreeRuntime: ((rt: ThreeJSSimulationRuntime | undefined) => void) | null = null;
+
 function main() {
 
   // Initial display for framerate
@@ -1359,8 +1363,18 @@ function main() {
                                        (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
 
   const setupInputHandlers = (camera: Camera) => {
-    // Create event handlers (must be done after controlsConfig and camera are loaded)
-    const eventHandlers = createEventHandlers(controls, controlsConfig, camera);
+    // Create dependency object for event handlers (dependency injection)
+    const eventHandlerDeps: EventHandlerDependencies = {
+      heightMapBuffer: threeRuntime?.getHeightMapCpuBuffer() || HightMapCpuBuf, // Fallback for WebGL
+      threeRuntime: threeRuntime,
+      camera: camera,
+      controls: controls,
+      controlsConfig: controlsConfig,
+      simres: simres,
+    };
+    
+    // Create event handlers with dependency injection
+    const eventHandlers = createEventHandlers(controls, controlsConfig, camera, eventHandlerDeps);
     const { onKeyDown, onKeyUp, onMouseDown, onMouseUp } = eventHandlers;
   
     // Disabled mouseChange to prevent coordinate conflicts with pointer events
@@ -1447,7 +1461,7 @@ function main() {
   };
 
   // Check if Three.js runtime is enabled
-  let threeRuntime: ThreeJSSimulationRuntime | undefined;
+  // Note: threeRuntime is declared at module level for Reset() function access
   
   // Setup GUI with dependency injection (threeRuntime will be injected if available)
   // This follows dependency injection best practices - dependencies are passed explicitly
@@ -1455,6 +1469,7 @@ function main() {
   
   if (THREEJS_CONFIG.USE_THREEJS_RUNTIME) {
     try {
+      // threeRuntime is declared at module level, assign to it here
       threeRuntime = new ThreeJSSimulationRuntime(canvas, gl_context, simres);
       threeRuntime.initializeSimulation();
       threeRuntime.setControlsConfig(controlsConfig, brushUsesLeftClickForCamera);
@@ -1464,6 +1479,7 @@ function main() {
       }
       
       // Inject threeRuntime into Reset function via closure (dependency injection)
+      // resetWithThreeRuntime is declared at module level
       resetWithThreeRuntime = (rt: ThreeJSSimulationRuntime | undefined) => {
         if (rt) {
           console.log('[Reset] ===== RESET BUTTON CLICKED =====');
@@ -1521,11 +1537,11 @@ function main() {
       const { importHeightmap, clearHeightmap, exportHeightmap } = createTerrainIO({
         simres,
         controls,
-        getTerrainGeometry: () => threeRuntime.getTerrainGeometry(),
+        getTerrainGeometry: () => threeRuntime!.getTerrainGeometry(),
         onHeightmapChange: async (heightmap) => {
-          await threeRuntime.initializeTextures(controls, timer, heightmap, terrainRandom);
-          const heightData = threeRuntime.readCombinedHeight();
-          threeRuntime.updateTerrainGeometry(heightData);
+          await threeRuntime!.initializeTextures(controls, timer, heightmap, terrainRandom);
+          const heightData = threeRuntime!.readCombinedHeight();
+          threeRuntime!.updateTerrainGeometry(heightData);
         }
       });
 
@@ -1570,8 +1586,8 @@ function main() {
               // Try to initialize terrain on first few frames
               if (frameCount < 10) {
                 try {
-                  const heightData = threeRuntime.readCombinedHeight();
-                  threeRuntime.updateTerrainGeometry(heightData);
+                  const heightData = threeRuntime!.readCombinedHeight();
+                  threeRuntime!.updateTerrainGeometry(heightData);
                   terrainInitialized = true;
                 } catch (error) {
                   // Still initializing, skip this frame
@@ -1588,13 +1604,27 @@ function main() {
             
             // Run simulation steps
             for (let i = 0; i < controls.SimulationSpeed; i++) {
-              threeRuntime.executeSimulationStep(controls);
+              threeRuntime!.executeSimulationStep(controls);
+            }
+            
+            // Read updated heightmap after simulation for brush raycasting and BVH updates
+            // This is similar to the WebGL pipeline's HightMapBufCounter mechanism
+            // readCombinedHeight() automatically updates heightMapCpuBuffer for brush access
+            const shouldReadHeightmapForBrush = (frameCount % MaxHightMapBufCounter === 0) || (controls.brushPressed === 1);
+            if (shouldReadHeightmapForBrush && threeRuntime) {
+              threeRuntime.readCombinedHeight(); // Updates internal heightMapCpuBuffer for brushes
+            }
+
+            // Update terrain geometry periodically (e.g., every 10 frames) to reflect simulation changes
+            if (frameCount % 10 === 0 && threeRuntime) {
+              const updatedHeightData = threeRuntime.readCombinedHeight(); // Get latest simulation results
+              threeRuntime.updateTerrainGeometry(updatedHeightData); // Update mesh geometry
             }
             
             // Render the scene (only if terrain is initialized)
             // Note: We don't update terrain geometry every frame anymore since we use THREE.Terrain mesh directly
             // Geometry is only updated when terrain is regenerated (ResetTerrain) or heightmap is imported
-            if (terrainInitialized) {
+            if (terrainInitialized && threeRuntime) {
               threeRuntime.render();
             }
             stats.end();

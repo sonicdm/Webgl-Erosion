@@ -60,10 +60,20 @@ export interface EventHandlers {
     onMouseUp: (event: MouseEvent | PointerEvent) => void;
 }
 
+export interface EventHandlerDependencies {
+    heightMapBuffer: Float32Array;
+    threeRuntime?: ThreeJSSimulationRuntime;
+    camera: Camera;
+    controls: Controls;
+    controlsConfig: ControlsConfig;
+    simres: number;
+}
+
 export function createEventHandlers(
     controls: Controls,
     controlsConfig: ControlsConfig,
-    camera: Camera
+    camera: Camera,
+    deps?: EventHandlerDependencies
 ): EventHandlers {
     function onKeyDown(event: KeyboardEvent) {
         const key = event.key.toLowerCase();
@@ -218,11 +228,14 @@ export function createEventHandlers(
         const action = getMouseButtonAction(event.button, controlsConfig);
         
         if (action === 'brushActivate') {
+            // Use dependency injection - prefer Three.js runtime buffer if available
+            const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() || deps?.heightMapBuffer || HightMapCpuBuf;
+            
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
-                simres: Number(simres), // Ensure it's a number, not a string
-                HightMapCpuBuf: HightMapCpuBuf,
+                simres: deps?.simres || Number(simres), // Use injected simres if available
+                HightMapCpuBuf: heightMapBuffer,
                 camera: camera
             };
             
@@ -248,11 +261,14 @@ export function createEventHandlers(
         if (action === 'brushActivate') {
             controls.brushPressed = 0;
             
+            // Use dependency injection - prefer Three.js runtime buffer if available
+            const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() || deps?.heightMapBuffer || HightMapCpuBuf;
+            
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
-                simres: Number(simres), // Ensure it's a number, not a string
-                HightMapCpuBuf: HightMapCpuBuf,
+                simres: deps?.simres || Number(simres), // Use injected simres if available
+                HightMapCpuBuf: heightMapBuffer,
                 camera: camera
             };
             
