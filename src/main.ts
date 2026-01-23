@@ -1594,9 +1594,10 @@ function main() {
           // Read initial height data and create terrain geometry immediately
           let terrainInitialized = false;
           try {
-            console.log('Reading combined height data...');
+            console.log('Reading initial height data...');
+            // readCombinedHeight now just returns initial heightmap (no expensive GPU readback)
             const initialHeightData = threeRuntime.readCombinedHeight();
-            console.log('Height data read, length:', initialHeightData.length, 'first 16 values:', Array.from(initialHeightData.slice(0, 16)));
+            console.log('Height data read, length:', initialHeightData.length);
             threeRuntime.updateTerrainGeometry(initialHeightData);
             terrainInitialized = true;
             console.log('Terrain geometry initialized successfully');
@@ -1617,6 +1618,7 @@ function main() {
               // Try to initialize terrain on first few frames
               if (frameCount < 10) {
                 try {
+                  // readCombinedHeight now just returns initial heightmap (no expensive GPU readback)
                   const heightData = threeRuntime!.readCombinedHeight();
                   threeRuntime!.updateTerrainGeometry(heightData);
                   terrainInitialized = true;
@@ -1643,35 +1645,90 @@ function main() {
             if (threeRuntime) {
               const canvas = document.getElementById('canvas') as HTMLCanvasElement;
               if (canvas) {
-                // Calculate brush state from current mouse position
-                const calculatedBrushState = threeRuntime.calculateBrushState(lastX, lastY, canvas);
-                if (calculatedBrushState) {
-                  // Only use brushState if brushPos is valid (not [-10, -10])
-                  const [brushPosX, brushPosY] = calculatedBrushState.brushPos;
-                  if (brushPosX >= 0 && brushPosX <= 1 && brushPosY >= 0 && brushPosY <= 1) {
-                    brushState = calculatedBrushState;
-                    // Update controls.posTemp for brush system compatibility (vec2 from gl-matrix)
-                    controls.posTemp = vec2.fromValues(calculatedBrushState.brushPos[0], calculatedBrushState.brushPos[1]);
+                // Calculate brush state when brush is visible or pressed
+                // Heightmap raycasting is fast, so we can do it every frame
+                const brushVisible = Number(controls.brushType) !== 0;
+                const brushPressed = controls.brushPressed === 1;
+                const shouldCalculateBrush = brushVisible || brushPressed;
+                
+                if (shouldCalculateBrush) {
+                  // Calculate brush state from current mouse position
+                  const calculatedBrushState = threeRuntime.calculateBrushState(lastX, lastY, canvas);
+                  if (calculatedBrushState) {
+                    // Only use brushState if brushPos is valid (not [-10, -10])
+                    const [brushPosX, brushPosY] = calculatedBrushState.brushPos;
+                    if (brushPosX >= 0 && brushPosX <= 1 && brushPosY >= 0 && brushPosY <= 1) {
+                      brushState = calculatedBrushState;
+                      // Update controls.posTemp for brush system compatibility (vec2 from gl-matrix)
+                      controls.posTemp = vec2.fromValues(calculatedBrushState.brushPos[0], calculatedBrushState.brushPos[1]);
+                      
+                      // Update brush state (flatten target height, slope end points, etc.) - same as WebGL path
+                      // Get camera from threeRuntime (it's not declared yet in this scope)
+                      const runtimeCamera = threeRuntime.getCamera();
+                      if (runtimeCamera) {
+                        const brushContext: BrushContext = {
+                          controls: controls as BrushControls,
+                          controlsConfig: controlsConfig,
+                          simres: Number(simres),
+                          HightMapCpuBuf: threeRuntime.getHeightMapCpuBuffer(),
+                          camera: runtimeCamera
+                        };
+                        updateBrushState(controls.posTemp, brushContext);
+                      }
+                    } else {
+                      // Invalid brushPos - don't set brushState (will use fallback from controls.posTemp)
+                      brushState = undefined;
+                    }
                   } else {
-                    // Invalid brushPos - don't set brushState (will use fallback from controls.posTemp)
+                    // calculateBrushState returned null - clear brushState
                     brushState = undefined;
                   }
-                  
-                  // Update brush state (flatten target height, slope end points, etc.) - same as WebGL path
-                  // Get camera from threeRuntime (it's not declared yet in this scope)
-                  const runtimeCamera = threeRuntime.getCamera();
-                  if (runtimeCamera) {
-                    const brushContext: BrushContext = {
-                      controls: controls as BrushControls,
-                      controlsConfig: controlsConfig,
-                      simres: Number(simres),
-                      HightMapCpuBuf: threeRuntime.getHeightMapCpuBuffer(),
-                      camera: runtimeCamera
-                    };
-                    updateBrushState(controls.posTemp, brushContext);
-                  }
+                } else {
+                  // Brush not active - clear brushState
+                  brushState = undefined;
                 }
               }
+            }
+            
+            // Throttled debug logging for brush state (every 120 frames, only when pressed)
+            // Removed debug logging - was causing performance issues
+            
+            // Apply CPU-side terraforming when brush is pressed
+            // This directly modifies geometry vertices, avoiding GPU readback
+            // Only apply when brush is pressed AND mouse has moved (to avoid excessive updates)
+            if (brushState && controls.brushPressed === 1 && controls.brushType !== 0) {
+              const [brushPosX, brushPosY] = brushState.brushPos;
+              if (brushPosX >= 0 && brushPosX <= 1 && brushPosY >= 0 && brushPosY <= 1) {
+                // Get flatten target height and slope positions from brush state
+                const flattenTargetHeight = (controls as any).flattenTargetHeight;
+                const slopeStartPos = (controls as any).slopeStartPos;
+                const slopeEndPos = (controls as any).slopeEndPos;
+                
+                // Apply terraforming every frame to match shader behavior exactly
+                // The shader applies terraforming every frame when brush is pressed
+                // We need to match this frequency to get the same accumulation rate
+                // Note: This may be expensive, but it's necessary to match GPU behavior
+                
+                {
+                // Get brush strength - property is misspelled as "brushStrenth" in controls
+                const brushStrength = (controls as any).brushStrenth !== undefined ? (controls as any).brushStrenth : 
+                                    controls.brushStrength !== undefined ? controls.brushStrength : 0.5;
+                
+                threeRuntime!.applyTerraformingToGeometry(
+                  [brushPosX, brushPosY],
+                  controls.brushSize,
+                  brushStrength,
+                  controls.brushType,
+                  controls.brushOperation,
+                  flattenTargetHeight,
+                  slopeStartPos,
+                  slopeEndPos
+                );
+                }
+              }
+            } else if (controls.brushPressed === 0) {
+              // Brush released - mark terraforming as inactive
+              threeRuntime?.setTerraformingInactive();
             }
             
             // Run simulation steps
@@ -1681,19 +1738,11 @@ function main() {
               timer++; // Increment timer for each simulation step
             }
             
-            // Read updated heightmap after simulation for brush raycasting and BVH updates
-            // This is similar to the WebGL pipeline's HightMapBufCounter mechanism
-            // readCombinedHeight() automatically updates heightMapCpuBuffer for brush access
-            const shouldReadHeightmapForBrush = (frameCount % MaxHightMapBufCounter === 0) || (controls.brushPressed === 1);
-            if (shouldReadHeightmapForBrush && threeRuntime) {
-              threeRuntime.readCombinedHeight(); // Updates internal heightMapCpuBuffer for brushes
-            }
-
-            // Update terrain geometry periodically (e.g., every 10 frames) to reflect simulation changes
-            if (frameCount % 10 === 0 && threeRuntime) {
-              const updatedHeightData = threeRuntime.readCombinedHeight(); // Get latest simulation results
-              threeRuntime.updateTerrainGeometry(updatedHeightData); // Update mesh geometry
-            }
+            // CRITICAL PERFORMANCE: readCombinedHeight is disabled - it was taking 400ms+ per call
+            // GPU readback with FLOAT doesn't work (returns normalized values)
+            // For now, brush raycasting uses initial heightmap data
+            // Terraforming changes are applied to GPU textures but can't be read back
+            // TODO: Implement CPU-side tracking or copy pass for terraforming updates
             
             // Render the scene (only if terrain is initialized)
             // Note: We don't update terrain geometry every frame anymore since we use THREE.Terrain mesh directly
@@ -2633,6 +2682,13 @@ function main() {
     const updateTriggeredByInterval = shouldUpdateGeometry(); // Periodic update during erosion
     
     if (shouldUpdateNow && (updateTriggeredByBrush || updateTriggeredByInterval)) {
+        // Skip geometry update if terraforming is active (prevents overwriting terraformed changes)
+        if (threeRuntime && threeRuntime.isTerraformingActive()) {
+            // Terraforming is active - don't overwrite geometry with heightmap
+            // The terraforming directly modifies geometry, so we skip the heightmap-based update
+            return;
+        }
+        
         // Copy heightmap data to avoid race conditions (heightmap buffer might be overwritten)
         const heightmapCopy = new Float32Array(HightMapCpuBuf);
         
@@ -2644,6 +2700,11 @@ function main() {
         const performAsyncUpdate = () => {
             if (!terrainGeometry || !terrainBVH || terrainBVHBuildInProgress) {
                 return; // Safety check in case BVH was cleared during async delay
+            }
+            
+            // Double-check terraforming is still inactive (may have started during async delay)
+            if (threeRuntime && threeRuntime.isTerraformingActive()) {
+                return; // Skip update if terraforming became active
             }
             
             // Update geometry positions with copied heightmap

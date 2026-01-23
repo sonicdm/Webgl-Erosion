@@ -39,6 +39,7 @@ export class SimulationPassManager {
   private simres: number;
   private initialHeightmap: Float32Array | null = null; // Store initial heightmap for readback
   private terrainMesh: THREE.Mesh | null = null; // Store generated mesh for rendering
+  private rainPassDebugCounter: number = 0; // Counter for throttled debug logging
 
   // Ping-pong targets
   private terrainPP: PingPongTarget;
@@ -654,14 +655,17 @@ export class SimulationPassManager {
     
     // Brush uniforms
     // Only set brushPos if it's valid (not the invalid default [-10, -10])
+    let finalBrushPos: THREE.Vector2;
     if (brushState && brushState.brushPos) {
       const [brushPosX, brushPosY] = brushState.brushPos;
       // Only set if brushPos is valid (within [0, 1] range)
       if (brushPosX >= 0 && brushPosX <= 1 && brushPosY >= 0 && brushPosY <= 1) {
-        this.rainPass.setUniform('u_BrushPos', new THREE.Vector2(brushPosX, brushPosY));
+        finalBrushPos = new THREE.Vector2(brushPosX, brushPosY);
+        this.rainPass.setUniform('u_BrushPos', finalBrushPos);
       } else {
         // Invalid brushPos - set to invalid value that shader will ignore
-        this.rainPass.setUniform('u_BrushPos', new THREE.Vector2(-10.0, -10.0));
+        finalBrushPos = new THREE.Vector2(-10.0, -10.0);
+        this.rainPass.setUniform('u_BrushPos', finalBrushPos);
       }
       if (brushState.mouseWorldPos) {
         this.rainPass.setUniform('u_MouseWorldPos', new THREE.Vector4(...brushState.mouseWorldPos));
@@ -671,13 +675,17 @@ export class SimulationPassManager {
       }
     } else {
       // No brushState or no brushPos - set to invalid value
-      this.rainPass.setUniform('u_BrushPos', new THREE.Vector2(-10.0, -10.0));
+      finalBrushPos = new THREE.Vector2(-10.0, -10.0);
+      this.rainPass.setUniform('u_BrushPos', finalBrushPos);
     }
     this.rainPass.setUniform('u_BrushSize', controls.brushSize || 0);
     this.rainPass.setUniform('u_BrushStrength', controls.brushStrenth || 0);
     this.rainPass.setUniform('u_BrushType', controls.brushType || 0);
     this.rainPass.setUniform('u_BrushPressed', controls.brushPressed || 0);
     this.rainPass.setUniform('u_BrushOperation', controls.brushOperation || 0);
+    
+    // Throttled debug logging (every 120 frames)
+    // Removed debug logging - was causing performance issues
     
     // Brush-specific uniforms
     this.rainPass.setUniform('u_FlattenTargetHeight', controls.flattenTargetHeight || 0);

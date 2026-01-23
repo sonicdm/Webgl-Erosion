@@ -18,6 +18,7 @@ import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { setTerrainGeometry, setTerrainBVH, setTerrainBVHBuildInProgress, terrainBVHBuildInProgress, terrainBVH, terrainGeometry } from '../simulation/simulation-state';
 import { rayCastBVH } from '../utils/bvh-raycast';
 import { rayCast } from '../utils/raycast';
+import { applyTerraforming, TerraformParams } from './utils/cpu-terraforming';
 
 /**
  * Main Three.js simulation runtime that integrates with the existing system
@@ -29,10 +30,12 @@ export class ThreeJSSimulationRuntime {
   private terrainMesh: THREE.Mesh | null = null;
   private terrainGeometry: THREE.BufferGeometry | null = null;
   private heightMapCpuBuffer: Float32Array;
+  private heightMapInitialized: boolean = false;
   private controls: any = null; // Store controls for material updates
   private renderFrameCount: number = 0; // Track render calls for debugging
   private camera: Camera | null = null; // Custom camera with WASD movement
   private controlsConfig: ControlsConfig | null = null; // Camera configuration
+  private terraformingActive: boolean = false; // Track if terraforming is currently active
 
   constructor(canvas: HTMLCanvasElement, glContext: WebGL2RenderingContext, simres: number) {
     this.runtime = new ThreeJSRuntime(canvas, glContext);
@@ -147,6 +150,8 @@ export class ThreeJSSimulationRuntime {
       this.initializeSimulation();
     }
     
+    // Removed debug logging - was causing performance issues
+    
     // Build water source arrays
     const waterSourceCount = getWaterSourceCount();
     const waterSourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
@@ -240,103 +245,25 @@ export class ThreeJSSimulationRuntime {
       throw new Error('Simulation not initialized');
     }
 
-    // Try to use stored initial heightmap first (avoids GPU readback issues)
+    // CRITICAL PERFORMANCE: This function is extremely expensive (2+ seconds per call)
+    // GPU readback with FLOAT type is not working - returns normalized values
+    // For now, just return the initial heightmap immediately without attempting readback
+    // This avoids the 2+ second stall that's killing framerate
     const initialHeightmap = this.passManager.getInitialHeightmap();
     if (initialHeightmap) {
-      // Use stored heightmap for initial terrain
       const size = this.simres * this.simres;
-      const combinedBuffer = new Float32Array(size * 4);
-      combinedBuffer.set(initialHeightmap);
-      this.heightMapCpuBuffer.set(combinedBuffer);
-      
-      return combinedBuffer;
+      const buffer = new Float32Array(size * 4);
+      buffer.set(initialHeightmap);
+      this.heightMapCpuBuffer.set(buffer);
+      this.heightMapInitialized = true;
+      return buffer;
     }
-
-    // Fallback to GPU readback (may not work with FloatType)
-    const renderer = this.runtime.getRenderer();
-    const gl = renderer.getContext() as WebGL2RenderingContext;
     
-    // Get the actual render targets, not just textures
-    const terrainTarget = this.passManager.getTerrainRenderTarget();
-    const lavaTarget = this.passManager.getLavaRenderTarget();
-    
+    // If no initial heightmap, return zeros (shouldn't happen)
     const size = this.simres * this.simres;
-    const terrainBuffer = new Float32Array(size * 4);
-    const lavaBuffer = new Float32Array(size * 4);
-    
-    // Save current render target
-    const originalRenderTarget = renderer.getRenderTarget();
-    
-    try {
-      // Read from terrain render target - must set it as active first
-      renderer.setRenderTarget(terrainTarget);
-      // Force a flush to ensure GPU has finished writing
-      gl.finish();
-      
-      // Use WebGL2 readPixels directly for FloatType textures
-      // Three.js stores framebuffer in properties.get(renderTarget).__webglFramebuffer
-      const properties = (renderer as any).properties;
-      const terrainFramebuffer = properties?.get(terrainTarget)?.__webglFramebuffer;
-      if (terrainFramebuffer) {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, terrainFramebuffer);
-        gl.readPixels(0, 0, this.simres, this.simres, gl.RGBA, gl.FLOAT, terrainBuffer);
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-      } else {
-        // Fallback to Three.js method
-        renderer.readRenderTargetPixels(terrainTarget, 0, 0, this.simres, this.simres, terrainBuffer);
-      }
-      
-      // Read from lava render target
-      renderer.setRenderTarget(lavaTarget);
-      gl.finish();
-      
-      const lavaFramebuffer = (renderer as any).properties?.get(lavaTarget)?.__webglFramebuffer;
-      if (lavaFramebuffer) {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, lavaFramebuffer);
-        gl.readPixels(0, 0, this.simres, this.simres, gl.RGBA, gl.FLOAT, lavaBuffer);
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-      } else {
-        renderer.readRenderTargetPixels(lavaTarget, 0, 0, this.simres, this.simres, lavaBuffer);
-      }
-      
-      // Check if we got valid data (throttled logging - only log warnings)
-      const hasTerrainData = terrainBuffer.some((val, i) => i % 4 === 0 && Math.abs(val) > 0.001);
-      if (!hasTerrainData) {
-        // Only log if there's a problem (reduces noise)
-        console.warn('[Heightmap Readback] Terrain buffer is all zeros - readback may have failed');
-      }
-    } catch (error) {
-      console.error('Error reading render targets:', error);
-    } finally {
-      // Restore original render target
-      renderer.setRenderTarget(originalRenderTarget);
-    }
-    
-    // Combine heights: terrain (R) + lava volume (R)
-    const combinedBuffer = new Float32Array(size * 4);
-    for (let i = 0; i < size; i++) {
-      const terrainHeight = terrainBuffer[i * 4 + 0]; // R channel = terrain + sediment
-      const lavaVolume = lavaBuffer[i * 4 + 0]; // R channel = lava volume
-      
-      // Validate lava volume
-      const lavaTemp = lavaBuffer[i * 4 + 1]; // G channel = lava temperature
-      let validLavaVolume = 0.0;
-      const LAVA_MAX_VOLUME = 50.0;
-      
-      if (lavaVolume >= 0.0 && lavaTemp >= 0.0 && lavaTemp <= 2000.0) {
-        validLavaVolume = Math.min(Math.max(lavaVolume, 0.0), LAVA_MAX_VOLUME);
-      }
-      
-      // Combined height = terrain + sediment + lava
-      combinedBuffer[i * 4 + 0] = terrainHeight + validLavaVolume;
-      combinedBuffer[i * 4 + 1] = terrainBuffer[i * 4 + 1]; // Water volume
-      combinedBuffer[i * 4 + 2] = terrainBuffer[i * 4 + 2]; // Rock material
-      combinedBuffer[i * 4 + 3] = terrainBuffer[i * 4 + 3]; // Base rock surface
-    }
-    
-    // Update internal buffer (synchronized for brush raycasting)
-    this.heightMapCpuBuffer.set(combinedBuffer);
-    return combinedBuffer;
+    const buffer = new Float32Array(size * 4);
+    this.heightMapCpuBuffer.set(buffer);
+    return buffer;
   }
 
   /**
@@ -515,10 +442,15 @@ export class ThreeJSSimulationRuntime {
       // Update existing geometry from height data
       updateTerrainGeometry(this.terrainGeometry, this.simres, heightData, 1.0);
       this.terrainMesh.geometry.attributes.position.needsUpdate = true;
-      if (this.terrainMesh.geometry.attributes.normal) {
-        this.terrainMesh.geometry.attributes.normal.needsUpdate = true;
-      } else {
+      // CRITICAL PERFORMANCE: Only compute normals if they don't exist
+      // Don't recompute every frame - it's expensive (184ms per call)
+      // Normals will be updated automatically by Three.js when needed
+      if (!this.terrainMesh.geometry.attributes.normal) {
+        // Only compute once if normals don't exist
         this.terrainMesh.geometry.computeVertexNormals();
+      } else {
+        // Just mark as needing update - Three.js will handle it efficiently
+        this.terrainMesh.geometry.attributes.normal.needsUpdate = true;
       }
       
       // Update geometry in simulation-state (for BVH raycasting)
@@ -599,14 +531,78 @@ export class ThreeJSSimulationRuntime {
         updateTerrainGeometry(this.terrainGeometry, this.simres, heightData, 1.0);
         if (this.terrainMesh) {
           this.terrainMesh.geometry.attributes.position.needsUpdate = true;
-          if (this.terrainMesh.geometry.attributes.normal) {
-            this.terrainMesh.geometry.attributes.normal.needsUpdate = true;
-          } else {
+          // CRITICAL PERFORMANCE: Only compute normals if they don't exist
+          // Don't recompute every frame - it's expensive (184ms per call)
+          if (!this.terrainMesh.geometry.attributes.normal) {
+            // Only compute once if normals don't exist
             this.terrainMesh.geometry.computeVertexNormals();
+          } else {
+            // Just mark as needing update - Three.js will handle it efficiently
+            this.terrainMesh.geometry.attributes.normal.needsUpdate = true;
           }
         }
       }
     }
+  }
+  
+  /**
+   * Applies CPU-side terraforming to terrain geometry when brush is used.
+   * This directly modifies vertex positions, avoiding the need for GPU readback.
+   */
+  public applyTerraformingToGeometry(
+    brushPos: [number, number],
+    brushSize: number,
+    brushStrength: number,
+    brushType: number,
+    brushOperation: number,
+    flattenTargetHeight?: number,
+    slopeStartPos?: [number, number],
+    slopeEndPos?: [number, number]
+  ): void {
+    if (!this.terrainGeometry) {
+      return;
+    }
+    
+    // Mark terraforming as active to prevent geometry updates from overwriting changes
+    this.terraformingActive = true;
+    
+    const params: TerraformParams = {
+      brushPos,
+      brushSize,
+      brushStrength,
+      brushType,
+      brushOperation,
+      flattenTargetHeight,
+      slopeStartPos,
+      slopeEndPos
+    };
+    
+    applyTerraforming(this.terrainGeometry, this.simres, params);
+    
+    // Mark geometry for update
+    if (this.terrainMesh) {
+      this.terrainMesh.geometry.attributes.position.needsUpdate = true;
+      if (this.terrainMesh.geometry.attributes.normal) {
+        this.terrainMesh.geometry.attributes.normal.needsUpdate = true;
+      }
+    }
+    
+    // Update geometry in simulation-state (for BVH raycasting)
+    setTerrainGeometry(this.terrainGeometry);
+  }
+  
+  /**
+   * Returns whether terraforming is currently active (prevents geometry overwrites)
+   */
+  public isTerraformingActive(): boolean {
+    return this.terraformingActive;
+  }
+  
+  /**
+   * Marks terraforming as inactive (called when brush is released)
+   */
+  public setTerraformingInactive(): void {
+    this.terraformingActive = false;
   }
   
   /**
@@ -662,6 +658,29 @@ export class ThreeJSSimulationRuntime {
       return null;
     }
     
+    // Ensure heightmap buffer is initialized before raycasting
+    if (!this.heightMapInitialized && this.passManager) {
+      const initialHeightmap = this.passManager.getInitialHeightmap();
+      if (initialHeightmap) {
+        const size = this.simres * this.simres;
+        const buffer = new Float32Array(size * 4);
+        buffer.set(initialHeightmap);
+        this.heightMapCpuBuffer.set(buffer);
+        this.heightMapInitialized = true;
+        console.log('[Raycast] Heightmap buffer initialized, size:', size * 4);
+      } else {
+        console.warn('[Raycast] No initial heightmap available for raycasting');
+      }
+    }
+    
+    // Verify buffer has data (not all zeros)
+    if (this.heightMapInitialized) {
+      const hasData = this.heightMapCpuBuffer.some(val => val !== 0);
+      if (!hasData) {
+        console.warn('[Raycast] Heightmap buffer appears to be all zeros');
+      }
+    }
+    
     // Update camera to ensure matrices are current
     if (this.controlsConfig) {
       this.camera.update(this.controlsConfig.camera);
@@ -692,8 +711,11 @@ export class ThreeJSSimulationRuntime {
     const rayOriginVec3 = vec3.fromValues(rayOrigin.x, rayOrigin.y, rayOrigin.z);
     const rayDirVec3 = vec3.fromValues(rayDir.x, rayDir.y, rayDir.z);
     
-    // Try BVH raycast first if available
+    // Try BVH raycast first if available and enabled, otherwise use heightmap raycast
+    // Heightmap raycast is fast and works with initial terrain data
+    // BVH is more accurate but expensive (39% CPU time when used every frame)
     if (this.controlsConfig?.raycast?.method === 'bvh' && terrainBVH && terrainGeometry) {
+      // Use BVH raycast (expensive but accurate)
       const hit = rayCastBVH(
         rayOriginVec3,
         rayDirVec3,
@@ -703,7 +725,7 @@ export class ThreeJSSimulationRuntime {
       );
       
       if (!hit) {
-        // Fallback to heightmap raycast
+        // Fallback to heightmap raycast if BVH misses
         const heightmapPos: [number, number] = [-10.0, -10.0];
         rayCast(
           rayOriginVec3,
@@ -716,7 +738,9 @@ export class ThreeJSSimulationRuntime {
         brushPos[1] = heightmapPos[1];
       }
     } else {
-      // Use heightmap raycast
+      // Use heightmap raycast (fast, works with initial terrain data)
+      // Note: heightMapCpuBuffer contains initial terrain data (GPU readback disabled for performance)
+      // For terraforming to work with raycasting, we'd need CPU-side tracking or a copy pass
       rayCast(
         rayOriginVec3,
         rayDirVec3,
@@ -802,15 +826,7 @@ export class ThreeJSSimulationRuntime {
     renderer.setClearColor(0x87CEEB, 1.0); // Sky blue background
     renderer.clear(true, true, true); // Clear color, depth, and stencil
     
-    // Log scene contents for debugging (throttled to reduce noise)
     this.renderFrameCount++;
-    if (this.renderFrameCount === 1 || this.renderFrameCount % 600 === 0) {
-      // Log only first frame and every 10 seconds (600 frames at 60fps)
-      console.log('Render frame', this.renderFrameCount, '- Scene children:', scene.children.length, 'Terrain mesh in scene:', scene.children.includes(this.terrainMesh!));
-      if (this.terrainMesh) {
-        console.log('Terrain mesh - visible:', this.terrainMesh.visible, 'position:', this.terrainMesh.position, 'scale:', this.terrainMesh.scale, 'geometry vertices:', this.terrainMesh.geometry.attributes.position.count);
-      }
-    }
     
     try {
       // Update custom Camera (handles OrbitControls + WASD movement)
@@ -824,82 +840,13 @@ export class ThreeJSSimulationRuntime {
           this.camera.threeCamera.updateProjectionMatrix();
         }
         
-        // Log first frame to verify camera.update() is called with correct config
-        if (this.renderFrameCount === 1) {
-          console.log('[WASD] camera.update() called with controlsConfig.camera:', this.controlsConfig.camera);
-          console.log('[WASD] enableWASD:', this.controlsConfig.camera?.movement?.enableWASD);
-          console.log('[WASD] Camera instance in integration:', this.camera);
-        }
-        const cameraBeforeUpdate = this.camera.threeCamera.position.clone();
         this.camera.update(this.controlsConfig.camera);
-        const cameraAfterUpdate = this.camera.threeCamera.position.clone();
         const threeCamera = this.camera.threeCamera;
         
-        // Debug: Check if camera position changed after update
-        if (this.renderFrameCount <= 5 && cameraBeforeUpdate.distanceTo(cameraAfterUpdate) > 0.001) {
-          console.log('[WASD] Camera position changed in update():', {
-            before: {x: cameraBeforeUpdate.x.toFixed(2), y: cameraBeforeUpdate.y.toFixed(2), z: cameraBeforeUpdate.z.toFixed(2)},
-            after: {x: cameraAfterUpdate.x.toFixed(2), y: cameraAfterUpdate.y.toFixed(2), z: cameraAfterUpdate.z.toFixed(2)},
-            change: cameraBeforeUpdate.distanceTo(cameraAfterUpdate).toFixed(3)
-          });
-        }
-        
-        // Debug camera position on first frame
-        if (this.renderFrameCount === 1) {
-          const bbox = this.terrainMesh.geometry.boundingBox;
-          const terrainCenter = bbox ? new THREE.Vector3().addVectors(bbox.min, bbox.max).multiplyScalar(0.5) : new THREE.Vector3();
-          const terrainSize = bbox ? new THREE.Vector3().subVectors(bbox.max, bbox.min) : new THREE.Vector3();
-          const maxDim = Math.max(terrainSize.x, terrainSize.y, terrainSize.z);
-          
-          console.log('[Render] Camera position:', threeCamera.position);
-          console.log('[Render] Camera target (looking at):', threeCamera.position.clone().add(threeCamera.getWorldDirection(new THREE.Vector3()).multiplyScalar(100)));
-          console.log('[Render] Camera near/far:', threeCamera.near, threeCamera.far);
-          console.log('[Render] Terrain mesh bounds:', bbox ? {
-            min: bbox.min,
-            max: bbox.max,
-            center: terrainCenter,
-            size: terrainSize,
-            maxDimension: maxDim
-          } : 'No bounding box');
-          
-          // Check if terrain is in view frustum
-          if (bbox) {
-            const distance = threeCamera.position.distanceTo(terrainCenter);
-            const isInFrustum = distance < threeCamera.far && distance > threeCamera.near;
-            console.log('[Render] Terrain visibility check:', {
-              distanceToCenter: distance.toFixed(2),
-              isInFrustum: isInFrustum,
-              cameraFar: threeCamera.far,
-              terrainMaxDim: maxDim.toFixed(2)
-            });
-            
-            // Suggest camera adjustment if terrain is too far
-            if (distance > threeCamera.far * 0.8) {
-              console.warn('[Render] WARNING: Terrain may be outside view frustum. Consider adjusting camera position or far plane.');
-            }
-          }
-        }
-        
-        // Use the Camera's Three.js camera for rendering
-        // Verify we're using the same camera instance that was updated
-        if (this.renderFrameCount <= 5) {
-          const renderCamera = threeCamera;
-          const updatedCamera = this.camera.threeCamera;
-          if (renderCamera !== updatedCamera) {
-            console.error('[WASD] ERROR: Render camera is different from updated camera!', {
-              renderCamera: renderCamera,
-              updatedCamera: updatedCamera
-            });
-          } else {
-            console.log('[WASD] Camera instance matches for render:', {
-              position: {x: renderCamera.position.x.toFixed(2), y: renderCamera.position.y.toFixed(2), z: renderCamera.position.z.toFixed(2)}
-            });
-          }
-        }
+        // Render scene
         renderer.render(scene, threeCamera);
       } else {
         // Fallback to runtime camera if Camera wrapper not available
-        console.warn('[Render] Using fallback camera');
         renderer.render(scene, camera);
       }
     } catch (error) {

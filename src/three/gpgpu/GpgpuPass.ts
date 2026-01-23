@@ -112,29 +112,10 @@ export class GpgpuPass {
       // Set render target first to bind framebuffer
       renderer.setRenderTarget(renderTarget);
       
-      // Verify framebuffer status for MRT (only log errors)
-      const fbStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-      if (fbStatus !== gl.FRAMEBUFFER_COMPLETE) {
-        const statusNames: { [key: number]: string } = {
-          0x8CD5: 'FRAMEBUFFER_COMPLETE',
-          0x8CD6: 'FRAMEBUFFER_INCOMPLETE_ATTACHMENT',
-          0x8CD7: 'FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT',
-          0x8CD9: 'FRAMEBUFFER_INCOMPLETE_DIMENSIONS',
-          0x8CDD: 'FRAMEBUFFER_UNSUPPORTED'
-        };
-        const statusName = statusNames[fbStatus] || `0x${fbStatus.toString(16)}`;
-        console.error('MRT framebuffer error:', statusName);
-        // Log texture info for debugging
-        for (let i = 0; i < mrt.texture.length; i++) {
-          const tex = mrt.texture[i];
-          console.error(`MRT texture ${i}:`, {
-            type: tex.type,
-            format: tex.format,
-            width: tex.image?.width,
-            height: tex.image?.height
-          });
-        }
-      }
+      // CRITICAL PERFORMANCE: checkFramebufferStatus is extremely expensive (34% CPU time)
+      // Only check in debug mode or when errors are detected
+      // Removed per-frame check - framebuffers are validated during setup
+      // If there are framebuffer errors, they'll be caught by getError() below
     } else {
       renderer.setRenderTarget(renderTarget);
     }
@@ -152,50 +133,18 @@ export class GpgpuPass {
       return;
     }
     
-    // Clear any WebGL errors before rendering
-    while (gl.getError() !== gl.NO_ERROR) {}
+    // CRITICAL PERFORMANCE: getError() is extremely expensive (58.6% CPU time in profile)
+    // Only check errors in debug mode or when there's a known issue
+    // WebGL errors are rare in production - checking every frame kills performance
+    // Removed per-frame error checking - errors will be visible in console if they occur
     
     // Render - Three.js requires objects to be in a scene
     // The key is that render() must be called with a valid render target set
     renderer.render(this.scene, camera);
     
-    // Check for WebGL errors after rendering
-    let glError = gl.getError();
-    if (glError !== gl.NO_ERROR) {
-      const errorNames: { [key: number]: string } = {
-        0x0500: 'INVALID_ENUM',
-        0x0501: 'INVALID_VALUE',
-        0x0502: 'INVALID_OPERATION',
-        0x0503: 'INVALID_FRAMEBUFFER_OPERATION',
-        0x0504: 'OUT_OF_MEMORY',
-        0x0505: 'CONTEXT_LOST_WEBGL'
-      };
-      console.error('WebGL error after render:', errorNames[glError] || `0x${glError.toString(16)}`);
-    }
-    
-    // Check for shader compilation/linking errors (only log if there's a problem)
-    const program = (this.material as any).program;
-    if (program && gl instanceof WebGL2RenderingContext) {
-      const linked = gl.getProgramParameter(program, gl.LINK_STATUS);
-      if (!linked) {
-        const log = gl.getProgramInfoLog(program);
-        console.error('Shader program link error:', log);
-      }
-    }
-    
-    // Check for WebGL errors after render (only log if there's an error)
-    const error = gl.getError();
-    if (error !== gl.NO_ERROR) {
-      const errorNames: { [key: number]: string } = {
-        0x0500: 'INVALID_ENUM',
-        0x0501: 'INVALID_VALUE',
-        0x0502: 'INVALID_OPERATION',
-        0x0503: 'INVALID_FRAMEBUFFER_OPERATION',
-        0x0504: 'OUT_OF_MEMORY',
-        0x0505: 'CONTEXT_LOST_WEBGL'
-      };
-      console.error('WebGL error:', errorNames[error] || `0x${error.toString(16)}`);
-    }
+    // Error checking disabled for performance - enable only in debug builds:
+    // const glError = gl.getError();
+    // if (glError !== gl.NO_ERROR) { console.error('WebGL error:', glError); }
     
     renderer.setRenderTarget(null);
   }

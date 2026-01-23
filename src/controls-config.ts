@@ -82,7 +82,7 @@ export const defaultControlsConfig: ControlsConfig = {
         },
     },
     raycast: {
-        method: 'bvh',                     // Default raycast method: 'bvh' for better accuracy
+        method: 'heightmap',               // Default raycast method: 'heightmap' for performance (BVH is expensive)
     },
 };
 
