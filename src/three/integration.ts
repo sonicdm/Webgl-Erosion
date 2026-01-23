@@ -12,6 +12,12 @@ import Camera from '../Camera';
 import { ControlsConfig } from '../controls-config';
 import { createTerrainGeometry, updateTerrainGeometry } from '../utils/terrain-geometry-builder';
 import { createTerrainProceduralMaterial, updateTerrainProceduralMaterial } from './materials/terrain-procedural-material';
+import { getWaterSourceCount, waterSources as waterSourcesList, MAX_WATER_SOURCES } from '../utils/water-sources';
+import { getLavaSourceCount, lavaSources as lavaSourcesList, MAX_LAVA_SOURCES } from '../utils/lava-sources';
+import { MeshBVH, SAH } from 'three-mesh-bvh';
+import { setTerrainGeometry, setTerrainBVH, setTerrainBVHBuildInProgress, terrainBVHBuildInProgress, terrainBVH, terrainGeometry } from '../simulation/simulation-state';
+import { rayCastBVH } from '../utils/bvh-raycast';
+import { rayCast } from '../utils/raycast';
 
 /**
  * Main Three.js simulation runtime that integrates with the existing system
@@ -58,7 +64,6 @@ export class ThreeJSSimulationRuntime {
     // Ensure OrbitControls target is set to look at terrain center
     if (this.camera.threeControls) {
       this.camera.threeControls.target.set(initialTarget[0], initialTarget[1], initialTarget[2]);
-      this.camera.threeControls.update();
     }
     
     // Replace the runtime's camera with the Camera's Three.js camera
@@ -125,12 +130,96 @@ export class ThreeJSSimulationRuntime {
 
   /**
    * Executes one simulation step
+   * @param controls - Simulation controls/parameters
+   * @param timer - Time value for shaders (optional, defaults to 0)
+   * @param brushState - Brush state (mouse world pos/dir, brush pos) (optional)
    */
-  public executeSimulationStep(controls: any): void {
+  public executeSimulationStep(
+    controls: any,
+    timer: number = 0,
+    brushState?: {
+      mouseWorldPos?: [number, number, number, number];
+      mouseWorldDir?: [number, number, number];
+      brushPos?: [number, number];
+    }
+  ): void {
     if (!this.passManager) {
       this.initializeSimulation();
     }
-    this.passManager!.executeStep(controls);
+    
+    // Build water source arrays
+    const waterSourceCount = getWaterSourceCount();
+    const waterSourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
+    const waterSourceSizes = new Float32Array(MAX_WATER_SOURCES);
+    const waterSourceStrengths = new Float32Array(MAX_WATER_SOURCES);
+    
+    for (let i = 0; i < MAX_WATER_SOURCES; i++) {
+      if (i < waterSourceCount) {
+        waterSourcePositions[i * 2] = waterSourcesList[i].position[0];
+        waterSourcePositions[i * 2 + 1] = waterSourcesList[i].position[1];
+        waterSourceSizes[i] = waterSourcesList[i].size;
+        waterSourceStrengths[i] = waterSourcesList[i].strength;
+      } else {
+        waterSourcePositions[i * 2] = 0.0;
+        waterSourcePositions[i * 2 + 1] = 0.0;
+        waterSourceSizes[i] = 0.0;
+        waterSourceStrengths[i] = 0.0;
+      }
+    }
+    
+    // Build lava source arrays
+    const lavaSourceCount = getLavaSourceCount();
+    const lavaSourcePositions = new Float32Array(MAX_LAVA_SOURCES * 2);
+    const lavaSourceSizes = new Float32Array(MAX_LAVA_SOURCES);
+    const lavaSourceStrengths = new Float32Array(MAX_LAVA_SOURCES);
+    
+    for (let i = 0; i < MAX_LAVA_SOURCES; i++) {
+      if (i < lavaSourceCount) {
+        lavaSourcePositions[i * 2] = lavaSourcesList[i].position[0];
+        lavaSourcePositions[i * 2 + 1] = lavaSourcesList[i].position[1];
+        lavaSourceSizes[i] = lavaSourcesList[i].size;
+        lavaSourceStrengths[i] = lavaSourcesList[i].strength;
+      } else {
+        lavaSourcePositions[i * 2] = 0.0;
+        lavaSourcePositions[i * 2 + 1] = 0.0;
+        lavaSourceSizes[i] = 0.0;
+        lavaSourceStrengths[i] = 0.0;
+      }
+    }
+    
+    // Build brush state from controls if not provided
+    // Only use controls.posTemp if it's valid (not [-10, -10])
+    let finalBrushState = brushState;
+    if (!finalBrushState && controls.posTemp) {
+      const [posTempX, posTempY] = controls.posTemp;
+      if (posTempX >= 0 && posTempX <= 1 && posTempY >= 0 && posTempY <= 1) {
+        finalBrushState = {
+          brushPos: [posTempX, posTempY]
+        };
+      }
+    }
+    // If still no valid brushState, don't pass one (rain pass will handle invalid brushPos)
+    if (!finalBrushState) {
+      finalBrushState = undefined;
+    }
+    
+    this.passManager!.executeStep(
+      controls,
+      timer,
+      finalBrushState,
+      {
+        count: waterSourceCount,
+        positions: waterSourcePositions,
+        sizes: waterSourceSizes,
+        strengths: waterSourceStrengths
+      },
+      {
+        count: lavaSourceCount,
+        positions: lavaSourcePositions,
+        sizes: lavaSourceSizes,
+        strengths: lavaSourceStrengths
+      }
+    );
   }
 
   /**
@@ -284,6 +373,8 @@ export class ThreeJSSimulationRuntime {
           forestRange: this.controls?.ForestRange || 0.0,
           terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
         });
+        
+        
         console.log('[Terrain Update] Material replaced with procedural terrain material');
       } catch (error) {
         console.warn('[Terrain Update] Failed to create procedural material, using fallback:', error);
@@ -304,6 +395,12 @@ export class ThreeJSSimulationRuntime {
       // Just add to scene
       const scene = this.runtime.getScene();
       scene.add(this.terrainMesh);
+      
+      // Store geometry in simulation-state for BVH raycasting
+      setTerrainGeometry(this.terrainGeometry);
+      
+      // Build BVH for raycasting (async, non-blocking)
+      this.buildBVHForRaycasting(this.terrainGeometry);
       
       console.log('[Terrain Update] THREE.Terrain mesh added to scene');
       console.log('[Terrain Update] Mesh details:', {
@@ -381,6 +478,12 @@ export class ThreeJSSimulationRuntime {
         this.terrainMesh.frustumCulled = false;
         this.terrainMesh.updateMatrixWorld(true);
         
+        // Store geometry in simulation-state for BVH raycasting
+        setTerrainGeometry(this.terrainGeometry);
+        
+        // Build BVH for raycasting (async, non-blocking)
+        this.buildBVHForRaycasting(this.terrainGeometry);
+        
         // Add to scene
         const scene = this.runtime.getScene();
         scene.add(this.terrainMesh);
@@ -417,6 +520,13 @@ export class ThreeJSSimulationRuntime {
       } else {
         this.terrainMesh.geometry.computeVertexNormals();
       }
+      
+      // Update geometry in simulation-state (for BVH raycasting)
+      setTerrainGeometry(this.terrainGeometry);
+      
+      // Rebuild BVH periodically (throttled to avoid performance issues)
+      // Only rebuild if geometry actually changed significantly
+      // This is handled by the caller (main.ts) based on geometryUpdateCounter
       
       // Update material height range if using procedural material
       if ((this.terrainMesh.material instanceof THREE.ShaderMaterial || this.terrainMesh.material instanceof THREE.RawShaderMaterial) && this.controls) {
@@ -536,6 +646,95 @@ export class ThreeJSSimulationRuntime {
   }
 
   /**
+   * Calculates brush state (mouse world position, direction, and brush UV position) from mouse coordinates
+   * Similar to the WebGL tick() function's raycasting logic
+   * @param mouseX - Mouse X in client coordinates
+   * @param mouseY - Mouse Y in client coordinates
+   * @param canvas - Canvas element for coordinate conversion
+   * @returns Brush state with mouse world pos/dir and brush UV position, or null if calculation fails
+   */
+  public calculateBrushState(mouseX: number, mouseY: number, canvas: HTMLCanvasElement): {
+    mouseWorldPos: [number, number, number, number];
+    mouseWorldDir: [number, number, number];
+    brushPos: [number, number];
+  } | null {
+    if (!this.camera) {
+      return null;
+    }
+    
+    // Update camera to ensure matrices are current
+    if (this.controlsConfig) {
+      this.camera.update(this.controlsConfig.camera);
+    }
+    
+    // Use Three.js Raycaster for proper mouse-to-world unprojection
+    const raycaster = new THREE.Raycaster();
+    const rect = canvas.getBoundingClientRect();
+    
+    // Convert mouse coordinates to normalized device coordinates (NDC) [-1, 1]
+    const mouseNDC = new THREE.Vector2();
+    mouseNDC.x = ((mouseX - rect.left) / rect.width) * 2 - 1;
+    mouseNDC.y = -((mouseY - rect.top) / rect.height) * 2 + 1; // Flip Y axis
+    
+    // Set raycaster to use the camera and mouse position
+    const threeCamera = this.camera.threeCamera;
+    raycaster.setFromCamera(mouseNDC, threeCamera);
+    
+    // Get ray origin and direction from raycaster
+    const rayOrigin = new THREE.Vector3();
+    rayOrigin.copy(raycaster.ray.origin);
+    const rayDir = new THREE.Vector3();
+    rayDir.copy(raycaster.ray.direction);
+    
+    const brushPos: [number, number] = [-10.0, -10.0]; // Invalid default
+    
+    // Convert to gl-matrix vec3 for raycast functions
+    const rayOriginVec3 = vec3.fromValues(rayOrigin.x, rayOrigin.y, rayOrigin.z);
+    const rayDirVec3 = vec3.fromValues(rayDir.x, rayDir.y, rayDir.z);
+    
+    // Try BVH raycast first if available
+    if (this.controlsConfig?.raycast?.method === 'bvh' && terrainBVH && terrainGeometry) {
+      const hit = rayCastBVH(
+        rayOriginVec3,
+        rayDirVec3,
+        terrainBVH,
+        terrainGeometry,
+        brushPos
+      );
+      
+      if (!hit) {
+        // Fallback to heightmap raycast
+        const heightmapPos: [number, number] = [-10.0, -10.0];
+        rayCast(
+          rayOriginVec3,
+          rayDirVec3,
+          this.simres,
+          this.heightMapCpuBuffer,
+          heightmapPos
+        );
+        brushPos[0] = heightmapPos[0];
+        brushPos[1] = heightmapPos[1];
+      }
+    } else {
+      // Use heightmap raycast
+      rayCast(
+        rayOriginVec3,
+        rayDirVec3,
+        this.simres,
+        this.heightMapCpuBuffer,
+        brushPos
+      );
+    }
+    
+    // Return brush state
+    return {
+      mouseWorldPos: [rayOrigin.x, rayOrigin.y, rayOrigin.z, 1.0],
+      mouseWorldDir: [rayDir.x, rayDir.y, rayDir.z],
+      brushPos: brushPos
+    };
+  }
+
+  /**
    * Renders the scene
    */
   public render(): void {
@@ -569,6 +768,24 @@ export class ThreeJSSimulationRuntime {
         if (uniform.value === undefined) {
           console.warn(`Terrain material uniform ${uniformName} has no value, skipping render`);
           return;
+        }
+      }
+      
+      // NOTE: Textures are no longer used in vertex shader
+      // Geometry vertices are updated directly via updateTerrainGeometry()
+      
+      // Update brush uniforms for visualization (if they exist)
+      if (this.controls) {
+        if (material.uniforms.u_BrushType) {
+          material.uniforms.u_BrushType.value = this.controls.brushType || 0;
+        }
+        if (material.uniforms.u_BrushSize) {
+          material.uniforms.u_BrushSize.value = this.controls.brushSize || 0.0;
+        }
+        if (material.uniforms.u_BrushPos && this.controls.posTemp) {
+          const brushPosX = this.controls.posTemp[0];
+          const brushPosY = this.controls.posTemp[1];
+          material.uniforms.u_BrushPos.value.set(brushPosX, brushPosY);
         }
       }
     }
@@ -607,8 +824,25 @@ export class ThreeJSSimulationRuntime {
           this.camera.threeCamera.updateProjectionMatrix();
         }
         
+        // Log first frame to verify camera.update() is called with correct config
+        if (this.renderFrameCount === 1) {
+          console.log('[WASD] camera.update() called with controlsConfig.camera:', this.controlsConfig.camera);
+          console.log('[WASD] enableWASD:', this.controlsConfig.camera?.movement?.enableWASD);
+          console.log('[WASD] Camera instance in integration:', this.camera);
+        }
+        const cameraBeforeUpdate = this.camera.threeCamera.position.clone();
         this.camera.update(this.controlsConfig.camera);
+        const cameraAfterUpdate = this.camera.threeCamera.position.clone();
         const threeCamera = this.camera.threeCamera;
+        
+        // Debug: Check if camera position changed after update
+        if (this.renderFrameCount <= 5 && cameraBeforeUpdate.distanceTo(cameraAfterUpdate) > 0.001) {
+          console.log('[WASD] Camera position changed in update():', {
+            before: {x: cameraBeforeUpdate.x.toFixed(2), y: cameraBeforeUpdate.y.toFixed(2), z: cameraBeforeUpdate.z.toFixed(2)},
+            after: {x: cameraAfterUpdate.x.toFixed(2), y: cameraAfterUpdate.y.toFixed(2), z: cameraAfterUpdate.z.toFixed(2)},
+            change: cameraBeforeUpdate.distanceTo(cameraAfterUpdate).toFixed(3)
+          });
+        }
         
         // Debug camera position on first frame
         if (this.renderFrameCount === 1) {
@@ -647,6 +881,21 @@ export class ThreeJSSimulationRuntime {
         }
         
         // Use the Camera's Three.js camera for rendering
+        // Verify we're using the same camera instance that was updated
+        if (this.renderFrameCount <= 5) {
+          const renderCamera = threeCamera;
+          const updatedCamera = this.camera.threeCamera;
+          if (renderCamera !== updatedCamera) {
+            console.error('[WASD] ERROR: Render camera is different from updated camera!', {
+              renderCamera: renderCamera,
+              updatedCamera: updatedCamera
+            });
+          } else {
+            console.log('[WASD] Camera instance matches for render:', {
+              position: {x: renderCamera.position.x.toFixed(2), y: renderCamera.position.y.toFixed(2), z: renderCamera.position.z.toFixed(2)}
+            });
+          }
+        }
         renderer.render(scene, threeCamera);
       } else {
         // Fallback to runtime camera if Camera wrapper not available
@@ -766,6 +1015,71 @@ export class ThreeJSSimulationRuntime {
    */
   public getTerrainGeometry(): THREE.BufferGeometry | null {
     return this.terrainGeometry;
+  }
+
+  /**
+   * Builds BVH from terrain geometry for raycasting (async, non-blocking)
+   * Stores the BVH in simulation-state for brush system access
+   */
+  private buildBVHForRaycasting(geometry: THREE.BufferGeometry): void {
+    // Don't build if already in progress
+    if (terrainBVHBuildInProgress) {
+      console.log('[BVH] Build already in progress, skipping');
+      return;
+    }
+    
+    if (!geometry) {
+      console.warn('[BVH] No geometry provided for BVH build');
+      return;
+    }
+    
+    // Mark as in progress
+    setTerrainBVHBuildInProgress(true);
+    console.log('[BVH] Starting BVH build from terrain geometry');
+    
+    // Build BVH asynchronously to avoid blocking
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          const bvhStartTime = performance.now();
+          
+          // Build BVH with optimized settings
+          const bvh = new MeshBVH(geometry, {
+            strategy: SAH, // Surface Area Heuristic for best performance
+            maxDepth: 30,   // Reduced from 40 for faster builds (still very accurate)
+            indirect: false  // Direct indexed geometry
+          });
+          
+          const bvhDuration = performance.now() - bvhStartTime;
+          console.log(`[BVH] BVH construction complete in ${bvhDuration.toFixed(2)}ms`);
+          
+          // Store in simulation-state for brush system access
+          setTerrainBVH(bvh); // This will clear terrainBVHBuildInProgress flag
+          console.log('[BVH] BVH stored in simulation-state for brush raycasting');
+        } catch (error) {
+          console.error('[BVH] Failed to build BVH:', error);
+          setTerrainBVHBuildInProgress(false); // Clear flag on error
+        }
+      });
+    });
+  }
+
+  /**
+   * Rebuilds BVH when terrain geometry changes (for periodic updates during erosion)
+   * Only rebuilds if geometry actually changed and BVH is not already building
+   */
+  public rebuildBVHIfNeeded(): void {
+    if (!this.terrainGeometry) {
+      return;
+    }
+    
+    // Don't rebuild if already in progress
+    if (terrainBVHBuildInProgress) {
+      return;
+    }
+    
+    // Rebuild BVH from updated geometry
+    this.buildBVHForRaycasting(this.terrainGeometry);
   }
 
   /**

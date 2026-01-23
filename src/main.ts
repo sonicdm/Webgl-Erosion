@@ -1363,6 +1363,23 @@ function main() {
                                        (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
 
   const setupInputHandlers = (camera: Camera) => {
+    // Verify Camera instance matches (DI check)
+    console.log('[WASD DI Check] setupInputHandlers received camera:', camera);
+    console.log('[WASD DI Check] Camera instance ID/ref:', (camera as any).__id || 'no id');
+    console.log('[WASD DI Check] Camera wasdCheckId:', (camera as any).__wasdCheckId || 'not set');
+    
+    // Verify camera matches the one from threeRuntime
+    if (threeRuntime) {
+      const runtimeCamera = threeRuntime.getCamera();
+      if (runtimeCamera === camera) {
+        console.log('[WASD DI Check] ✓ Camera instance matches threeRuntime.getCamera()');
+      } else {
+        console.error('[WASD DI Check] ✗ ERROR: Camera instance mismatch! setupInputHandlers camera !== threeRuntime.getCamera()');
+        console.error('[WASD DI Check]   setupInputHandlers camera:', camera);
+        console.error('[WASD DI Check]   threeRuntime.getCamera():', runtimeCamera);
+      }
+    }
+    
     // Create dependency object for event handlers (dependency injection)
     const eventHandlerDeps: EventHandlerDependencies = {
       heightMapBuffer: threeRuntime?.getHeightMapCpuBuffer() || HightMapCpuBuf, // Fallback for WebGL
@@ -1373,6 +1390,13 @@ function main() {
       simres: simres,
     };
     
+    // Verify camera in deps matches parameter (DI consistency check)
+    if (eventHandlerDeps.camera !== camera) {
+      console.error('[WASD DI Check] ERROR: Camera instance mismatch! deps.camera !== camera parameter');
+    } else {
+      console.log('[WASD DI Check] Camera instance matches in eventHandlerDeps');
+    }
+    
     // Create event handlers with dependency injection
     const eventHandlers = createEventHandlers(controls, controlsConfig, camera, eventHandlerDeps);
     const { onKeyDown, onKeyUp, onMouseDown, onMouseUp } = eventHandlers;
@@ -1380,8 +1404,10 @@ function main() {
     // Disabled mouseChange to prevent coordinate conflicts with pointer events
     // Pointer events now handle all mouse position tracking directly
     // mouseChange(canvas, handleInteraction);
+    console.log('[WASD] Attaching event listeners - onKeyDown:', typeof onKeyDown, 'onKeyUp:', typeof onKeyUp);
     document.addEventListener('keydown', onKeyDown, false);
     document.addEventListener('keyup', onKeyUp, false);
+    console.log('[WASD] Event listeners attached to document');
     
     // Note: controlsConfig will be loaded in main() before event listeners are set up
     window.addEventListener('pointerdown', (e) => {
@@ -1475,6 +1501,11 @@ function main() {
       threeRuntime.setControlsConfig(controlsConfig, brushUsesLeftClickForCamera);
       const threeCamera = threeRuntime.getCamera();
       if (threeCamera) {
+        // Verify Camera instance matches (DI check)
+        console.log('[WASD DI Check] Camera instance from threeRuntime.getCamera():', threeCamera);
+        console.log('[WASD DI Check] Camera instance ID/ref:', (threeCamera as any).__id || 'no id');
+        // Store reference for comparison in setupInputHandlers
+        (threeCamera as any).__wasdCheckId = 'threeRuntime_camera';
         setupInputHandlers(threeCamera);
       }
       
@@ -1602,9 +1633,52 @@ function main() {
               }
             }
             
+            // Calculate brush state (mouse world pos/dir, brush UV position) for brush uniforms
+            let brushState: {
+              mouseWorldPos?: [number, number, number, number];
+              mouseWorldDir?: [number, number, number];
+              brushPos?: [number, number];
+            } | undefined = undefined;
+            
+            if (threeRuntime) {
+              const canvas = document.getElementById('canvas') as HTMLCanvasElement;
+              if (canvas) {
+                // Calculate brush state from current mouse position
+                const calculatedBrushState = threeRuntime.calculateBrushState(lastX, lastY, canvas);
+                if (calculatedBrushState) {
+                  // Only use brushState if brushPos is valid (not [-10, -10])
+                  const [brushPosX, brushPosY] = calculatedBrushState.brushPos;
+                  if (brushPosX >= 0 && brushPosX <= 1 && brushPosY >= 0 && brushPosY <= 1) {
+                    brushState = calculatedBrushState;
+                    // Update controls.posTemp for brush system compatibility (vec2 from gl-matrix)
+                    controls.posTemp = vec2.fromValues(calculatedBrushState.brushPos[0], calculatedBrushState.brushPos[1]);
+                  } else {
+                    // Invalid brushPos - don't set brushState (will use fallback from controls.posTemp)
+                    brushState = undefined;
+                  }
+                  
+                  // Update brush state (flatten target height, slope end points, etc.) - same as WebGL path
+                  // Get camera from threeRuntime (it's not declared yet in this scope)
+                  const runtimeCamera = threeRuntime.getCamera();
+                  if (runtimeCamera) {
+                    const brushContext: BrushContext = {
+                      controls: controls as BrushControls,
+                      controlsConfig: controlsConfig,
+                      simres: Number(simres),
+                      HightMapCpuBuf: threeRuntime.getHeightMapCpuBuffer(),
+                      camera: runtimeCamera
+                    };
+                    updateBrushState(controls.posTemp, brushContext);
+                  }
+                }
+              }
+            }
+            
             // Run simulation steps
+            let timer = frameCount; // Use frame count as timer
             for (let i = 0; i < controls.SimulationSpeed; i++) {
-              threeRuntime!.executeSimulationStep(controls);
+              threeRuntime!.executeSimulationStep(controls, timer, brushState);
+              timer++; // Increment timer for each simulation step
             }
             
             // Read updated heightmap after simulation for brush raycasting and BVH updates

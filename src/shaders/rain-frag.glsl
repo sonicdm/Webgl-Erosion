@@ -135,7 +135,8 @@ void main() {
       // normal water brush
       // Early exit: only do brush calculations if brush is active AND pressed
       // This avoids expensive distance calculations when not brushing
-      if(u_BrushType != 0 && u_BrushPressed == 1){
+      // Also check that brushPos is valid (not the invalid default [-10, -10])
+      if(u_BrushType != 0 && u_BrushPressed == 1 && u_BrushPos.x >= 0.0 && u_BrushPos.x <= 1.0 && u_BrushPos.y >= 0.0 && u_BrushPos.y <= 1.0){
             vec3 ro = u_MouseWorldPos.xyz;
             vec3 rd = u_MouseWorldDir;
             vec2 pointOnPlane = u_BrushPos;

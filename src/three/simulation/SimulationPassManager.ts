@@ -271,6 +271,11 @@ export class SimulationPassManager {
           const geom = terrainMesh.geometry.clone();
           // Orient to XZ plane (Y up) to match renderer and heightmap extractor expectations
           geom.rotateX(-Math.PI / 2);
+          
+          // NOTE: Keep THREE.Terrain's pre-displaced vertices
+          // Geometry will be updated from height data via updateTerrainGeometry()
+          // Vertex shader does NOT displace - it uses geometry positions directly
+          
           geom.computeVertexNormals();
           geom.computeBoundingBox();
           return geom; // Clone to avoid disposing the original
@@ -292,7 +297,7 @@ export class SimulationPassManager {
     const positions = geometry.attributes.position.array as Float32Array;
     const heightFunction = typeof heightmapSource === 'function'
       ? heightmapSource
-      : this.getTerrainGenerationMethod(terrainBaseType, terrainRandom);
+      : this.getTerrainGenerationMethod(terrainBaseType);
     
     // Modify vertex heights procedurally
     for (let i = 0; i < positions.length; i += 3) {
@@ -553,19 +558,44 @@ export class SimulationPassManager {
 
   /**
    * Executes one simulation step (equivalent to SimulatePerStep)
+   * @param controls - Simulation controls/parameters
+   * @param timer - Time value for shaders (optional, defaults to 0)
+   * @param brushState - Brush state (mouse world pos/dir, brush pos, etc.) (optional)
+   * @param waterSources - Water source arrays (optional)
+   * @param lavaSources - Lava source arrays (optional)
    */
-  public executeStep(controls: any): void {
+  public executeStep(
+    controls: any,
+    timer: number = 0,
+    brushState?: {
+      mouseWorldPos?: [number, number, number, number];
+      mouseWorldDir?: [number, number, number];
+      brushPos?: [number, number];
+    },
+    waterSources?: {
+      count: number;
+      positions: Float32Array;
+      sizes: Float32Array;
+      strengths: Float32Array;
+    },
+    lavaSources?: {
+      count: number;
+      positions: Float32Array;
+      sizes: Float32Array;
+      strengths: Float32Array;
+    }
+  ): void {
     // 0. Rain precipitation
-    this.executeRainPass(controls);
+    this.executeRainPass(controls, timer, brushState, waterSources);
     
     // 1. Flow (flux)
     this.executeFlowPass(controls);
     
     // 2. Water height/velocity
-    this.executeWaterHeightPass(controls);
+    this.executeWaterHeightPass(controls, timer);
     
     // 3. Sediment
-    this.executeSedimentPass(controls);
+    this.executeSedimentPass(controls, timer);
     
     // 4. Sediment advection (conditional)
     if (controls.AdvectionMethod == 1) {
@@ -587,24 +617,111 @@ export class SimulationPassManager {
     this.executeEvaporationPass(controls);
     
     // 9. Lava flow
-    this.executeLavaFlowPass(controls);
+    this.executeLavaFlowPass(controls, timer, lavaSources);
     
     // 10. Lava update
-    this.executeLavaUpdatePass(controls);
+    this.executeLavaUpdatePass(controls, timer, brushState, lavaSources);
     
     // 11. Lava-terrain interaction
-    this.executeLavaTerrainPass(controls);
+    this.executeLavaTerrainPass(controls, lavaSources);
     
     // 12. Average smoothing
     this.executeAveragePass(controls);
   }
 
   // Individual pass execution methods (to be implemented with proper uniform setting)
-  private executeRainPass(controls: any): void {
+  private executeRainPass(
+    controls: any,
+    timer: number,
+    brushState?: {
+      mouseWorldPos?: [number, number, number, number];
+      mouseWorldDir?: [number, number, number];
+      brushPos?: [number, number];
+    },
+    waterSources?: {
+      count: number;
+      positions: Float32Array;
+      sizes: Float32Array;
+      strengths: Float32Array;
+    }
+  ): void {
     this.rainPass.setInputTexture('readTerrain', this.terrainPP.getReadTexture());
+    
+    // Standard simulation uniforms
     this.rainPass.setUniform('raindeg', controls.RainDegree);
     this.rainPass.setUniform('u_SimRes', this.simres);
-    // ... set other uniforms as needed
+    this.rainPass.setUniform('u_Time', timer);
+    
+    // Brush uniforms
+    // Only set brushPos if it's valid (not the invalid default [-10, -10])
+    if (brushState && brushState.brushPos) {
+      const [brushPosX, brushPosY] = brushState.brushPos;
+      // Only set if brushPos is valid (within [0, 1] range)
+      if (brushPosX >= 0 && brushPosX <= 1 && brushPosY >= 0 && brushPosY <= 1) {
+        this.rainPass.setUniform('u_BrushPos', new THREE.Vector2(brushPosX, brushPosY));
+      } else {
+        // Invalid brushPos - set to invalid value that shader will ignore
+        this.rainPass.setUniform('u_BrushPos', new THREE.Vector2(-10.0, -10.0));
+      }
+      if (brushState.mouseWorldPos) {
+        this.rainPass.setUniform('u_MouseWorldPos', new THREE.Vector4(...brushState.mouseWorldPos));
+      }
+      if (brushState.mouseWorldDir) {
+        this.rainPass.setUniform('u_MouseWorldDir', new THREE.Vector3(...brushState.mouseWorldDir));
+      }
+    } else {
+      // No brushState or no brushPos - set to invalid value
+      this.rainPass.setUniform('u_BrushPos', new THREE.Vector2(-10.0, -10.0));
+    }
+    this.rainPass.setUniform('u_BrushSize', controls.brushSize || 0);
+    this.rainPass.setUniform('u_BrushStrength', controls.brushStrenth || 0);
+    this.rainPass.setUniform('u_BrushType', controls.brushType || 0);
+    this.rainPass.setUniform('u_BrushPressed', controls.brushPressed || 0);
+    this.rainPass.setUniform('u_BrushOperation', controls.brushOperation || 0);
+    
+    // Brush-specific uniforms
+    this.rainPass.setUniform('u_FlattenTargetHeight', controls.flattenTargetHeight || 0);
+    if (controls.slopeStartPos) {
+      this.rainPass.setUniform('u_SlopeStartPos', new THREE.Vector2(controls.slopeStartPos[0] || 0, controls.slopeStartPos[1] || 0));
+    } else {
+      this.rainPass.setUniform('u_SlopeStartPos', new THREE.Vector2(0, 0));
+    }
+    if (controls.slopeEndPos) {
+      this.rainPass.setUniform('u_SlopeEndPos', new THREE.Vector2(controls.slopeEndPos[0] || 0, controls.slopeEndPos[1] || 0));
+    } else {
+      this.rainPass.setUniform('u_SlopeEndPos', new THREE.Vector2(0, 0));
+    }
+    this.rainPass.setUniform('u_SlopeActive', controls.slopeActive || 0);
+    
+    // Rain erosion uniforms
+    this.rainPass.setUniform('u_RainErosion', controls.RainErosion ? 1 : 0);
+    this.rainPass.setUniform('u_RainErosionStrength', controls.RainErosionStrength || 1.0);
+    this.rainPass.setUniform('u_RainErosionDropSize', controls.RainErosionDropSize || 1.0);
+    
+    // Water source arrays
+    if (waterSources) {
+      this.rainPass.setUniform('u_SourceCount', waterSources.count);
+      // Set source arrays (max 16 sources)
+      const maxSources = Math.min(waterSources.count, 16);
+      const positions = new Float32Array(maxSources * 2);
+      const sizes = new Float32Array(maxSources);
+      const strengths = new Float32Array(maxSources);
+      for (let i = 0; i < maxSources; i++) {
+        positions[i * 2] = waterSources.positions[i * 2] || 0;
+        positions[i * 2 + 1] = waterSources.positions[i * 2 + 1] || 0;
+        sizes[i] = waterSources.sizes[i] || 0;
+        strengths[i] = waterSources.strengths[i] || 0;
+      }
+      this.rainPass.setUniform('u_SourcePositions', positions);
+      this.rainPass.setUniform('u_SourceSizes', sizes);
+      this.rainPass.setUniform('u_SourceStrengths', strengths);
+    } else {
+      this.rainPass.setUniform('u_SourceCount', 0);
+      this.rainPass.setUniform('u_SourcePositions', new Float32Array(32)); // 16 * 2
+      this.rainPass.setUniform('u_SourceSizes', new Float32Array(16));
+      this.rainPass.setUniform('u_SourceStrengths', new Float32Array(16));
+    }
+    
     this.passRunner.executePingPongPass(this.rainPass, this.terrainPP);
   }
 
@@ -619,7 +736,7 @@ export class SimulationPassManager {
     this.passRunner.executePingPongPass(this.flowPass, this.fluxPP);
   }
 
-  private executeWaterHeightPass(controls: any): void {
+  private executeWaterHeightPass(controls: any, timer: number): void {
     // This is an MRT pass (2 outputs)
     const mrtTarget = new MRTRenderTarget(this.simres, this.simres, 2);
     mrtTarget.getTargets().texture[0] = this.terrainPP.getWriteTarget().texture;
@@ -633,15 +750,16 @@ export class SimulationPassManager {
     this.waterHeightPass.setUniform('u_PipeLen', controls.pipelen);
     this.waterHeightPass.setUniform('u_timestep', controls.timestep);
     this.waterHeightPass.setUniform('u_PipeArea', controls.pipeAra);
-    this.waterHeightPass.setUniform('u_VelMult', controls.VelocityMultiplier);
-    this.waterHeightPass.setUniform('u_VelAdvMag', controls.VelocityAdvectionMag);
+    this.waterHeightPass.setUniform('u_VelMult', controls.VelocityMultiplier || 1.0);
+    this.waterHeightPass.setUniform('u_VelAdvMag', controls.VelocityAdvectionMag || 1.0);
+    this.waterHeightPass.setUniform('u_Time', timer);
     
     this.passRunner.executeMRTPass(this.waterHeightPass, mrtTarget.getTargets());
     this.terrainPP.swap();
     this.velocityPP.swap();
   }
 
-  private executeSedimentPass(controls: any): void {
+  private executeSedimentPass(controls: any, timer: number): void {
     // This is a 4-output MRT pass
     const mrtTarget = new MRTRenderTarget(this.simres, this.simres, 4);
     mrtTarget.getTargets().texture[0] = this.terrainPP.getWriteTarget().texture;
@@ -659,6 +777,7 @@ export class SimulationPassManager {
     this.sedimentPass.setUniform('Ks', controls.Ks);
     this.sedimentPass.setUniform('Kd', controls.Kd);
     this.sedimentPass.setUniform('u_timestep', controls.timestep);
+    this.sedimentPass.setUniform('u_Time', timer);
     
     this.passRunner.executeMRTPass(this.sedimentPass, mrtTarget.getTargets());
     this.terrainPP.swap();
@@ -735,7 +854,7 @@ export class SimulationPassManager {
     this.maxslippagePass.setUniform('u_PipeLen', controls.pipelen);
     this.maxslippagePass.setUniform('u_timestep', controls.timestep);
     this.maxslippagePass.setUniform('u_PipeArea', controls.pipeAra);
-    this.maxslippagePass.setUniform('unif_TalusScale', controls.thermalTalusAngleScale);
+    this.maxslippagePass.setUniform('unif_TalusScale', controls.thermalTalusAngleScale || 1.0);
     this.maxslippagePass.setUniform('unif_rainMode', controls.RainErosion ? 1 : 0);
     this.passRunner.executePingPongPass(this.maxslippagePass, this.maxslippagePP);
   }
@@ -747,7 +866,7 @@ export class SimulationPassManager {
     this.thermalFluxPass.setUniform('u_PipeLen', controls.pipelen);
     this.thermalFluxPass.setUniform('u_timestep', controls.timestep);
     this.thermalFluxPass.setUniform('u_PipeArea', controls.pipeAra);
-    this.thermalFluxPass.setUniform('unif_thermalRate', controls.thermalRate);
+    this.thermalFluxPass.setUniform('unif_thermalRate', controls.thermalRate || 0.5);
     this.passRunner.executePingPongPass(this.thermalFluxPass, this.terrainFluxPP);
   }
 
@@ -758,7 +877,7 @@ export class SimulationPassManager {
     this.thermalApplyPass.setUniform('u_PipeLen', controls.pipelen);
     this.thermalApplyPass.setUniform('u_timestep', controls.timestep);
     this.thermalApplyPass.setUniform('u_PipeArea', controls.pipeAra);
-    this.thermalApplyPass.setUniform('unif_thermalErosionScale', controls.thermalErosionScale);
+    this.thermalApplyPass.setUniform('unif_thermalErosionScale', controls.thermalErosionScale || 1.0);
     this.passRunner.executePingPongPass(this.thermalApplyPass, this.terrainPP);
   }
 
@@ -768,7 +887,12 @@ export class SimulationPassManager {
     this.passRunner.executePingPongPass(this.evaporationPass, this.terrainPP);
   }
 
-  private executeLavaFlowPass(controls: any): void {
+  private executeLavaFlowPass(controls: any, timer: number, lavaSources?: {
+    count: number;
+    positions: Float32Array;
+    sizes: Float32Array;
+    strengths: Float32Array;
+  }): void {
     // Unbind textures to avoid feedback loops
     this.renderer.setRenderTarget(null);
     
@@ -779,19 +903,124 @@ export class SimulationPassManager {
     this.lavaFlowPass.setUniform('u_PipeLen', controls.pipelen);
     this.lavaFlowPass.setUniform('u_timestep', controls.timestep);
     this.lavaFlowPass.setUniform('u_PipeArea', controls.pipeAra);
-    // Set lava physics constants...
+    this.lavaFlowPass.setUniform('u_Time', timer);
+    
+    // Lava physics constants
+    this.lavaFlowPass.setUniform('u_LavaViscosityPreExp', controls.LavaViscosityPreExp || 1.0);
+    this.lavaFlowPass.setUniform('u_LavaActivationEnergy', controls.LavaActivationEnergy || 1.0);
+    this.lavaFlowPass.setUniform('u_LavaDensity', controls.LavaDensity || 2700.0);
+    this.lavaFlowPass.setUniform('u_LavaGasConstant', 8.314); // Gas constant R = 8.314 J/(mol·K)
+    this.lavaFlowPass.setUniform('u_LavaSolidificationTemp', controls.LavaSolidificationTemp || 800.0);
+    this.lavaFlowPass.setUniform('u_LavaInitialTemp', controls.LavaInitialTemp || 1200.0);
+    
+    // Lava source arrays
+    if (lavaSources) {
+      this.lavaFlowPass.setUniform('u_LavaSourceCount', lavaSources.count);
+      const maxSources = Math.min(lavaSources.count, 16);
+      const positions = new Float32Array(maxSources * 2);
+      const sizes = new Float32Array(maxSources);
+      for (let i = 0; i < maxSources; i++) {
+        positions[i * 2] = lavaSources.positions[i * 2] || 0;
+        positions[i * 2 + 1] = lavaSources.positions[i * 2 + 1] || 0;
+        sizes[i] = lavaSources.sizes[i] || 0;
+      }
+      this.lavaFlowPass.setUniform('u_LavaSourcePositions', positions);
+      this.lavaFlowPass.setUniform('u_LavaSourceSizes', sizes);
+    } else {
+      this.lavaFlowPass.setUniform('u_LavaSourceCount', 0);
+      this.lavaFlowPass.setUniform('u_LavaSourcePositions', new Float32Array(32));
+      this.lavaFlowPass.setUniform('u_LavaSourceSizes', new Float32Array(16));
+    }
+    
     this.passRunner.executePingPongPass(this.lavaFlowPass, this.lavaFluxPP);
   }
 
-  private executeLavaUpdatePass(controls: any): void {
+  private executeLavaUpdatePass(
+    controls: any,
+    timer: number,
+    brushState?: {
+      mouseWorldPos?: [number, number, number, number];
+      mouseWorldDir?: [number, number, number];
+      brushPos?: [number, number];
+    },
+    lavaSources?: {
+      count: number;
+      positions: Float32Array;
+      sizes: Float32Array;
+      strengths: Float32Array;
+    }
+  ): void {
     this.lavaUpdatePass.setInputTexture('readTerrain', this.terrainPP.getReadTexture());
     this.lavaUpdatePass.setInputTexture('readLava', this.lavaPP.getReadTexture());
     this.lavaUpdatePass.setInputTexture('readLavaFlux', this.lavaFluxPP.getReadTexture());
-    // Set all lava update uniforms...
+    
+    // Standard simulation uniforms
+    this.lavaUpdatePass.setUniform('u_SimRes', this.simres);
+    this.lavaUpdatePass.setUniform('u_PipeLen', controls.pipelen);
+    this.lavaUpdatePass.setUniform('u_timestep', controls.timestep);
+    this.lavaUpdatePass.setUniform('u_PipeArea', controls.pipeAra);
+    this.lavaUpdatePass.setUniform('u_Time', timer);
+    
+    // Heat transfer constants
+    this.lavaUpdatePass.setUniform('u_LavaAirHeatTransfer', controls.LavaAirHeatTransfer || 200.0);
+    this.lavaUpdatePass.setUniform('u_LavaWaterHeatTransfer', controls.LavaWaterHeatTransfer || 2000.0);
+    this.lavaUpdatePass.setUniform('u_LavaAmbientTemp', controls.LavaAmbientTemp || 20.0);
+    this.lavaUpdatePass.setUniform('u_LavaWaterTemp', controls.LavaWaterTemp || 10.0);
+    this.lavaUpdatePass.setUniform('u_LavaDensity', controls.LavaDensity || 2700.0);
+    this.lavaUpdatePass.setUniform('u_LavaSpecificHeat', controls.LavaSpecificHeat || 1200.0);
+    this.lavaUpdatePass.setUniform('u_LavaInitialTemp', controls.LavaInitialTemp || 1200.0);
+    this.lavaUpdatePass.setUniform('u_LavaSolidificationTemp', controls.LavaSolidificationTemp || 800.0);
+    
+    // Lava source arrays
+    if (lavaSources) {
+      this.lavaUpdatePass.setUniform('u_LavaSourceCount', lavaSources.count);
+      const maxSources = Math.min(lavaSources.count, 16);
+      const positions = new Float32Array(maxSources * 2);
+      const sizes = new Float32Array(maxSources);
+      const strengths = new Float32Array(maxSources);
+      for (let i = 0; i < maxSources; i++) {
+        positions[i * 2] = lavaSources.positions[i * 2] || 0;
+        positions[i * 2 + 1] = lavaSources.positions[i * 2 + 1] || 0;
+        sizes[i] = lavaSources.sizes[i] || 0;
+        strengths[i] = lavaSources.strengths[i] || 0;
+      }
+      this.lavaUpdatePass.setUniform('u_LavaSourcePositions', positions);
+      this.lavaUpdatePass.setUniform('u_LavaSourceSizes', sizes);
+      this.lavaUpdatePass.setUniform('u_LavaSourceStrengths', strengths);
+    } else {
+      this.lavaUpdatePass.setUniform('u_LavaSourceCount', 0);
+      this.lavaUpdatePass.setUniform('u_LavaSourcePositions', new Float32Array(32));
+      this.lavaUpdatePass.setUniform('u_LavaSourceSizes', new Float32Array(16));
+      this.lavaUpdatePass.setUniform('u_LavaSourceStrengths', new Float32Array(16));
+    }
+    
+    // Lava brush uniforms (brush type 7)
+    if (brushState) {
+      if (brushState.mouseWorldPos) {
+        this.lavaUpdatePass.setUniform('u_MouseWorldPos', new THREE.Vector4(...brushState.mouseWorldPos));
+      }
+      if (brushState.mouseWorldDir) {
+        this.lavaUpdatePass.setUniform('u_MouseWorldDir', new THREE.Vector3(...brushState.mouseWorldDir));
+      }
+      if (brushState.brushPos) {
+        this.lavaUpdatePass.setUniform('u_BrushPos', new THREE.Vector2(...brushState.brushPos));
+      }
+    }
+    this.lavaUpdatePass.setUniform('u_BrushSize', controls.brushSize || 0);
+    this.lavaUpdatePass.setUniform('u_BrushStrength', controls.brushStrenth || 0);
+    this.lavaUpdatePass.setUniform('u_BrushType', controls.brushType || 0);
+    this.lavaUpdatePass.setUniform('u_BrushPressed', controls.brushPressed || 0);
+    this.lavaUpdatePass.setUniform('u_BrushOperation', controls.brushOperation || 0);
+    
     this.passRunner.executePingPongPass(this.lavaUpdatePass, this.lavaPP);
   }
 
-  private executeLavaTerrainPass(controls: any): void {
+  private executeLavaTerrainPass(controls: any, lavaSources?: {
+    count: number;
+    positions: Float32Array;
+    sizes: Float32Array;
+    strengths: Float32Array;
+  }): void {
     const mrt = new MRTRenderTarget(this.simres, this.simres, 2);
     mrt.getTargets().texture[0] = this.terrainPP.getWriteTarget().texture;
     mrt.getTargets().texture[1] = this.lavaPP.getWriteTarget().texture;
@@ -799,7 +1028,39 @@ export class SimulationPassManager {
     this.lavaTerrainPass.setInputTexture('readTerrain', this.terrainPP.getReadTexture());
     this.lavaTerrainPass.setInputTexture('readLava', this.lavaPP.getReadTexture());
     this.lavaTerrainPass.setInputTexture('readLavaFlux', this.lavaFluxPP.getReadTexture());
-    // Set lava terrain uniforms...
+    
+    // Standard simulation uniforms
+    this.lavaTerrainPass.setUniform('u_SimRes', this.simres);
+    this.lavaTerrainPass.setUniform('u_timestep', controls.timestep);
+    
+    // Thermal erosion and solidification constants
+    this.lavaTerrainPass.setUniform('u_LavaContactHeatTransfer', controls.LavaContactHeatTransfer || 200.0);
+    this.lavaTerrainPass.setUniform('u_LavaMeltThreshold', controls.LavaMeltThreshold || 1000.0);
+    this.lavaTerrainPass.setUniform('u_LavaLatentHeatFusion', controls.LavaLatentHeatFusion || 400000.0);
+    this.lavaTerrainPass.setUniform('u_LavaSolidificationTemp', controls.LavaSolidificationTemp || 800.0);
+    this.lavaTerrainPass.setUniform('u_LavaInitialTemp', controls.LavaInitialTemp || 1200.0);
+    this.lavaTerrainPass.setUniform('u_LavaDensity', controls.LavaDensity || 2700.0);
+    this.lavaTerrainPass.setUniform('u_LavaWaterTemp', controls.LavaWaterTemp || 10.0);
+    
+    // Lava source arrays
+    if (lavaSources) {
+      this.lavaTerrainPass.setUniform('u_LavaSourceCount', lavaSources.count);
+      const maxSources = Math.min(lavaSources.count, 16);
+      const positions = new Float32Array(maxSources * 2);
+      const sizes = new Float32Array(maxSources);
+      for (let i = 0; i < maxSources; i++) {
+        positions[i * 2] = lavaSources.positions[i * 2] || 0;
+        positions[i * 2 + 1] = lavaSources.positions[i * 2 + 1] || 0;
+        sizes[i] = lavaSources.sizes[i] || 0;
+      }
+      this.lavaTerrainPass.setUniform('u_LavaSourcePositions', positions);
+      this.lavaTerrainPass.setUniform('u_LavaSourceSizes', sizes);
+    } else {
+      this.lavaTerrainPass.setUniform('u_LavaSourceCount', 0);
+      this.lavaTerrainPass.setUniform('u_LavaSourcePositions', new Float32Array(32));
+      this.lavaTerrainPass.setUniform('u_LavaSourceSizes', new Float32Array(16));
+    }
+    
     this.passRunner.executeMRTPass(this.lavaTerrainPass, mrt.getTargets());
     this.terrainPP.swap();
     this.lavaPP.swap();
@@ -824,6 +1085,10 @@ export class SimulationPassManager {
    */
   public getTerrainTexture(): THREE.Texture {
     return this.terrainPP.getReadTexture();
+  }
+  
+  public getSimRes(): number {
+    return this.simres;
   }
 
   public getLavaTexture(): THREE.Texture {

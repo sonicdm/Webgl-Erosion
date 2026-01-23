@@ -6,17 +6,24 @@
 import * as THREE from 'three';
 
 // Vertex shader - GLSL 1.0 for ShaderMaterial (Three.js handles uniforms automatically)
+// NOTE: Geometry vertices are updated directly from height data via updateTerrainGeometry()
+// This shader does NOT displace vertices - it just passes through the geometry positions
 const terrainVertexShaderGLSL1 = `
   varying vec3 vPosition;
   varying vec3 vNormal;
   varying vec2 vUv;
   
   void main() {
-    vPosition = position;
-    vNormal = normalize(normalMatrix * normal);
     vUv = uv;
     
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    // Use geometry position directly - vertices are updated from height data on CPU
+    // No shader displacement needed - updateTerrainGeometry() handles height updates
+    vec3 worldPosition = position;
+    
+    vPosition = (modelMatrix * vec4(worldPosition, 1.0)).xyz;
+    vNormal = normalize(normalMatrix * normal);
+    
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPosition, 1.0);
   }
 `;
 
@@ -53,6 +60,11 @@ const terrainFragmentShaderGLSL1 = `
   uniform float u_SnowRange;
   uniform float u_ForestRange;
   uniform int u_TerrainPalette; // 0 = AlpineMtn, 1 = Desert, 2 = Jungle
+  
+  // Brush uniforms for visualization
+  uniform int u_BrushType;
+  uniform float u_BrushSize;
+  uniform vec2 u_BrushPos;
   
   varying vec3 vPosition;
   varying vec3 vNormal;
@@ -178,6 +190,40 @@ const terrainFragmentShaderGLSL1 = `
     
     // Add noise variation
     finalcol += vec3(noiseVal);
+    
+    // Brush visualization (matching terrain-frag.glsl)
+    vec3 addcol = vec3(0.0);
+    // Force brush visualization for testing - always show if brushType > 0
+    if(u_BrushType != 0){
+        // Brush position comes from BVH raycast in [0,1] UV space
+        // vUv should also be in [0,1] space from the mesh UV attribute
+        // If there's an offset, it might be due to UV coordinate system mismatch
+        vec2 pointOnPlane = u_BrushPos;
+        float pdis2fragment = distance(pointOnPlane, vUv);
+        float brushRadius = 0.01 * u_BrushSize;
+        // Make brush more visible - use larger radius check
+        if (pdis2fragment < brushRadius){
+            float dens = (brushRadius - pdis2fragment) / brushRadius;
+            dens = clamp(dens, 0.0, 1.0);
+            
+            if(u_BrushType == 1){
+                addcol = sand * 0.8 * dens;
+            }else if(u_BrushType == 2){
+                addcol = vec3(0.1, 0.3, 0.8) * 0.8 * dens; // watercol
+            }else if(u_BrushType == 3){
+                addcol = vec3(0.35, 0.38, 0.45) * 0.8 * dens; // rock
+            }else if(u_BrushType == 4){
+                addcol = vec3(0.5, 0.8, 1.0) * 0.8 * dens; // smooth
+            }else if(u_BrushType == 5){
+                addcol = vec3(1.0, 1.0, 0.3) * 0.8 * dens; // flatten
+            }else if(u_BrushType == 6){
+                addcol = vec3(0.3, 1.0, 0.3) * 0.8 * dens; // slope
+            }else if(u_BrushType == 7){
+                addcol = vec3(1.0, 0.3, 0.0) * 0.8 * dens; // lava
+            }
+        }
+    }
+    finalcol += addcol;
     
     // Simple lighting based on normal
     float lightIntensity = max(dot(vNormal, vec3(0.5, 1.0, 0.3)), 0.3);
@@ -359,11 +405,17 @@ export function createTerrainProceduralMaterial(params: TerrainProceduralMateria
     vertexShader: terrainVertexShaderGLSL1,
     fragmentShader: terrainFragmentShaderGLSL1,
     uniforms: {
+      // Heightmap textures (will be set by integration.ts)
+      // Material uniforms
       u_MinHeight: { value: minHeight },
       u_MaxHeight: { value: maxHeight },
       u_SnowRange: { value: snowRange },
       u_ForestRange: { value: forestRange },
       u_TerrainPalette: { value: terrainPalette },
+      // Brush uniforms
+      u_BrushType: { value: 0 },
+      u_BrushSize: { value: 0.0 },
+      u_BrushPos: { value: new THREE.Vector2(0.0, 0.0) },
     },
     side: THREE.DoubleSide,
     wireframe: false,

@@ -6,7 +6,7 @@ import {OrbitControls} from "three/examples/jsm/controls/OrbitControls";
 import {vec3, mat4} from 'gl-matrix';
 // @ts-ignore
 
-import {Vector3} from "three";
+import {Vector3, Spherical} from "three";
 import { ControlsConfig } from './controls-config';
 
 
@@ -59,9 +59,6 @@ class Camera {
     this.threeCamera = new PerspectiveCamera(this.fovy,this.aspectRatio,this.near,this.far);
     this.threeCamera.position.set(position[0],position[1],position[2]);
     this.threeControls = new OrbitControls(this.threeCamera, document.getElementById('canvas'));
-    
-    // Set OrbitControls target to match the initial target position
-    this.threeControls.target.set(target[0], target[1], target[2]);
 
     // Apply camera configuration if provided
     if (cameraConfig) {
@@ -109,6 +106,7 @@ class Camera {
     }
     
     // Disable OrbitControls' built-in keyboard controls (we handle WASD ourselves)
+    // OrbitControls arrow keys do panning (move target), not strafe movement (move camera position)
     this.threeControls.keys = {
         LEFT: null,
         UP: null,
@@ -178,10 +176,10 @@ class Camera {
     }
 
 
-    // Acceleration and deceleration constants (reduced for smoother movement at high frame rates)
-    // Further reduced for smoother movement at variable frame rates
-    const acceleration = 2.0;  // Units per second squared (reduced from 4.0 for smoother movement)
-    const deceleration = 3.0;   // Units per second squared (reduced from 6.0 for smoother stopping)
+    // Acceleration and deceleration constants
+    // Increased significantly for responsive movement (reaches max speed in <1 second)
+    const acceleration = 50.0;  // Units per second squared (increased for immediate responsiveness)
+    const deceleration = 60.0;   // Units per second squared (faster stopping)
     const maxSpeed = config.movement.moveSpeed;
     const fastMaxSpeed = maxSpeed * (config.movement.fastMoveMultiplier || 3.0);
 
@@ -313,20 +311,18 @@ class Camera {
     vec3.scale(desiredVelocity, desiredDirection, currentMaxSpeed);
 
     // Calculate velocity change based on acceleration/deceleration
-    const velocityChange = vec3.create();
+    // For immediate responsiveness, use instant acceleration when input is present
     if (vec3.length(desiredDirection) > 0.001) {
-      // Accelerating towards desired direction
-      vec3.subtract(velocityChange, desiredVelocity, this.velocity);
-      const accelRate = acceleration * deltaTime;
-      vec3.scale(velocityChange, velocityChange, Math.min(accelRate, 1.0));
+      // Instant acceleration: set velocity directly to desired velocity
+      // This provides immediate, responsive movement
+      vec3.copy(this.velocity, desiredVelocity);
     } else {
-      // Decelerating (no input)
+      // Decelerating (no input) - use smooth deceleration
       const decelRate = deceleration * deltaTime;
+      const velocityChange = vec3.create();
       vec3.scale(velocityChange, this.velocity, -Math.min(decelRate, 1.0));
+      vec3.add(this.velocity, this.velocity, velocityChange);
     }
-
-    // Update velocity
-    vec3.add(this.velocity, this.velocity, velocityChange);
 
     // Clamp velocity to max speed
     const currentSpeed = vec3.length(this.velocity);
@@ -340,7 +336,6 @@ class Camera {
     const movementDelta = vec3.create();
     vec3.scale(movementDelta, this.velocity, deltaTime);
     
-    
     // Move both camera and target together
     this.threeCamera.position.x += movementDelta[0];
     this.threeCamera.position.y += movementDelta[1];
@@ -349,7 +344,6 @@ class Camera {
     this.threeControls.target.x += movementDelta[0];
     this.threeControls.target.y += movementDelta[1];
     this.threeControls.target.z += movementDelta[2];
-
   }
 
   update(cameraConfig?: ControlsConfig['camera']) {
@@ -369,13 +363,36 @@ class Camera {
     
     // Use smoothed deltaTime for movement calculations
     const deltaTime = this.smoothedDeltaTime;
-
+    
     // Update movement before OrbitControls (so movement happens first)
     if (cameraConfig) {
       this.updateMovement(deltaTime, cameraConfig);
     }
 
     // Update OrbitControls AFTER movement to ensure it respects the new positions
+    // CRITICAL FIX: After manual WASD movement, OrbitControls' internal spherical coordinates become stale.
+    // We need to recalculate them from the current camera position and target before calling update().
+    // This prevents OrbitControls from resetting the position when rotating with the mouse.
+    // Always sync spherical coordinates after any manual movement (when keys were pressed or velocity is non-zero)
+    // This ensures smooth rotation even after keys are released
+    if (this.pressedKeys.size > 0 || Math.abs(this.velocity[0]) > 0.001 || Math.abs(this.velocity[1]) > 0.001 || Math.abs(this.velocity[2]) > 0.001) {
+      // Manual movement occurred - sync OrbitControls' internal state
+      // Calculate offset from target to camera position (this is what OrbitControls uses internally)
+      const offset = new Vector3();
+      offset.subVectors(this.threeCamera.position, this.threeControls.target);
+      
+      // Update OrbitControls' internal spherical coordinates from current position
+      // Access internal _spherical property (private but accessible in JS)
+      // This syncs OrbitControls' internal state with the actual camera position
+      if ((this.threeControls as any)._spherical) {
+        (this.threeControls as any)._spherical.setFromVector3(offset);
+        // Also update _sphericalDelta if it exists (for smooth transitions)
+        if ((this.threeControls as any)._sphericalDelta) {
+          (this.threeControls as any)._sphericalDelta.set(0, 0, 0);
+        }
+      }
+    }
+    
     this.threeControls.update();
 
     this.threeCamera.updateMatrixWorld();

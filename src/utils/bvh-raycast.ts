@@ -75,36 +75,31 @@ export function rayCastBVH(
         // hit.faceIndex contains the triangle index
         // hit.distance contains the distance along the ray
         
-        // For stability, always use world position to calculate UV coordinates
-        // This is more consistent than triangle interpolation, especially for flat terrain
-        // Terrain spans from -0.5 to 0.5 in X and Z (scale = 1.0)
-        const worldX = hit.point.x;
-        const worldZ = hit.point.z;
+        // Use triangle interpolation to get UV coordinates from geometry
+        // This is more reliable than world position conversion since the geometry has proper UVs
+        const hitInfo = getTriangleHitPointInfo(hit.point, geometry, hit.faceIndex, {});
         
-        // Convert to UV space [0, 1]
-        // Inverse of: worldX = (u - 0.5) * scale, so u = worldX / scale + 0.5
-        let u = worldX + 0.5;
-        let v = worldZ + 0.5;
-        
-        // Clamp to valid range [0, 1]
-        u = Math.max(0, Math.min(1, u));
-        v = Math.max(0, Math.min(1, v));
-        
-        // Validate UV coordinates are reasonable
-        // If they're way out of bounds, try triangle interpolation as fallback
-        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
-            out[0] = u;
-            out[1] = v;
+        if (hitInfo && hitInfo.uv) {
+            // Use interpolated UV from triangle
+            out[0] = Math.max(0, Math.min(1, hitInfo.uv.x));
+            out[1] = Math.max(0, Math.min(1, hitInfo.uv.y));
         } else {
-            // Fallback to triangle interpolation if world position conversion fails
-            const hitInfo = getTriangleHitPointInfo(hit.point, geometry, hit.faceIndex, {});
-            if (hitInfo && hitInfo.uv) {
-                out[0] = Math.max(0, Math.min(1, hitInfo.uv.x));
-                out[1] = Math.max(0, Math.min(1, hitInfo.uv.y));
-            } else {
-                // Last resort: clamp the world position UV
+            // Fallback: try world position conversion (may not work if terrain is transformed)
+            const worldX = hit.point.x;
+            const worldZ = hit.point.z;
+            let u = worldX + 0.5;
+            let v = worldZ + 0.5;
+            
+            // Check if values are reasonable before clamping
+            if (u >= -10 && u <= 10 && v >= -10 && v <= 10) {
+                // Values seem reasonable, clamp to [0, 1]
                 out[0] = Math.max(0, Math.min(1, u));
                 out[1] = Math.max(0, Math.min(1, v));
+            } else {
+                // Values are way out of bounds, return invalid
+                out[0] = -10.0;
+                out[1] = -10.0;
+                return false;
             }
         }
         
