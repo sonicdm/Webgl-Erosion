@@ -18,7 +18,8 @@ import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { setTerrainGeometry, setTerrainBVH, setTerrainBVHBuildInProgress, terrainBVHBuildInProgress, terrainBVH, terrainGeometry } from '../simulation/simulation-state';
 import { rayCastBVH } from '../utils/bvh-raycast';
 import { rayCast } from '../utils/raycast';
-import { applyTerraforming, TerraformParams } from './utils/cpu-terraforming';
+// CPU-side terraforming removed - now using GPU-based VTF displacement
+// import { applyTerraforming, TerraformParams } from './utils/cpu-terraforming';
 
 /**
  * Main Three.js simulation runtime that integrates with the existing system
@@ -35,7 +36,8 @@ export class ThreeJSSimulationRuntime {
   private renderFrameCount: number = 0; // Track render calls for debugging
   private camera: Camera | null = null; // Custom camera with WASD movement
   private controlsConfig: ControlsConfig | null = null; // Camera configuration
-  private terraformingActive: boolean = false; // Track if terraforming is currently active
+  private _textureDebugLogged: boolean = false; // Track if texture debug info has been logged
+  // terraformingActive flag removed - terraforming is now GPU-based (rain shader)
 
   constructor(canvas: HTMLCanvasElement, glContext: WebGL2RenderingContext, simres: number) {
     this.runtime = new ThreeJSRuntime(canvas, glContext);
@@ -293,7 +295,7 @@ export class ThreeJSSimulationRuntime {
       }
       
       try {
-        this.terrainMesh.material = createTerrainProceduralMaterial({
+        const newMaterial = createTerrainProceduralMaterial({
           minHeight: minHeight,
           maxHeight: maxHeight,
           snowRange: this.controls?.SnowRange || 0.0,
@@ -301,7 +303,72 @@ export class ThreeJSSimulationRuntime {
           terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
         });
         
+        // Check for shader compilation errors early
+        const renderer = this.runtime.getRenderer();
+        const gl = renderer.getContext() as WebGL2RenderingContext;
         
+        // Check VTF support (query MAX_VERTEX_TEXTURE_IMAGE_UNITS)
+        const maxVertexTextureUnits = gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS);
+        console.log('[Terrain Material] VTF support check:', {
+          maxVertexTextureImageUnits: maxVertexTextureUnits,
+          supported: maxVertexTextureUnits > 0
+        });
+        
+        if (maxVertexTextureUnits === 0) {
+          console.warn('[Terrain Material] VTF not supported - MAX_VERTEX_TEXTURE_IMAGE_UNITS is 0');
+          console.warn('[Terrain Material] Falling back to CPU-side geometry updates');
+          // Fall through to use material anyway - might work on some drivers
+        }
+        
+        // Force shader compilation by creating a test program
+        const testProgram = gl.createProgram();
+        const vs = gl.createShader(gl.VERTEX_SHADER);
+        const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        
+        if (vs && fs) {
+          const vertexSource = newMaterial.vertexShader;
+          const fragmentSource = newMaterial.fragmentShader;
+          
+          // Log shader source info for debugging
+          console.log('[Terrain Material] Compiling shaders...');
+          console.log('[Terrain Material] Vertex shader length:', vertexSource.length);
+          console.log('[Terrain Material] Vertex shader starts with:', vertexSource.substring(0, 20));
+          console.log('[Terrain Material] Fragment shader length:', fragmentSource.length);
+          console.log('[Terrain Material] Fragment shader starts with:', fragmentSource.substring(0, 20));
+          
+          // When manually testing shader compilation, we need to add #version 300 es
+          // because Three.js hasn't added it yet (it adds it when actually using the material)
+          // But we can't add it to the shader files because Three.js would then have a duplicate
+          const testVertexSource = '#version 300 es\n' + vertexSource;
+          const testFragmentSource = '#version 300 es\n' + fragmentSource;
+          
+          gl.shaderSource(vs, testVertexSource);
+          gl.shaderSource(fs, testFragmentSource);
+          gl.compileShader(vs);
+          gl.compileShader(fs);
+          
+          if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+            const error = gl.getShaderInfoLog(vs);
+            console.error('[Terrain Material] Vertex shader compilation error:', error);
+            console.error('[Terrain Material] Vertex shader source (first 200 chars):', vertexSource.substring(0, 200));
+            console.error('[Terrain Material] Vertex shader source (last 200 chars):', vertexSource.substring(Math.max(0, vertexSource.length - 200)));
+            throw new Error(`Vertex shader compilation failed: ${error}`);
+          }
+          
+          if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+            const error = gl.getShaderInfoLog(fs);
+            console.error('[Terrain Material] Fragment shader compilation error:', error);
+            throw new Error(`Fragment shader compilation failed: ${error}`);
+          }
+          
+          gl.deleteShader(vs);
+          gl.deleteShader(fs);
+          gl.deleteProgram(testProgram);
+          
+          console.log('[Terrain Material] Shaders compiled successfully');
+        }
+        
+        this.terrainMesh.material = newMaterial;
         console.log('[Terrain Update] Material replaced with procedural terrain material');
       } catch (error) {
         console.warn('[Terrain Update] Failed to create procedural material, using fallback:', error);
@@ -461,7 +528,7 @@ export class ThreeJSSimulationRuntime {
       // This is handled by the caller (main.ts) based on geometryUpdateCounter
       
       // Update material height range if using procedural material
-      if ((this.terrainMesh.material instanceof THREE.ShaderMaterial || this.terrainMesh.material instanceof THREE.RawShaderMaterial) && this.controls) {
+      if ((this.terrainMesh.material instanceof THREE.RawShaderMaterial || this.terrainMesh.material instanceof THREE.ShaderMaterial) && this.controls) {
         const positions = this.terrainGeometry.attributes.position.array as Float32Array;
         let minHeight = Infinity;
         let maxHeight = -Infinity;
@@ -545,65 +612,9 @@ export class ThreeJSSimulationRuntime {
     }
   }
   
-  /**
-   * Applies CPU-side terraforming to terrain geometry when brush is used.
-   * This directly modifies vertex positions, avoiding the need for GPU readback.
-   */
-  public applyTerraformingToGeometry(
-    brushPos: [number, number],
-    brushSize: number,
-    brushStrength: number,
-    brushType: number,
-    brushOperation: number,
-    flattenTargetHeight?: number,
-    slopeStartPos?: [number, number],
-    slopeEndPos?: [number, number]
-  ): void {
-    if (!this.terrainGeometry) {
-      return;
-    }
-    
-    // Mark terraforming as active to prevent geometry updates from overwriting changes
-    this.terraformingActive = true;
-    
-    const params: TerraformParams = {
-      brushPos,
-      brushSize,
-      brushStrength,
-      brushType,
-      brushOperation,
-      flattenTargetHeight,
-      slopeStartPos,
-      slopeEndPos
-    };
-    
-    applyTerraforming(this.terrainGeometry, this.simres, params);
-    
-    // Mark geometry for update
-    if (this.terrainMesh) {
-      this.terrainMesh.geometry.attributes.position.needsUpdate = true;
-      if (this.terrainMesh.geometry.attributes.normal) {
-        this.terrainMesh.geometry.attributes.normal.needsUpdate = true;
-      }
-    }
-    
-    // Update geometry in simulation-state (for BVH raycasting)
-    setTerrainGeometry(this.terrainGeometry);
-  }
-  
-  /**
-   * Returns whether terraforming is currently active (prevents geometry overwrites)
-   */
-  public isTerraformingActive(): boolean {
-    return this.terraformingActive;
-  }
-  
-  /**
-   * Marks terraforming as inactive (called when brush is released)
-   */
-  public setTerraformingInactive(): void {
-    this.terraformingActive = false;
-  }
+  // CPU-side terraforming methods removed - terraforming is now GPU-based
+  // The rain shader (rain-frag.glsl) handles terraforming by modifying the heightmap texture
+  // The vertex shader uses VTF to displace vertices from the heightmap texture
   
   /**
    * Updates material parameters from controls
@@ -621,7 +632,7 @@ export class ThreeJSSimulationRuntime {
       return;
     }
     
-    if (this.terrainMesh && (this.terrainMesh.material instanceof THREE.ShaderMaterial || this.terrainMesh.material instanceof THREE.RawShaderMaterial) && this.terrainGeometry) {
+    if (this.terrainMesh && (this.terrainMesh.material instanceof THREE.RawShaderMaterial || this.terrainMesh.material instanceof THREE.ShaderMaterial) && this.terrainGeometry) {
       const positions = this.terrainGeometry.attributes.position.array as Float32Array;
       let minHeight = Infinity;
       let maxHeight = -Infinity;
@@ -774,6 +785,7 @@ export class ThreeJSSimulationRuntime {
     
     // Ensure material uniforms are valid before rendering
     if (this.terrainMesh.material instanceof THREE.RawShaderMaterial || this.terrainMesh.material instanceof THREE.ShaderMaterial) {
+      // Material type is correct - continue
       const material = this.terrainMesh.material;
       if (!material.uniforms) {
         console.warn('Terrain material has no uniforms, skipping render');
@@ -795,8 +807,59 @@ export class ThreeJSSimulationRuntime {
         }
       }
       
-      // NOTE: Textures are no longer used in vertex shader
-      // Geometry vertices are updated directly via updateTerrainGeometry()
+      // Update heightmap textures for VTF displacement (GPU-based terraforming)
+      if (this.passManager) {
+        const terrainTexture = this.passManager.getTerrainTexture();
+        const sedimentTexture = this.passManager.getSedimentTexture();
+        
+        // Debug: Log texture info on first render
+        if (!this._textureDebugLogged) {
+          console.log('[Terrain Render] Texture check:', {
+            hasTerrainTexture: !!terrainTexture,
+            hasSedimentTexture: !!sedimentTexture,
+            terrainTextureType: terrainTexture?.type,
+            terrainTextureFormat: terrainTexture?.format,
+            terrainTextureWidth: terrainTexture?.image?.width,
+            terrainTextureHeight: terrainTexture?.image?.height,
+            hasHeightmapUniform: !!material.uniforms.u_Heightmap,
+            hasSedimentUniform: !!material.uniforms.u_Sediment,
+            simres: this.simres
+          });
+          this._textureDebugLogged = true;
+        }
+        
+        if (terrainTexture && material.uniforms.u_Heightmap) {
+          // Only update if texture changed to avoid unnecessary updates
+          if (material.uniforms.u_Heightmap.value !== terrainTexture) {
+            material.uniforms.u_Heightmap.value = terrainTexture;
+            // Ensure texture is marked for update
+            terrainTexture.needsUpdate = true;
+          }
+        } else if (!terrainTexture) {
+          console.warn('[Terrain Render] Terrain texture not available from passManager');
+        }
+        
+        if (sedimentTexture && material.uniforms.u_Sediment) {
+          // Only update if texture changed to avoid unnecessary updates
+          if (material.uniforms.u_Sediment.value !== sedimentTexture) {
+            material.uniforms.u_Sediment.value = sedimentTexture;
+            // Ensure texture is marked for update
+            sedimentTexture.needsUpdate = true;
+          }
+        } else if (!sedimentTexture) {
+          console.warn('[Terrain Render] Sediment texture not available from passManager');
+        }
+        
+        if (material.uniforms.u_SimRes) {
+          material.uniforms.u_SimRes.value = this.simres;
+        }
+        if (material.uniforms.u_TerrainSize) {
+          // Calculate terrain size from controls (terrainScale * 320.0)
+          const terrainScale = this.controls?.TerrainScale || 3.2;
+          const terrainSize = terrainScale * 320.0;
+          material.uniforms.u_TerrainSize.value = terrainSize;
+        }
+      }
       
       // Update brush uniforms for visualization (if they exist)
       if (this.controls) {

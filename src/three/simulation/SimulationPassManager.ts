@@ -269,17 +269,27 @@ export class SimulationPassManager {
         // Extract geometry from the scene (THREE.Terrain returns a Scene with a mesh)
         const terrainMesh = terrainScene.children[0] as THREE.Mesh;
         if (terrainMesh && terrainMesh.geometry) {
-          const geom = terrainMesh.geometry.clone();
-          // Orient to XZ plane (Y up) to match renderer and heightmap extractor expectations
-          geom.rotateX(-Math.PI / 2);
+          // For GPU-based VTF displacement, we need a FLAT plane geometry
+          // The vertex shader will read from heightmap texture and displace vertices
+          // So we create a flat plane matching the terrain size, not the pre-displaced geometry
+          const terrainSize = terrainScale * 320.0;
+          const segments = this.simres - 1; // Creates exactly simres x simres vertices
           
-          // NOTE: Keep THREE.Terrain's pre-displaced vertices
-          // Geometry will be updated from height data via updateTerrainGeometry()
-          // Vertex shader does NOT displace - it uses geometry positions directly
+          // Create flat plane geometry (Y = 0 for all vertices)
+          // Vertex shader will displace based on heightmap texture
+          const geom = new THREE.PlaneGeometry(terrainSize, terrainSize, segments, segments);
+          geom.rotateX(-Math.PI / 2); // Rotate to XZ plane (Y up)
+          
+          // Flatten all Y positions to 0 (vertex shader will displace from texture)
+          const positions = geom.attributes.position.array as Float32Array;
+          for (let i = 1; i < positions.length; i += 3) {
+            positions[i] = 0.0; // Set Y to 0
+          }
+          geom.attributes.position.needsUpdate = true;
           
           geom.computeVertexNormals();
           geom.computeBoundingBox();
-          return geom; // Clone to avoid disposing the original
+          return geom;
         }
       } catch (error) {
         console.warn('Failed to use THREE.Terrain, falling back to simple procedural:', error);

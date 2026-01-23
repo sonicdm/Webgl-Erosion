@@ -1693,43 +1693,10 @@ function main() {
             // Throttled debug logging for brush state (every 120 frames, only when pressed)
             // Removed debug logging - was causing performance issues
             
-            // Apply CPU-side terraforming when brush is pressed
-            // This directly modifies geometry vertices, avoiding GPU readback
-            // Only apply when brush is pressed AND mouse has moved (to avoid excessive updates)
-            if (brushState && controls.brushPressed === 1 && controls.brushType !== 0) {
-              const [brushPosX, brushPosY] = brushState.brushPos;
-              if (brushPosX >= 0 && brushPosX <= 1 && brushPosY >= 0 && brushPosY <= 1) {
-                // Get flatten target height and slope positions from brush state
-                const flattenTargetHeight = (controls as any).flattenTargetHeight;
-                const slopeStartPos = (controls as any).slopeStartPos;
-                const slopeEndPos = (controls as any).slopeEndPos;
-                
-                // Apply terraforming every frame to match shader behavior exactly
-                // The shader applies terraforming every frame when brush is pressed
-                // We need to match this frequency to get the same accumulation rate
-                // Note: This may be expensive, but it's necessary to match GPU behavior
-                
-                {
-                // Get brush strength - property is misspelled as "brushStrenth" in controls
-                const brushStrength = (controls as any).brushStrenth !== undefined ? (controls as any).brushStrenth : 
-                                    controls.brushStrength !== undefined ? controls.brushStrength : 0.5;
-                
-                threeRuntime!.applyTerraformingToGeometry(
-                  [brushPosX, brushPosY],
-                  controls.brushSize,
-                  brushStrength,
-                  controls.brushType,
-                  controls.brushOperation,
-                  flattenTargetHeight,
-                  slopeStartPos,
-                  slopeEndPos
-                );
-                }
-              }
-            } else if (controls.brushPressed === 0) {
-              // Brush released - mark terraforming as inactive
-              threeRuntime?.setTerraformingInactive();
-            }
+            // Terraforming is now handled GPU-side by the rain shader
+            // The rain shader modifies the heightmap texture, and the vertex shader
+            // uses VTF to displace vertices from the texture
+            // No CPU-side terraforming needed
             
             // Run simulation steps
             let timer = frameCount; // Use frame count as timer
@@ -2682,12 +2649,9 @@ function main() {
     const updateTriggeredByInterval = shouldUpdateGeometry(); // Periodic update during erosion
     
     if (shouldUpdateNow && (updateTriggeredByBrush || updateTriggeredByInterval)) {
-        // Skip geometry update if terraforming is active (prevents overwriting terraformed changes)
-        if (threeRuntime && threeRuntime.isTerraformingActive()) {
-            // Terraforming is active - don't overwrite geometry with heightmap
-            // The terraforming directly modifies geometry, so we skip the heightmap-based update
-            return;
-        }
+        // Terraforming is now GPU-based (rain shader modifies heightmap texture)
+        // Geometry is displaced via VTF in vertex shader, so we don't need to update geometry from heightmap
+        // BVH updates can proceed normally
         
         // Copy heightmap data to avoid race conditions (heightmap buffer might be overwritten)
         const heightmapCopy = new Float32Array(HightMapCpuBuf);
@@ -2702,12 +2666,8 @@ function main() {
                 return; // Safety check in case BVH was cleared during async delay
             }
             
-            // Double-check terraforming is still inactive (may have started during async delay)
-            if (threeRuntime && threeRuntime.isTerraformingActive()) {
-                return; // Skip update if terraforming became active
-            }
-            
-            // Update geometry positions with copied heightmap
+            // Update geometry positions with copied heightmap (for BVH raycasting)
+            // Note: Rendering uses VTF displacement, so geometry update is only for BVH
             updateTerrainGeometry(terrainGeometry, simres, heightmapCopy, 1.0);
             
             // Refit BVH bounding volumes to match updated geometry
