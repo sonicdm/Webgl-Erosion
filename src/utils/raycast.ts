@@ -199,8 +199,8 @@ export function rayCast(
             
             if (finalTexSpace[0] >= 0.0 && finalTexSpace[0] <= 1.0 && 
                 finalTexSpace[1] >= 0.0 && finalTexSpace[1] <= 1.0) {
-                let finalHval = sampleHeightBilinear(finalTexSpace, simres, HightMapCpuBuf);
-                let finalTerrainHeight = finalHval / simres;
+            let finalHval = sampleHeightBilinear(finalTexSpace, simres, HightMapCpuBuf);
+            let finalTerrainHeight = finalHval / simres;
                 
                 // Use resolution-dependent threshold for better precision at high resolutions
                 const threshold = 0.001 * (1024 / simres);
@@ -242,4 +242,3 @@ export function rayCast(
         totalDistance += step;
     }
 }
-

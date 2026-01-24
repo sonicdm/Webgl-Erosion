@@ -17,6 +17,8 @@ export interface TerrainProceduralMaterialParams {
   snowRange?: number;
   forestRange?: number;
   terrainPalette?: number; // 0 = AlpineMtn, 1 = Desert, 2 = Jungle
+  debugMode?: number;      // 0 = normal, 1..n debug visualization
+  debugScale?: number;     // scale for debug visualization (height normalization)
 }
 
 /**
@@ -30,7 +32,9 @@ export function createTerrainProceduralMaterial(params: TerrainProceduralMateria
     snowRange = 0.0,
     forestRange = 0.0,
     terrainPalette = 1, // Default to Desert
+    debugMode = 0, // Default normal
   } = params;
+  const debugScale = params.debugScale ?? Math.max(maxHeight - minHeight, 1.0);
 
   // Use RawShaderMaterial with GLSL 3.0 to support Vertex Texture Fetch (VTF)
   // VTF requires WebGL 2.0 / GLSL 3.0, which RawShaderMaterial supports
@@ -68,12 +72,15 @@ export function createTerrainProceduralMaterial(params: TerrainProceduralMateria
       u_Sediment: { value: dummySediment },   // Sediment texture (from sedimentPP)
       u_SimRes: { value: 1024.0 },  // Simulation resolution
       u_TerrainSize: { value: 1024.0 }, // Terrain world-space size (for normal calculation)
+      u_HeightDecodeScale: { value: 1.0 }, // Multiply stored height to get world units
       // Material uniforms
       u_MinHeight: { value: minHeight },
       u_MaxHeight: { value: maxHeight },
       u_SnowRange: { value: snowRange },
       u_ForestRange: { value: forestRange },
       u_TerrainPalette: { value: terrainPalette },
+      u_DebugMode: { value: debugMode },
+      u_DebugScale: { value: debugScale },
       // Brush uniforms
       u_BrushType: { value: 0 },
       u_BrushSize: { value: 0.0 },
@@ -152,8 +159,13 @@ export function updateTerrainProceduralMaterial(
   if (params.terrainPalette !== undefined && material.uniforms.u_TerrainPalette) {
     material.uniforms.u_TerrainPalette.value = params.terrainPalette;
   }
+  if ((params as any).debugMode !== undefined && material.uniforms.u_DebugMode) {
+    material.uniforms.u_DebugMode.value = (params as any).debugMode;
+  }
+  if ((params as any).debugScale !== undefined && material.uniforms.u_DebugScale) {
+    material.uniforms.u_DebugScale.value = (params as any).debugScale;
+  }
   
   // Mark material as needing update
   material.needsUpdate = true;
 }
-

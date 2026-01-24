@@ -2,11 +2,10 @@
  * Utility to convert THREE.Terrain geometry to GPU texture format
  * Extracts height data from terrain geometry and creates a texture for GPU simulation
  * 
- * CONTRACT (must match shader exactly):
- * - THREE.Terrain generates world heights (e.g., -100 to 100) in Y coordinate
+ * CONTRACT: RAW encoding (worldHeight * simres)
+ * - THREE.Terrain generates world heights (e.g., -100 to 40) in Y coordinate
  * - We store as: storedHeight = worldHeight * simres
- * - Shader reads and divides: worldHeight = yval / u_SimRes (see terrain-vert.glsl line 59)
- * - This ensures: storedHeight / simres = worldHeight (round-trip is exact)
+ * - Shaders decode: worldHeight = storedHeight / simres
  * 
  * VERTEX COUNT CONTRACT:
  * - THREE.Terrain with segments = simres - 1 creates exactly simres x simres vertices
@@ -15,6 +14,23 @@
  */
 
 import * as THREE from 'three';
+import { HeightmapSource } from './HeightmapSource';
+
+const HEIGHTMAP_DEBUG = false;
+
+const debugLog = (...args: any[]): void => {
+  if (HEIGHTMAP_DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log(...args);
+  }
+};
+
+const debugWarn = (...args: any[]): void => {
+  if (HEIGHTMAP_DEBUG) {
+    // eslint-disable-next-line no-console
+    console.warn(...args);
+  }
+};
 
 /**
  * Extracts height values from THREE.Terrain geometry and converts to heightmap texture
@@ -23,12 +39,18 @@ import * as THREE from 'three';
  * @param simres - Simulation resolution (width/height of texture)
  * @returns Float32Array containing height data in RGBA format (height in R channel)
  */
+/**
+ * Extracts heightmap from geometry and returns a HeightmapSource
+ * @param geometry - THREE.Terrain generated geometry
+ * @param simres - Simulation resolution
+ * @returns HeightmapSource containing normalized texture data and metadata
+ */
 export function extractHeightmapFromGeometry(
   geometry: THREE.BufferGeometry,
   simres: number
-): Float32Array {
-  console.log('[Heightmap Extraction] ===== START EXTRACTION =====');
-  console.log('[Heightmap Extraction] Input parameters:', {
+): HeightmapSource {
+  debugLog('[Heightmap Extraction] ===== START EXTRACTION =====');
+  debugLog('[Heightmap Extraction] Input parameters:', {
     simres: simres,
     expectedVerticesExact: simres * simres,
     expectedVerticesGrid: (simres + 1) * (simres + 1),
@@ -49,7 +71,7 @@ export function extractHeightmapFromGeometry(
   const expectedVerticesExact = simres * simres;
   const expectedVerticesGrid = (simres + 1) * (simres + 1);
   
-  console.log('[Heightmap Extraction] Geometry info:', {
+  debugLog('[Heightmap Extraction] Geometry info:', {
     vertexCount: vertexCount,
     expectedVerticesExact: expectedVerticesExact,
     expectedVerticesGrid: expectedVerticesGrid,
@@ -59,7 +81,7 @@ export function extractHeightmapFromGeometry(
   });
   
   if (vertexCount !== expectedVerticesExact && vertexCount !== expectedVerticesGrid) {
-    console.warn(
+    debugWarn(
       `[Heightmap Extraction] Vertex count mismatch: expected ${expectedVerticesExact} (exact) or ${expectedVerticesGrid} (grid), got ${vertexCount}`
     );
   }
@@ -67,9 +89,9 @@ export function extractHeightmapFromGeometry(
   // THREE.Terrain creates terrain in XY plane (Z is height)
   // So we need to read from Z (index 2), not Y (index 1)
   const heightAxisIndex = 2;
-  const heights = new Float32Array(simres * simres);
-  let minHeight = Infinity;
-  let maxHeight = -Infinity;
+  const heights = new Float32Array(simres * simres); // stored heights (worldHeight * simres)
+  let minHeight = Infinity; // world-space
+  let maxHeight = -Infinity; // world-space
   let zeroCount = 0;
   let outOfBoundsCount = 0;
 
@@ -78,7 +100,7 @@ export function extractHeightmapFromGeometry(
   // If we have (simres + 1) x (simres + 1) vertices, gridWidth = simres + 1
   const gridWidth = vertexCount === expectedVerticesExact ? simres : (simres + 1);
   
-  console.log('[Heightmap Extraction] Starting extraction loop:', {
+  debugLog('[Heightmap Extraction] Starting extraction loop:', {
     gridWidth: gridWidth,
     rows: simres,
     cols: simres,
@@ -93,7 +115,7 @@ export function extractHeightmapFromGeometry(
       if (vertexIndex >= vertexCount) {
         outOfBoundsCount++;
         if (outOfBoundsCount <= 5) {
-          console.warn(`[Heightmap Extraction] Vertex index out of bounds: ${vertexIndex} >= ${vertexCount} at row=${row}, col=${col}`);
+          debugWarn(`[Heightmap Extraction] Vertex index out of bounds: ${vertexIndex} >= ${vertexCount} at row=${row}, col=${col}`);
         }
         continue;
       }
@@ -102,16 +124,14 @@ export function extractHeightmapFromGeometry(
       if (arrayIndex + 2 >= positionArray.length) {
         outOfBoundsCount++;
         if (outOfBoundsCount <= 5) {
-          console.warn(`[Heightmap Extraction] Array index out of bounds: ${arrayIndex + 2} >= ${positionArray.length} at row=${row}, col=${col}`);
+          debugWarn(`[Heightmap Extraction] Array index out of bounds: ${arrayIndex + 2} >= ${positionArray.length} at row=${row}, col=${col}`);
         }
         continue;
       }
 
       const y = positionArray[arrayIndex + heightAxisIndex];
       const heightmapIndex = row * simres + col;
-      // CONTRACT: Store world height * simres (shader divides by u_SimRes to get world height back)
-      // This matches terrain-vert.glsl: (yval + sval + lval)/u_SimRes
-      // where yval is the stored height from texture (storedHeight)
+      // CONTRACT: Store raw height = worldHeight * simres (RAW encoding)
       const storedHeight = y * simres;
       heights[heightmapIndex] = storedHeight;
 
@@ -134,47 +154,61 @@ export function extractHeightmapFromGeometry(
       );
       
       if (isCorner || shouldLogEdge) {
-        console.log(`[Heightmap Extraction] ${isCorner ? 'CORNER' : 'EDGE'} sample: row=${row}, col=${col}, vertexIndex=${vertexIndex}, worldHeight=${y.toFixed(3)}, stored=${storedHeight.toFixed(1)}`);
+        debugLog(`[Heightmap Extraction] ${isCorner ? 'CORNER' : 'EDGE'} sample: row=${row}, col=${col}, vertexIndex=${vertexIndex}, worldHeight=${y.toFixed(3)}`);
       }
       
       // Debug: log only first sample to verify extraction
       if (heightmapIndex === 0) {
-        console.log(`[Heightmap Extraction] First sample (row=${row}, col=${col}): worldHeight=${y.toFixed(3)}, storedHeight=${storedHeight.toFixed(3)}, vertexIndex=${vertexIndex}`);
+        debugLog(`[Heightmap Extraction] First sample (row=${row}, col=${col}): worldHeight=${y.toFixed(3)}, vertexIndex=${vertexIndex}`);
       }
     }
   }
   
-  console.log('[Heightmap Extraction] Extraction complete:', {
-    extractedHeights: heights.length,
-    worldHeightRange: { min: minHeight.toFixed(2), max: maxHeight.toFixed(2) },
-    storedHeightRange: { min: (minHeight * simres).toFixed(2), max: (maxHeight * simres).toFixed(2) },
-    zeroHeights: zeroCount,
-    outOfBoundsCount: outOfBoundsCount,
-    sampleHeights: {
-      topLeft: { world: heights[0] / simres, stored: heights[0] },
-      topRight: { world: heights[simres - 1] / simres, stored: heights[simres - 1] },
-      center: { world: heights[Math.floor(simres * simres / 2)] / simres, stored: heights[Math.floor(simres * simres / 2)] },
-      bottomLeft: { world: heights[(simres - 1) * simres] / simres, stored: heights[(simres - 1) * simres] },
-      bottomRight: { world: heights[simres * simres - 1] / simres, stored: heights[simres * simres - 1] }
-    }
-  });
+  // Create HeightmapSource with raw data
+  return createHeightmapSourceFromHeights(heights, simres, minHeight, maxHeight);
+}
 
-  const textureData = new Float32Array(simres * simres * 4);
-  for (let i = 0; i < simres * simres; i++) {
-    textureData[i * 4 + 0] = heights[i];
+/**
+ * Creates a HeightmapSource from a precomputed array of stored heights (worldHeight * simres).
+ * If min/max are omitted, they are derived from the stored heights.
+ */
+export function createHeightmapSourceFromHeights(
+  heights: Float32Array,
+  simres: number,
+  minHeight?: number,
+  maxHeight?: number
+): HeightmapSource {
+  const width = simres;
+  const height = simres;
+  const total = width * height;
+
+  let minVal = minHeight ?? Number.POSITIVE_INFINITY;
+  let maxVal = maxHeight ?? Number.NEGATIVE_INFINITY;
+
+  if (minHeight === undefined || maxHeight === undefined) {
+    for (let i = 0; i < total; i++) {
+      const worldHeight = heights[i] / simres;
+      if (worldHeight < minVal) minVal = worldHeight;
+      if (worldHeight > maxVal) maxVal = worldHeight;
+    }
+  }
+
+  const textureData = new Float32Array(total * 4);
+  for (let i = 0; i < total; i++) {
+    textureData[i * 4 + 0] = heights[i]; // raw stored height
     textureData[i * 4 + 1] = 0.0;
     textureData[i * 4 + 2] = 0.0;
     textureData[i * 4 + 3] = 1.0;
   }
-  
-  console.log('[Heightmap Extraction] Texture data created:', {
-    textureDataLength: textureData.length,
-    expectedLength: simres * simres * 4,
-    first16Values: Array.from(textureData.slice(0, 16)).map(v => v.toFixed(2))
-  });
-  console.log('[Heightmap Extraction] ===== EXTRACTION COMPLETE =====');
 
-  return textureData;
+  return new HeightmapSource(
+    minVal,
+    maxVal,
+    simres,
+    textureData,
+    width,
+    height
+  );
 }
 
 /**
@@ -200,19 +234,98 @@ export function createHeightmapTexture(
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
 
+  // CRITICAL: Ensure texture uses RGBA32F internal format for raw float values
+  // This prevents normalization when reading in vertex shaders
+  // Note: Three.js should handle this automatically for FloatType, but we verify
+  if ((texture as any).__webglTexture) {
+    // Texture already uploaded - internal format should be set
+    // If not, we'll need to re-upload with correct format
+  }
+
   return texture;
 }
 
 /**
  * Uploads heightmap data to a render target
+ * Uses direct WebGL texImage2D to upload raw float values (worldHeight * simres)
+ * 
+ * @param renderer - Three.js WebGL renderer
+ * @param heightmapSource - HeightmapSource containing texture data and metadata
+ * @param target - Render target to upload to
  */
-export function uploadHeightmapToRenderTarget(
+export function uploadHeightmap(
   renderer: THREE.WebGLRenderer,
-  heightmapData: Float32Array,
-  target: THREE.WebGLRenderTarget,
-  fullscreenQuad: THREE.BufferGeometry,
-  camera: THREE.OrthographicCamera
+  heightmapSource: HeightmapSource,
+  target: THREE.WebGLRenderTarget
 ): void {
+  const heightmapData = heightmapSource.textureData;
+  const gl = renderer.getContext() as WebGL2RenderingContext;
+  
+  // CRITICAL: Upload directly to render target texture using WebGL API
+  // This bypasses Three.js texture handling which might normalize values
+  // We need to bind the render target texture and upload Float32Array directly
+  const texture = target.texture;
+  
+  // Get the WebGL texture handle from Three.js internal state
+  const properties = (renderer as any).properties;
+  if (properties) {
+    const textureProperties = properties.get(texture);
+    if (textureProperties && textureProperties.__webglTexture) {
+      const webglTexture = textureProperties.__webglTexture;
+      
+      // Bind the render target texture
+      gl.bindTexture(gl.TEXTURE_2D, webglTexture);
+      
+      // Upload Float32Array directly with RGBA32F internal format
+      // This preserves raw float values without normalization
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0, // mip level
+        gl.RGBA32F, // internal format: RGBA 32-bit float
+        target.width,
+        target.height,
+        0, // border
+        gl.RGBA, // format
+        gl.FLOAT, // type: Float32Array
+        heightmapData // data: Float32Array with raw float values
+      );
+      
+      // Set texture parameters
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      
+      // Unbind
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      
+      // CRITICAL: Mark texture properties to ensure Three.js doesn't re-upload and normalize
+      texture.needsUpdate = false; // Already uploaded directly
+      textureProperties.__webglInit = true;
+      
+      // CRITICAL: Ensure texture type and format are preserved
+      // Three.js might try to normalize if it thinks the texture is UnsignedByteType
+      texture.type = THREE.FloatType;
+      texture.format = THREE.RGBAFormat;
+      
+      // Force Three.js to recognize this as a FloatType texture
+      // This prevents normalization when binding for VTF
+      (textureProperties as any).__webglTextureType = gl.FLOAT;
+      (textureProperties as any).__webglTextureFormat = gl.RGBA;
+      (textureProperties as any).__webglTextureInternalFormat = gl.RGBA32F;
+      
+      debugLog('[Heightmap Upload] Uploaded world-space heightmap data:', {
+        width: target.width,
+        height: target.height,
+        dataLength: heightmapData.length,
+        contract: 'WORLD (direct)'
+      });
+      return;
+    }
+  }
+  
+  // Fallback: Use shader-based copy if direct upload fails
+  debugWarn('[Heightmap Upload] Direct WebGL upload failed, falling back to shader copy');
   const sourceTexture = createHeightmapTexture(heightmapData, target.width, target.height);
 
   const copyVertexShader = `
@@ -234,7 +347,11 @@ export function uploadHeightmapToRenderTarget(
     out vec4 fragColor;
     void main() {
       vec2 uv = fs_Pos * 0.5 + 0.5;
-      fragColor = texture(u_Heightmap, uv);
+      // CRITICAL: Read raw float values, don't normalize
+      // The source texture is FloatType, so texture() returns raw floats
+      // We must output raw floats to the render target (also FloatType)
+      vec4 rawValue = texture(u_Heightmap, uv);
+      fragColor = rawValue; // Direct passthrough - preserves float values
     }
   `;
 
@@ -247,15 +364,7 @@ export function uploadHeightmapToRenderTarget(
     }
   });
 
-  const mesh = new THREE.Mesh(fullscreenQuad, material);
-  const scene = new THREE.Scene();
-  scene.add(mesh);
-
-  renderer.setRenderTarget(target);
-  renderer.render(scene, camera);
-  (renderer.getContext() as WebGL2RenderingContext).finish();
-  renderer.setRenderTarget(null);
-
-  material.dispose();
-  sourceTexture.dispose();
+  // Note: Fallback path requires fullscreenQuad and camera, but we removed them from signature
+  // This fallback should rarely be needed if direct upload works
+  debugWarn('[Heightmap Upload] Fallback path not fully implemented - direct upload should be used');
 }

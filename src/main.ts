@@ -102,6 +102,8 @@ const controlscomp = {
     TerrainHeight : 2.0,
     TerrainMask : 0,//0 off, 1 sphere
     TerrainDebug : 0,
+    DebugMode: 0,
+    UseSimHeightmap: false,
     WaterTransparency : 0.50,
     SedimentTrace : 0, // 0 on, 1 off
     TerrainPlatte : 1, // 0 normal alphine mtn, 1 desert, 2 jungle

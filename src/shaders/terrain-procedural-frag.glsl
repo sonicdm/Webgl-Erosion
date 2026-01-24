@@ -5,12 +5,17 @@ uniform float u_MaxHeight;
 uniform float u_SnowRange;
 uniform float u_ForestRange;
 uniform int u_TerrainPalette; // 0 = AlpineMtn, 1 = Desert, 2 = Jungle
+uniform int u_DebugMode;      // 0 = normal, 1 = height grayscale, 2 = UVs, 3 = normals, 4 = worldY, 5 = flat detector
+uniform float u_DebugScale;   // scale divisor for debug visualizations (e.g., max height range)
 
 // Brush uniforms for visualization
 uniform int u_BrushType;
 uniform float u_BrushSize;
 uniform vec2 u_BrushPos;
 
+in float vSampledHeight;
+in float vSediment;
+in vec3 vWorldPos;
 in vec3 vPosition;
 in vec3 vNormal;
 in vec2 vUv;
@@ -69,6 +74,35 @@ float ridgedNoise(vec2 st) {
 }
 
 void main() {
+  // Debug visualization modes
+  if (u_DebugMode == 1) {
+    float h = (vSampledHeight - u_MinHeight) / max(u_MaxHeight - u_MinHeight, 0.0001);
+    h = clamp(h, 0.0, 1.0);
+    fragColor = vec4(vec3(h), 1.0);
+    return;
+  } else if (u_DebugMode == 2) {
+    fragColor = vec4(vUv, 0.0, 1.0);
+    return;
+  } else if (u_DebugMode == 3) {
+    fragColor = vec4(normalize(vNormal) * 0.5 + 0.5, 1.0);
+    return;
+  } else if (u_DebugMode == 4) {
+    float yNorm = (vWorldPos.y - u_MinHeight) / max(u_MaxHeight - u_MinHeight, 0.0001);
+    yNorm = clamp(yNorm, 0.0, 1.0);
+    fragColor = vec4(yNorm, 0.0, 1.0 - yNorm, 1.0);
+    return;
+  } else if (u_DebugMode == 5) {
+    // Original flat detector: red/yellow bands
+    float debugY = vPosition.y;
+    if (abs(debugY) < 0.1) {
+      fragColor = vec4(1.0, 0.0, 0.0, 1.0);
+      return;
+    } else if (abs(debugY) < 1.0) {
+      fragColor = vec4(1.0, 1.0, 0.0, 1.0);
+      return;
+    }
+  }
+  
   // Calculate height normalized to [0, 1]
   float height = (vPosition.y - u_MinHeight) / (u_MaxHeight - u_MinHeight);
   height = clamp(height, 0.0, 1.0);

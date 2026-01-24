@@ -28,14 +28,8 @@ import {
     clearAllLavaSources,
     getLavaSourceCount
 } from '../utils/lava-sources';
-import {
-    MAX_LAVA_SOURCES,
-    addLavaSource,
-    removeNearestLavaSource,
-    clearAllLavaSources,
-    getLavaSourceCount
-} from '../utils/lava-sources';
 import { simres, HightMapCpuBuf } from '../simulation/simulation-state';
+import { ThreeJSSimulationRuntime } from '../three/integration';
 import Camera from '../Camera';
 
 export interface Controls {
@@ -288,4 +282,3 @@ export function createEventHandlers(
         onMouseUp
     };
 }
-

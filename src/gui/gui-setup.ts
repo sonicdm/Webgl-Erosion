@@ -251,25 +251,50 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
         }
     });
     
-    // Rendering Parameters
-    var renderingpara = gui.addFolder('Rendering Parameters');
-    renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);
-    const terrainPaletteController = renderingpara.add(controls, 'TerrainPlatte', { AlpineMtn: 0, Desert: 1, Jungle: 2 });
-    const snowRangeController = renderingpara.add(controls, 'SnowRange', 0.0, 100.0);
-    const forestRangeController = renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
-    
-    // Update terrain material when rendering parameters change
-    if (threeRuntime) {
-      terrainPaletteController.onFinishChange(() => {
-        threeRuntime.updateMaterialFromControls();
+  // Rendering Parameters
+  var renderingpara = gui.addFolder('Rendering Parameters');
+  renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);
+
+  // Ensure DebugMode exists on controls to avoid dat-gui runtime errors
+  if (!(controls as any).hasOwnProperty('DebugMode')) {
+    (controls as any).DebugMode = 0;
+  }
+  // Opt-in to live heightmap from simulation (otherwise uses initial CPU texture)
+  if (!(controls as any).hasOwnProperty('UseSimHeightmap')) {
+    (controls as any).UseSimHeightmap = false;
+  }
+
+  const terrainPaletteController = renderingpara.add(controls, 'TerrainPlatte', { AlpineMtn: 0, Desert: 1, Jungle: 2 });
+  const snowRangeController = renderingpara.add(controls, 'SnowRange', 0.0, 100.0);
+  const forestRangeController = renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
+  const useSimHeightmapController = renderingpara.add(controls as any, 'UseSimHeightmap');
+  const threeDebugController = renderingpara.add(controls as any, 'DebugMode', {
+    Normal: 0,
+    HeightGray: 1,
+    UVs: 2,
+    Normals: 3,
+    WorldY: 4,
+    FlatDetector: 5
+  });
+  
+  // Update terrain material when rendering parameters change
+  if (threeRuntime) {
+    terrainPaletteController.onFinishChange(() => {
+      threeRuntime.updateMaterialFromControls();
       });
-      snowRangeController.onFinishChange(() => {
-        threeRuntime.updateMaterialFromControls();
-      });
-      forestRangeController.onFinishChange(() => {
-        threeRuntime.updateMaterialFromControls();
-      });
-    }
+    snowRangeController.onFinishChange(() => {
+      threeRuntime.updateMaterialFromControls();
+    });
+    forestRangeController.onFinishChange(() => {
+      threeRuntime.updateMaterialFromControls();
+    });
+    useSimHeightmapController.onFinishChange(() => {
+      threeRuntime.updateMaterialFromControls();
+    });
+    threeDebugController.onFinishChange(() => {
+      threeRuntime.updateMaterialFromControls();
+    });
+  }
     renderingpara.add(controls, 'ShowFlowTrace');
     renderingpara.add(controls, 'SedimentTrace');
     renderingpara.add(controls, 'showScattering');

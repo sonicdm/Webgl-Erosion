@@ -5,7 +5,8 @@ import { MRTRenderTarget } from '../gpgpu/MRTRenderTarget';
 import { PassRunner } from '../gpgpu/PassRunner';
 import quadVert from '../../shaders/quad-vert.glsl?raw';
 // import { generateTerrain, getTerrainMethod, getEasing, TerrainOptions } from '../terrain/THREE.Terrain'; // Skipped for now - using simple procedural
-import { extractHeightmapFromGeometry, uploadHeightmapToRenderTarget } from '../utils/terrain-heightmap-converter';
+import { extractHeightmapFromGeometry, uploadHeightmap } from '../utils/terrain-heightmap-converter';
+import { HeightmapSource } from '../utils/HeightmapSource';
 import { ensureTerrainLibrary } from '../terrain/THREE.Terrain';
 import { createCustomTerrainHeightmap } from '../terrain/custom-terrain-algorithms';
 
@@ -40,6 +41,7 @@ export class SimulationPassManager {
   private initialHeightmap: Float32Array | null = null; // Store initial heightmap for readback
   private terrainMesh: THREE.Mesh | null = null; // Store generated mesh for rendering
   private rainPassDebugCounter: number = 0; // Counter for throttled debug logging
+  private heightmapSource: HeightmapSource | null = null; // Heightmap data and metadata
 
   // Ping-pong targets
   private terrainPP: PingPongTarget;
@@ -485,7 +487,21 @@ export class SimulationPassManager {
       
       // THREE.Terrain creates terrain in XY plane (Z is height)
       // Extract heightmap data BEFORE rotating (extractor expects Z to be height)
-      const heightmapData = extractHeightmapFromGeometry(terrainMesh.geometry, this.simres);
+      this.heightmapSource = extractHeightmapFromGeometry(terrainMesh.geometry, this.simres);
+      if (this.heightmapSource) {
+        let min = this.heightmapSource.minHeight;
+        let max = this.heightmapSource.maxHeight;
+        const tex = this.heightmapSource.textureData;
+        console.log('[Terrain Generation] HeightmapSource stats:', {
+          simres: this.simres,
+          minHeight: min,
+          maxHeight: max,
+          textureDataLength: tex.length,
+          firstSample: tex[0],
+          midSample: tex[Math.floor(tex.length / 2)] || 'N/A',
+          lastSample: tex[tex.length - 4] || 'N/A'
+        });
+      }
       
       // Now rotate the GEOMETRY to XZ plane (Y is height) for rendering
       // This matches the fallback approach - actually modifies vertex positions
@@ -493,14 +509,8 @@ export class SimulationPassManager {
       terrainMesh.geometry.computeVertexNormals();
       terrainMesh.geometry.computeBoundingBox();
       
-      console.log('[Terrain Generation] Heightmap extracted:', {
-        dataLength: heightmapData.length,
-        expectedLength: this.simres * this.simres * 4,
-        vertexCount: terrainMesh.geometry.attributes.position.count
-      });
-      
       // Store heightmap for initial terrain geometry (avoid GPU readback issues)
-      this.initialHeightmap = new Float32Array(heightmapData);
+      this.initialHeightmap = new Float32Array(this.heightmapSource.textureData);
       
       // Store the terrain mesh for later use (we'll use it for rendering)
       // THREE.Terrain returns a Scene with the mesh as first child - use it directly
@@ -534,13 +544,13 @@ export class SimulationPassManager {
       this.terrainMesh.geometry.computeBoundingBox();
       
       // Upload heightmap to terrainPP ping-pong target
-      uploadHeightmapToRenderTarget(
-        this.renderer,
-        heightmapData,
-        this.terrainPP.getWriteTarget(),
-        this.fullscreenQuad,
-        this.camera
-      );
+      if (this.heightmapSource) {
+        uploadHeightmap(
+          this.renderer,
+          this.heightmapSource,
+          this.terrainPP.getWriteTarget()
+        );
+      }
       
       // Swap ping-pong so initial terrain is in read position
       this.terrainPP.swap();
@@ -1138,6 +1148,18 @@ export class SimulationPassManager {
   public getTerrainMesh(): THREE.Mesh | null {
     return this.terrainMesh;
   }
+  
+  public getHeightmapSource(): HeightmapSource | null {
+    return this.heightmapSource;
+  }
+  
+  public getStoredHeightRange(): { min: number; max: number } {
+    // Legacy method for compatibility - returns world height range
+    if (this.heightmapSource) {
+      return { min: this.heightmapSource.minHeight, max: this.heightmapSource.maxHeight };
+    }
+    return { min: 0, max: 0 };
+  }
 
   public getSedimentTexture(): THREE.Texture {
     return this.sedimentPP.getReadTexture();
@@ -1204,4 +1226,3 @@ export class SimulationPassManager {
     this.lavaTerrainPass.dispose();
   }
 }
-

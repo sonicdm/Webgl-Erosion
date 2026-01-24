@@ -21,6 +21,7 @@ export class PingPongTarget {
 
   /**
    * Creates a render target with RGBA32F format for simulation data
+   * CRITICAL: Must use RGBA32F internal format for raw float values (not normalized)
    */
   private createRenderTarget(width: number, height: number): THREE.WebGLRenderTarget {
     const target = new THREE.WebGLRenderTarget(width, height, {
@@ -34,6 +35,16 @@ export class PingPongTarget {
       depthBuffer: false,
       stencilBuffer: false,
     });
+
+    // CRITICAL: Explicitly set internal format to RGBA32F to ensure raw float values
+    // Without this, Three.js might use a normalized format
+    const gl = (target as any).__webglContext;
+    if (gl) {
+      const texture = target.texture;
+      // Force RGBA32F internal format for raw float values
+      // This ensures vertex shaders read raw floats, not normalized [0,1] values
+      (texture as any).internalFormat = gl.RGBA32F || 0x8814; // RGBA32F
+    }
 
     return target;
   }
