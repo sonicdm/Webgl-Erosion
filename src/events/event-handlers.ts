@@ -28,9 +28,11 @@ import {
     clearAllLavaSources,
     getLavaSourceCount
 } from '../utils/lava-sources';
-import { simres, HightMapCpuBuf } from '../simulation/simulation-state';
+import { simres, HightMapCpuBuf } from '../simulation/simulation-state'; // @deprecated - will be replaced with state holders
 import { ThreeJSSimulationRuntime } from '../three/integration';
 import Camera from '../Camera';
+import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
+import { TerrainStateHolder } from '../app/state/TerrainStateHolder';
 
 export interface Controls {
     [key: string]: any;
@@ -61,6 +63,9 @@ export interface EventHandlerDependencies {
     controls: Controls;
     controlsConfig: ControlsConfig;
     simres: number;
+    // Optional state holders (for new code paths)
+    simulationState?: SimulationStateHolder;
+    terrainState?: TerrainStateHolder;
 }
 
 export function createEventHandlers(
@@ -223,14 +228,19 @@ export function createEventHandlers(
         
         if (action === 'brushActivate') {
             // Use dependency injection - prefer Three.js runtime buffer if available
-            const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() || deps?.heightMapBuffer || HightMapCpuBuf;
+            const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() 
+                || deps?.terrainState?.heightMapCpuBuf 
+                || deps?.heightMapBuffer 
+                || HightMapCpuBuf;
             
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
-                simres: deps?.simres || Number(simres), // Use injected simres if available
+                simres: deps?.simulationState?.simres || deps?.simres || Number(simres), // Use injected simres if available
                 HightMapCpuBuf: heightMapBuffer,
-                camera: camera
+                camera: camera,
+                simulationState: deps?.simulationState,
+                terrainState: deps?.terrainState
             };
             
             const result = handleBrushMouseDown(event, brushContext);
@@ -256,14 +266,19 @@ export function createEventHandlers(
             controls.brushPressed = 0;
             
             // Use dependency injection - prefer Three.js runtime buffer if available
-            const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() || deps?.heightMapBuffer || HightMapCpuBuf;
+            const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() 
+                || deps?.terrainState?.heightMapCpuBuf 
+                || deps?.heightMapBuffer 
+                || HightMapCpuBuf;
             
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
-                simres: deps?.simres || Number(simres), // Use injected simres if available
+                simres: deps?.simulationState?.simres || deps?.simres || Number(simres), // Use injected simres if available
                 HightMapCpuBuf: heightMapBuffer,
-                camera: camera
+                camera: camera,
+                simulationState: deps?.simulationState,
+                terrainState: deps?.terrainState
             };
             
             handleBrushMouseUp(event, brushContext);

@@ -14,6 +14,8 @@ import { createTerrainGeometry, updateTerrainGeometry } from '../utils/terrain-g
 import { createTerrainProceduralMaterial, updateTerrainProceduralMaterial } from './materials/terrain-procedural-material';
 import { getWaterSourceCount, waterSources as waterSourcesList, MAX_WATER_SOURCES } from '../utils/water-sources';
 import { getLavaSourceCount, lavaSources as lavaSourcesList, MAX_LAVA_SOURCES } from '../utils/lava-sources';
+import { SimulationParams, createSimulationParams } from '../app/dto/SimulationParams';
+import { BrushInput } from '../app/dto/BrushInput';
 import { createHeightmapTexture } from './utils/terrain-heightmap-converter';
 import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { setTerrainGeometry, setTerrainBVH, setTerrainBVHBuildInProgress, terrainBVHBuildInProgress, terrainBVH, terrainGeometry } from '../simulation/simulation-state';
@@ -136,12 +138,12 @@ export class ThreeJSSimulationRuntime {
 
   /**
    * Executes one simulation step
-   * @param controls - Simulation controls/parameters
+   * @param controls - Simulation controls/parameters (can be SimulationParams or legacy controls object)
    * @param timer - Time value for shaders (optional, defaults to 0)
    * @param brushState - Brush state (mouse world pos/dir, brush pos) (optional)
    */
   public executeSimulationStep(
-    controls: any,
+    controls: SimulationParams | any,
     timer: number = 0,
     brushState?: {
       mouseWorldPos?: [number, number, number, number];
@@ -154,6 +156,11 @@ export class ThreeJSSimulationRuntime {
     }
     
     // Removed debug logging - was causing performance issues
+    
+    // Convert controls to SimulationParams if needed (backward compatibility)
+    const simParams: SimulationParams = controls.simres !== undefined 
+      ? controls as SimulationParams 
+      : createSimulationParams(controls, this.simres);
     
     // Build water source arrays
     const waterSourceCount = getWaterSourceCount();

@@ -2,6 +2,12 @@ import {vec2} from 'gl-matrix';
 import { BufferGeometry } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 
+/**
+ * @deprecated This module uses global state and will be replaced by state holders.
+ * Use SimulationStateHolder, TerrainStateHolder, and ClientStateHolder from src/app/state/
+ * instead. These globals are kept for backward compatibility during migration.
+ */
+
 // Simulation state variables
 export const simresolution = 1024;
 export const shadowMapResolution = 4096;

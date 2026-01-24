@@ -1,6 +1,7 @@
 import { getHeightMapTexture, setHeightMapTexture, read_terrain_tex, frame_buffer } from '../simulation/texture-management';
-import { setTerrainGeometryDirty } from '../simulation/simulation-state';
-import * as simulationState from '../simulation/simulation-state';
+import { setTerrainGeometryDirty } from '../simulation/simulation-state'; // @deprecated - will be replaced with state holders
+import * as simulationState from '../simulation/simulation-state'; // @deprecated - will be replaced with state holders
+import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 
 export interface Controls {
     TerrainHeight: number;
@@ -15,7 +16,8 @@ let reusableCanvasContext: CanvasRenderingContext2D | null = null;
 export function createHeightMapLoader(
     gl_context: WebGL2RenderingContext,
     simres: number,
-    controls: Controls
+    controls: Controls,
+    simulationState?: SimulationStateHolder // Optional state holder for new code paths
 ) {
     function loadHeightMap() {
         const input = document.createElement('input');
@@ -87,7 +89,11 @@ export function createHeightMapLoader(
                     setHeightMapTexture(heightmap_tex);
                     
                     // Mark terrain as dirty to regenerate
-                    setTerrainGeometryDirty(true);
+                    if (simulationState) {
+                        simulationState.terrainGeometryDirty = true;
+                    } else {
+                        setTerrainGeometryDirty(true); // Fallback to global
+                    }
                     console.log('Height map loaded successfully');
                 };
                 img.src = event.target?.result as string;
@@ -102,7 +108,11 @@ export function createHeightMapLoader(
         if (heightmap_tex) {
             gl_context.deleteTexture(heightmap_tex);
             setHeightMapTexture(null);
-            setTerrainGeometryDirty(true);
+            if (simulationState) {
+                simulationState.terrainGeometryDirty = true;
+            } else {
+                setTerrainGeometryDirty(true); // Fallback to global
+            }
             console.log('Height map cleared, using procedural generation');
         }
     }
@@ -114,7 +124,9 @@ export function createHeightMapLoader(
         }
 
         // Get current resolution from controls (this is the source of truth for current resolution)
-        const currentRes = Number(controls.SimulationResolution) || simulationState.simres;
+        const currentRes = Number(controls.SimulationResolution) 
+            || simulationState?.simres 
+            || simulationState.simres; // Fallback to global
 
         // Create temporary buffer for reading heightmap data
         const bufferSize = currentRes * currentRes * 4;
@@ -204,7 +216,9 @@ export function createHeightMapLoader(
         }
 
         // Get current resolution from controls (this is the source of truth for current resolution)
-        const currentRes = Number(controls.SimulationResolution) || simulationState.simres;
+        const currentRes = Number(controls.SimulationResolution) 
+            || simulationState?.simres 
+            || simulationState.simres; // Fallback to global
 
         // Create temporary buffer for reading heightmap data
         const bufferSize = currentRes * currentRes * 4;

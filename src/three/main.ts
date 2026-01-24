@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { simres } from '../simulation/simulation-state';
+import { simres } from '../simulation/simulation-state'; // @deprecated - not used, will be removed
 
 // Ensure THREE is available globally for THREE.Terrain and other UMD modules
 if (typeof window !== 'undefined') {
@@ -60,9 +60,11 @@ export function createThreeJSRenderer(
   }
 
   // Create Three.js renderer with existing WebGL2 context
+  // Typescript typing issue: Three.js expects WebGLRenderingContext, but WebGL2RenderingContext extends it.
+  // We can cast glContext to WebGLRenderingContext to satisfy the type checker.
   const renderer = new THREE.WebGLRenderer({
     canvas: canvas,
-    context: glContext,
+    context: glContext as unknown as WebGLRenderingContext,
     powerPreference: 'high-performance',
     antialias: false, // Disable for performance
     preserveDrawingBuffer: false,

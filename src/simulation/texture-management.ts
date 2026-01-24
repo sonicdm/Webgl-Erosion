@@ -1,4 +1,5 @@
-import { simres, shadowMapResolution } from './simulation-state';
+import { simres, shadowMapResolution } from './simulation-state'; // @deprecated - will be replaced with state holders
+import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 
 // We need to get gl_context from the caller, so we'll pass it as a parameter
 let gl_context: WebGL2RenderingContext;
@@ -88,36 +89,41 @@ function LE_create_screen_texture(w: number, h: number, samplingType: number): W
     return new_tex;
 }
 
-export function resizeTextures4Simulation(context: WebGL2RenderingContext, simres: number): void {
+export function resizeTextures4Simulation(
+    context: WebGL2RenderingContext, 
+    simres: number,
+    simulationState?: SimulationStateHolder // Optional state holder for new code paths
+): void {
     gl_context = context;
+    const currentSimres = simulationState?.simres ?? simres;
     let simulationTextureSampler = gl_context.LINEAR;
     // recreate all textures related to simulation
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_terrain_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_terrain_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_flux_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_flux_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_terrain_flux_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_terrain_flux_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_maxslippage_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_maxslippage_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_vel_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_vel_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_sediment_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_sediment_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, terrain_nor);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_sediment_blend);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_sediment_blend);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, sediment_advect_a);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, sediment_advect_b);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_lava_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_lava_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_lava_flux_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_lava_flux_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_terrain_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_terrain_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_flux_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_flux_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_terrain_flux_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_terrain_flux_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_maxslippage_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_maxslippage_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_vel_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_vel_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_sediment_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_sediment_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, terrain_nor);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_sediment_blend);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_sediment_blend);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, sediment_advect_a);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, sediment_advect_b);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_lava_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_lava_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, read_lava_flux_tex);
+    LE_recreate_texture(currentSimres, currentSimres, simulationTextureSampler, write_lava_flux_tex);
 
     // recreate all framebuffer/renderbuffer related to simulation
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, render_buffer);
     gl_context.renderbufferStorage(gl_context.RENDERBUFFER, gl_context.DEPTH_COMPONENT16,
-        simres, simres);
+        currentSimres, currentSimres);
 
     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);

@@ -4,7 +4,8 @@ import OpenGLRenderer from './gl/OpenGLRenderer';
 import Camera from '../Camera';
 import ShaderProgram from './gl/ShaderProgram';
 import { frame_buffer, render_buffer, getHeightMapTexture } from '../simulation/texture-management';
-import { simres } from '../simulation/simulation-state';
+import { simres } from '../simulation/simulation-state'; // @deprecated - will be replaced with state holders
+import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 
 export function Render2Texture(
     renderer: OpenGLRenderer,
@@ -13,11 +14,13 @@ export function Render2Texture(
     shader: ShaderProgram,
     cur_texture: WebGLTexture,
     square: Square,
-    noiseterrain: ShaderProgram | null
+    noiseterrain: ShaderProgram | null,
+    simulationState?: SimulationStateHolder // Optional state holder for new code paths
 ): void {
+    const currentSimres = simulationState?.simres ?? simres;
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, render_buffer);
     gl_context.renderbufferStorage(gl_context.RENDERBUFFER, gl_context.DEPTH_COMPONENT16,
-        simres, simres);
+        currentSimres, currentSimres);
 
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, cur_texture, 0);
@@ -38,7 +41,7 @@ export function Render2Texture(
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
-    gl_context.viewport(0, 0, simres, simres);
+    gl_context.viewport(0, 0, currentSimres, currentSimres);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
     renderer.clear();
     shader.use();
