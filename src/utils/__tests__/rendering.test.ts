@@ -8,9 +8,9 @@
 import { BufferGeometry, BufferAttribute } from 'three';
 import { createTerrainGeometry } from '../terrain-geometry-builder';
 
-// Skip these tests in Jest due to ESM/CommonJS compatibility issues with three.js
-// They can be run manually in a browser environment
-describe.skip('Rendering Pipeline', () => {
+// Rendering pipeline tests
+// Note: These tests use createTerrainGeometry which should work in Jest
+describe('Rendering Pipeline', () => {
     function createMockWebGL2Context(): WebGL2RenderingContext | null {
         // In a real test environment, you might use headless-gl or similar
         // For now, we'll test the geometry creation which doesn't require WebGL
