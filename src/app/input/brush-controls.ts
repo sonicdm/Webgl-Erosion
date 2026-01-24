@@ -176,7 +176,10 @@ export function calculateBrushInput(
         simulationState: appContext.simulationState,
         terrainState: appContext.terrainStateHolder,
       };
-      updateBrushState(brushState.brushPos, brushContext);
+      if (brushState.brushPos) {
+        const brushPosVec2 = vec2.fromValues(brushState.brushPos[0], brushState.brushPos[1]);
+        updateBrushState(brushPosVec2, brushContext);
+      }
     }
   }
 

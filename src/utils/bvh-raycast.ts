@@ -57,17 +57,17 @@ export function rayCastBVH(
         // Try with a small upward offset first (most reliable for flat terrain)
         const offsetOrigin = origin.clone().addScaledVector(new Vector3(0, 1, 0), 0.001);
         const offsetRay = new Ray(offsetOrigin, direction);
-        hit = bvh.raycastFirst(offsetRay, maxDistance);
+        hit = (bvh.raycastFirst as any)(offsetRay, maxDistance);
         
         // If offset ray didn't hit, try original
         if (!hit || hit.distance < 0) {
             const ray = new Ray(origin, direction);
-            hit = bvh.raycastFirst(ray, maxDistance);
+            hit = (bvh.raycastFirst as any)(ray, maxDistance);
         }
     } else {
         // For normal rays, use standard approach
         const ray = new Ray(origin, direction);
-        hit = bvh.raycastFirst(ray, maxDistance);
+        hit = (bvh.raycastFirst as any)(ray, maxDistance);
     }
     
     if (hit && hit.distance >= 0) {
@@ -77,7 +77,7 @@ export function rayCastBVH(
         
         // Use triangle interpolation to get UV coordinates from geometry
         // This is more reliable than world position conversion since the geometry has proper UVs
-        const hitInfo = getTriangleHitPointInfo(hit.point, geometry, hit.faceIndex, {});
+        const hitInfo = getTriangleHitPointInfo(hit.point, geometry, hit.faceIndex, {} as any);
         
         if (hitInfo && hitInfo.uv) {
             // Use interpolated UV from triangle
