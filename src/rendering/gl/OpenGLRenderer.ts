@@ -3,7 +3,6 @@ import Drawable from './Drawable';
 import Camera from '../../Camera';
 import {gl} from '../../globals';
 import ShaderProgram from './ShaderProgram';
-import {isNumber} from "util";
 
 // In this file, `gl` is accessible because it is imported above
 class OpenGLRenderer {    counter : number;
