@@ -1,4 +1,3 @@
-import { WebGL2RenderingContext } from 'webgl2';
 import { vec2, vec3 } from 'gl-matrix';
 import { BufferGeometry } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
@@ -167,7 +166,10 @@ class RaycasterService implements IRaycaster {
     if (method === 'heightmap') {
       const buffer = this.terrainState.heightMapCpuBuf;
       const simres = this.simState.simres;
-      return rayCast(rayOrigin, rayDirection, simres, buffer, out);
+      rayCast(rayOrigin, rayDirection, simres, buffer, out);
+      // Check if a valid hit was found (out[0] and out[1] should be in [0, 1] range)
+      // rayCast sets out to [-10, -10] when no hit is found
+      return out[0] >= 0 && out[0] <= 1 && out[1] >= 0 && out[1] <= 1;
     }
 
     return false;

@@ -60,7 +60,7 @@ import { createShaders, Shaders } from './rendering/shader-factory';
 import { THREEJS_CONFIG } from './three/config';
 import { ThreeJSSimulationRuntime } from './three/integration';
 import { createTerrainIO } from './three/utils/terrain-io';
-import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner } from './app';
+import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner, createLegacyRunner } from './app';
 
 // Note: Most state variables are now imported from simulation-state.ts
 // Additional local variables
@@ -275,15 +275,15 @@ function loadScene() {
   waterPlane.create();
 }
 
+// Helper functions - will be updated in main() to use AppContext
+// These are placeholders that will be replaced with AppContext-aware versions
 function StartGeneration(){
     setPauseGeneration(!PauseGeneration);
 }
 
-
 // Reset function - receives threeRuntime via closure from main()
 // This is set up after threeRuntime is created
 // Note: resetWithThreeRuntime is declared at module level (line 1322)
-
 function Reset(){
     setSimFramecnt(0);
     setTerrainRandom();
@@ -1383,6 +1383,67 @@ function main() {
   // Set up context (canvas, GL, resize handling)
   const contextSetup = createAppContextSetup(appContext);
 
+  // Update helper functions to use AppContext state holders
+  // These functions are called from the GUI, so we create wrappers that have access to appContext
+  const createAppContextHelpers = (appContext: AppContext) => {
+    // Update StartGeneration to use AppContext
+    const startGenerationWrapper = () => {
+      appContext.simulationState.pauseGeneration = !appContext.simulationState.pauseGeneration;
+      // Also update global state for backward compatibility (legacy code still uses it)
+      setPauseGeneration(appContext.simulationState.pauseGeneration);
+    };
+    
+    // Update Reset to use AppContext
+    const resetWrapper = () => {
+      appContext.simulationState.simFramecnt = 0;
+      setSimFramecnt(0); // Also update global for backward compatibility
+      
+      // Update terrain random
+      const angle = Math.random() * Math.PI * 2.0;
+      terrainRandom.duneDir[0] = Math.cos(angle);
+      terrainRandom.duneDir[1] = Math.sin(angle);
+      terrainRandom.craterDensity = 0.8 + Math.random() * 0.7;
+      terrainRandom.canyonDepth = 0.45 + Math.random() * 0.5;
+      terrainRandom.seedOffset[0] = Math.random() * 256.0;
+      terrainRandom.seedOffset[1] = Math.random() * 256.0;
+      
+      appContext.simulationState.terrainGeometryDirty = true;
+      setTerrainGeometryDirty(true); // Also update global for backward compatibility
+      
+      // Call the injected reset handler if available
+      if (resetWithThreeRuntime) {
+        resetWithThreeRuntime(threeRuntime);
+      }
+    };
+    
+    // Update setTerrainRandom to use AppContext
+    const setTerrainRandomWrapper = () => {
+      const angle = Math.random() * Math.PI * 2.0;
+      terrainRandom.duneDir[0] = Math.cos(angle);
+      terrainRandom.duneDir[1] = Math.sin(angle);
+      terrainRandom.craterDensity = 0.8 + Math.random() * 0.7;
+      terrainRandom.canyonDepth = 0.45 + Math.random() * 0.5;
+      terrainRandom.seedOffset[0] = Math.random() * 256.0;
+      terrainRandom.seedOffset[1] = Math.random() * 256.0;
+      
+      appContext.simulationState.terrainGeometryDirty = true;
+      setTerrainGeometryDirty(true); // Also update global for backward compatibility
+    };
+    
+    return {
+      startGeneration: startGenerationWrapper,
+      reset: resetWrapper,
+      setTerrainRandom: setTerrainRandomWrapper,
+    };
+  };
+  
+  const helpers = createAppContextHelpers(appContext);
+  
+  // Update controls object with AppContext-aware helpers
+  controls['Pause/Resume'] = helpers.startGeneration;
+  controls['ResetTerrain'] = helpers.reset;
+  controls['setTerrainRandom'] = helpers.setTerrainRandom;
+
   // Create camera first (needed for event handlers)
   const brushUsesLeftClickForCamera = controlsConfig.mouse.brushActivate === 'LEFT' || 
                                        (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
@@ -1413,6 +1474,9 @@ function main() {
       controls: controls,
       controlsConfig: controlsConfig,
       simres: simres,
+      // Pass state holders for new code paths
+      simulationState: appContext.simulationState,
+      terrainState: appContext.terrainStateHolder,
     };
     
     // Verify camera in deps matches parameter (DI consistency check)
@@ -2978,21 +3042,53 @@ function main() {
     requestAnimationFrame(tick);
   }
 
-  window.addEventListener('resize', function() {
+  // Create legacy runner with all dependencies
+  // NOTE: The tick() function inside legacy-runner is still a placeholder
+  // Full extraction of tick() (~1200 lines) and SimulatePerStep() (~900 lines) will be done incrementally
+  // For now, we keep using the tick() function defined in main.ts to maintain functionality
+  const legacyRunner = createLegacyRunner({
+    appContext,
+    controls,
+    canvas,
+    glContext: gl_context,
+    renderer,
+    camera,
+    shaders: {
+      lambert,
+      flat,
+      flow,
+      waterhight,
+      sediment,
+      sediadvect,
+      macCormack,
+      rains,
+      evaporation,
+      average,
+      clean,
+      water,
+      thermalterrainflux,
+      thermalapply,
+      maxslippageheight,
+      shadowMapShader,
+      sceneDepthShader,
+      combinedShader,
+      bilateralBlur,
+      veladvect,
+      lavaFlow,
+      lavaUpdate,
+      lavaTerrain,
+      noiseterrain,
+    },
+    geometries: {
+      square,
+      plane,
+    },
+    terrainRandom,
+  });
 
-    resizeScreenTextures();
-
-    renderer.setSize(window.innerWidth, window.innerHeight);
-
-    camera.setAspectRatio(window.innerWidth / window.innerHeight);
-    camera.updateProjectionMatrix();
-  }, false);
-
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.setAspectRatio(window.innerWidth / window.innerHeight);
-  camera.updateProjectionMatrix();
-
-  // Start the render loop
+  // TODO: Once tick() is fully extracted to legacy-runner.ts, use: legacyRunner.start()
+  // For now, keep using the tick() function in main.ts to maintain functionality
+  // Start the render loop (using tick() from main.ts until full extraction is complete)
   tick();
 }
 

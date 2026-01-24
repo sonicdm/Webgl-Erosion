@@ -21,8 +21,8 @@ export interface WebGL2MockContext {
   linkProgram: (program: WebGLProgram) => void;
   getProgramParameter: (program: WebGLProgram, pname: number) => any;
   getProgramInfoLog: (program: WebGLProgram) => string | null;
-  // Override to return non-null for testing (production code expects non-null)
-  getUniformLocation: (program: WebGLProgram, name: string) => WebGLUniformLocation;
+  // Returns non-null only if uniform exists in shader (matches real WebGL behavior)
+  getUniformLocation: (program: WebGLProgram, name: string) => WebGLUniformLocation | null;
   getAttribLocation: (program: WebGLProgram, name: string) => number;
   VERTEX_SHADER: number;
   FRAGMENT_SHADER: number;
@@ -45,7 +45,7 @@ export function createWebGL2Mock(): WebGL2MockContext {
   let shaderIdCounter = 0;
   let programIdCounter = 0;
   const shaders = new Map<WebGLShader, { type: number; source: string; compiled: boolean; error: string | null }>();
-  const programs = new Map<WebGLProgram, { linked: boolean; error: string | null; shaders: WebGLShader[] }>();
+  const programs = new Map<WebGLProgram, { linked: boolean; error: string | null; shaders: WebGLShader[]; uniforms: Set<string> }>();
 
   // Basic GLSL validation - checks for common errors
   function validateShaderSource(source: string, type: number): string | null {
@@ -59,6 +59,19 @@ export function createWebGL2Mock(): WebGL2MockContext {
     const closeBraces = (source.match(/}/g) || []).length;
     if (openBraces !== closeBraces) {
       return `Mismatched braces: ${openBraces} open, ${closeBraces} close`;
+    }
+
+    // Check for mismatched parentheses
+    let parenDepth = 0;
+    for (let i = 0; i < source.length; i++) {
+      if (source[i] === '(') parenDepth++;
+      else if (source[i] === ')') parenDepth--;
+      if (parenDepth < 0) {
+        return 'Mismatched parentheses: closing paren without opening';
+      }
+    }
+    if (parenDepth !== 0) {
+      return 'Mismatched parentheses: unclosed parentheses';
     }
 
     // Check for required precision in fragment shader
@@ -117,7 +130,7 @@ export function createWebGL2Mock(): WebGL2MockContext {
 
     createProgram(): WebGLProgram | null {
       const program = `program_${programIdCounter++}` as any;
-      programs.set(program, { linked: false, error: null, shaders: [] });
+      programs.set(program, { linked: false, error: null, shaders: [], uniforms: new Set() });
       return program;
     },
 
@@ -144,6 +157,22 @@ export function createWebGL2Mock(): WebGL2MockContext {
         return;
       }
 
+      // Parse all shader sources to extract declared uniforms
+      programData.uniforms.clear();
+      for (const shader of programData.shaders) {
+        const shaderData = shaders.get(shader);
+        if (shaderData?.source) {
+          // Extract uniform declarations using regex
+          // Matches: uniform type name;
+          // Examples: uniform mat4 u_ViewProj; uniform float u_Time;
+          const uniformRegex = /uniform\s+\w+\s+(\w+)\s*[;\[\)]/g;
+          let match;
+          while ((match = uniformRegex.exec(shaderData.source)) !== null) {
+            programData.uniforms.add(match[1]);
+          }
+        }
+      }
+
       // Basic validation: check for matching attribute/uniform names
       // (This is simplified - real linking does more validation)
       programData.linked = true;
@@ -164,13 +193,18 @@ export function createWebGL2Mock(): WebGL2MockContext {
       return programData?.error || null;
     },
 
-    getUniformLocation(program: WebGLProgram, name: string): WebGLUniformLocation {
-      // Return a mock uniform location (always non-null for testing)
-      // In real WebGL, this would parse the shader to find the uniform
-      // For testing, we always return a location to match production code expectations
-      // Production code doesn't handle null uniform locations, so mock always returns a value
-      // Type assertion needed because mock returns string but TypeScript expects WebGLUniformLocation
-      return `uniform_${name}` as any as WebGLUniformLocation;
+    getUniformLocation(program: WebGLProgram, name: string): WebGLUniformLocation | null {
+      const programData = programs.get(program);
+      if (!programData) return null;
+      
+      // Only return non-null if the uniform was declared in the shader
+      // This properly tests that uniforms are found when they exist
+      if (programData.uniforms.has(name)) {
+        return `uniform_${name}` as any as WebGLUniformLocation;
+      }
+      
+      // Return null if uniform doesn't exist (matches real WebGL behavior)
+      return null;
     },
 
     getAttribLocation(program: WebGLProgram, name: string): number {

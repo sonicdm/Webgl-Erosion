@@ -5,13 +5,17 @@ import * as TerrainUniforms from './uniforms/TerrainUniforms';
 import * as BrushUniforms from './uniforms/BrushUniforms';
 import * as SimulationUniforms from './uniforms/SimulationUniforms';
 
-var activeProgram: WebGLProgram = null;
+var activeProgram: WebGLProgram | null = null;
 
 export class Shader {
   shader: WebGLShader;
 
   constructor(type: number, source: string) {
-    this.shader = gl.createShader(type);
+    const shader = gl.createShader(type);
+    if (!shader) {
+      throw new Error('Failed to create shader');
+    }
+    this.shader = shader;
     gl.shaderSource(this.shader, source);
     gl.compileShader(this.shader);
 
@@ -29,50 +33,54 @@ class ShaderProgram {
   attrCol: number;
   attrUv : number;
 
-  unifModel: WebGLUniformLocation;
-  unifModelInvTr: WebGLUniformLocation;
-  unifViewProj: WebGLUniformLocation;
-  unifColor: WebGLUniformLocation;
-  unifPlanePos: WebGLUniformLocation;
-  unifSpanwPos: WebGLUniformLocation;
-  unifMouseWorldPos : WebGLUniformLocation;
-  unifMouseWorldDir : WebGLUniformLocation;
+  unifModel: WebGLUniformLocation | null;
+  unifModelInvTr: WebGLUniformLocation | null;
+  unifViewProj: WebGLUniformLocation | null;
+  unifColor: WebGLUniformLocation | null;
+  unifPlanePos: WebGLUniformLocation | null;
+  unifSpanwPos: WebGLUniformLocation | null;
+  unifMouseWorldPos : WebGLUniformLocation | null;
+  unifMouseWorldDir : WebGLUniformLocation | null;
 
 
-  unifSimRes : WebGLUniformLocation;
-  unifPipeLen : WebGLUniformLocation;
-  unifKs : WebGLUniformLocation;
-  unifKc : WebGLUniformLocation;
-  unifKd : WebGLUniformLocation;
-  unifRockErosionResistance : WebGLUniformLocation;
-  unifTimestep : WebGLUniformLocation;
-  unifPipeArea : WebGLUniformLocation;
+  unifSimRes : WebGLUniformLocation | null;
+  unifPipeLen : WebGLUniformLocation | null;
+  unifKs : WebGLUniformLocation | null;
+  unifKc : WebGLUniformLocation | null;
+  unifKd : WebGLUniformLocation | null;
+  unifRockErosionResistance : WebGLUniformLocation | null;
+  unifTimestep : WebGLUniformLocation | null;
+  unifPipeArea : WebGLUniformLocation | null;
 
-  unifRef: WebGLUniformLocation;
-  unifEye: WebGLUniformLocation;
-  unifUp: WebGLUniformLocation;
-  unifDimensions: WebGLUniformLocation;
-  unifTime : WebGLUniformLocation;
-  unifWaterTransparency : WebGLUniformLocation;
+  unifRef: WebGLUniformLocation | null;
+  unifEye: WebGLUniformLocation | null;
+  unifUp: WebGLUniformLocation | null;
+  unifDimensions: WebGLUniformLocation | null;
+  unifTime : WebGLUniformLocation | null;
+  unifWaterTransparency : WebGLUniformLocation | null;
 
-  unifRndTerrain : WebGLUniformLocation;
-  unifTerrainType : WebGLUniformLocation;
-  unifTerrainDebug : WebGLUniformLocation;
-  unifTerrainScale : WebGLUniformLocation;
-  unifTerrainHeight : WebGLUniformLocation;
+  unifRndTerrain : WebGLUniformLocation | null;
+  unifTerrainType : WebGLUniformLocation | null;
+  unifTerrainDebug : WebGLUniformLocation | null;
+  unifTerrainScale : WebGLUniformLocation | null;
+  unifTerrainHeight : WebGLUniformLocation | null;
 
-  unifBrushType : WebGLUniformLocation;
-  unifBrushSize : WebGLUniformLocation;
-  unifBrushStrength : WebGLUniformLocation;
-  unifBrushOperation : WebGLUniformLocation;
-  unifBrushPressed : WebGLUniformLocation;
-  unifBrusPos : WebGLUniformLocation;
+  unifBrushType : WebGLUniformLocation | null;
+  unifBrushSize : WebGLUniformLocation | null;
+  unifBrushStrength : WebGLUniformLocation | null;
+  unifBrushOperation : WebGLUniformLocation | null;
+  unifBrushPressed : WebGLUniformLocation | null;
+  unifBrusPos : WebGLUniformLocation | null;
 
   // Cache for uniform locations to avoid expensive getUniformLocation calls
-  private uniformLocationCache: Map<string, WebGLUniformLocation> = new Map();
+  private uniformLocationCache: Map<string, WebGLUniformLocation | null> = new Map();
 
   constructor(shaders: Array<Shader>) {
-    this.prog = gl.createProgram();
+    const prog = gl.createProgram();
+    if (!prog) {
+      throw new Error('Failed to create program');
+    }
+    this.prog = prog;
 
     for (let shader of shaders) {
       gl.attachShader(this.prog, shader.shader);
@@ -89,6 +97,7 @@ class ShaderProgram {
     this.unifModel      = gl.getUniformLocation(this.prog, "u_Model");
     this.unifModelInvTr = gl.getUniformLocation(this.prog, "u_ModelInvTr");
     this.unifViewProj   = gl.getUniformLocation(this.prog, "u_ViewProj");
+    this.unifColor      = gl.getUniformLocation(this.prog, "u_Color");
     this.unifPlanePos   = gl.getUniformLocation(this.prog, "u_PlanePos");
     this.unifSpanwPos = gl.getUniformLocation(this.prog, "u_SpawnPos");
     this.unifMouseWorldPos =  gl.getUniformLocation(this.prog, "u_MouseWorldPos");
@@ -134,11 +143,11 @@ class ShaderProgram {
 
   setModelMatrix(model: mat4) {
     this.use();
-    if (this.unifModel !== -1) {
+    if (this.unifModel !== null) {
       gl.uniformMatrix4fv(this.unifModel, false, model);
     }
 
-    if (this.unifModelInvTr !== -1) {
+    if (this.unifModelInvTr !== null) {
       let modelinvtr: mat4 = mat4.create();
       mat4.transpose(modelinvtr, model);
       mat4.invert(modelinvtr, modelinvtr);
@@ -148,7 +157,7 @@ class ShaderProgram {
 
   setViewProjMatrix(vp: mat4) {
     this.use();
-    if (this.unifViewProj !== -1) {
+    if (this.unifViewProj !== null) {
       gl.uniformMatrix4fv(this.unifViewProj, false, vp);
     }
   }
@@ -159,7 +168,7 @@ class ShaderProgram {
       this.uniformLocationCache.set(name, loc);
       return loc;
     }
-    return this.uniformLocationCache.get(name)!;
+    return this.uniformLocationCache.get(name) ?? null;
   }
 
   setInt(f : number, name : string){
@@ -186,21 +195,21 @@ class ShaderProgram {
   }
   setTime(t:number){
     this.use();
-    if(this.unifTime!==-1){
+    if(this.unifTime !== null){
       gl.uniform1f(this.unifTime,t);
     }
   }
 
   setWaterTransparency(t:number){
     this.use();
-    if(this.unifWaterTransparency!==-1){
+    if(this.unifWaterTransparency !== null){
       gl.uniform1f(this.unifWaterTransparency,t);
     }
   }
 
     setDimensions(width: number, height: number) {
         this.use();
-        if(this.unifDimensions !== -1) {
+        if(this.unifDimensions !== null) {
             gl.uniform2f(this.unifDimensions, width, height);
         }
     }
@@ -267,7 +276,7 @@ class ShaderProgram {
   setSourceStrengths(strengths: Float32Array) {
     this.use();
     const loc = this.getUniformLocation("u_SourceStrengths");
-    if (loc !== -1) {
+    if (loc !== null) {
       gl.uniform1fv(loc, strengths);
     }
   }
@@ -290,7 +299,7 @@ class ShaderProgram {
 
   setSpawnPos(pos: vec2) {
     this.use();
-    if (this.unifSpanwPos !== -1) {
+    if (this.unifSpanwPos !== null) {
       gl.uniform2fv(this.unifSpanwPos, pos);
     }
   }
@@ -299,14 +308,14 @@ class ShaderProgram {
 
   setMouseWorldPos(pos : vec4){
     this.use();
-    if(this.unifMouseWorldPos !== -1){
+    if(this.unifMouseWorldPos !== null){
       gl.uniform4fv(this.unifMouseWorldPos, pos);
     }
   }
 
   setMouseWorldDir(dir : vec3){
     this.use();
-    if(this.unifMouseWorldDir !== -1){
+    if(this.unifMouseWorldDir !== null){
       gl.uniform3fv(this.unifMouseWorldDir, dir);
     }
   }
@@ -317,19 +326,19 @@ class ShaderProgram {
     }
   setPlanePos(pos: vec2) {
     this.use();
-    if (this.unifPlanePos !== -1) {
+    if (this.unifPlanePos !== null) {
       gl.uniform2fv(this.unifPlanePos, pos);
     }
   }
     setEyeRefUp(eye: vec3, ref: vec3, up: vec3) {
         this.use();
-        if(this.unifEye !== -1) {
+        if(this.unifEye !== null) {
             gl.uniform3f(this.unifEye, eye[0], eye[1], eye[2]);
         }
-        if(this.unifRef !== -1) {
+        if(this.unifRef !== null) {
             gl.uniform3f(this.unifRef, ref[0], ref[1], ref[2]);
         }
-        if(this.unifUp !== -1) {
+        if(this.unifUp !== null) {
             gl.uniform3f(this.unifUp, up[0], up[1], up[2]);
         }
     }

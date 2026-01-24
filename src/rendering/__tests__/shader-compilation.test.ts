@@ -87,9 +87,9 @@ describe('Shader Compilation', () => {
       // No main() function
     `;
 
-    const shader = new Shader(mockGL.VERTEX_SHADER, invalidSource);
-    expect(mockGL.getShaderParameter(shader.shader, mockGL.COMPILE_STATUS)).toBe(0);
-    expect(mockGL.getShaderInfoLog(shader.shader)).toContain('main()');
+    expect(() => {
+      new Shader(mockGL.VERTEX_SHADER, invalidSource);
+    }).toThrow('Shader must contain a main() function');
   });
 
   test('should create and link a shader program', () => {
@@ -135,15 +135,14 @@ describe('Shader Compilation', () => {
     `;
 
     const vertexShader = new Shader(mockGL.VERTEX_SHADER, validVertex);
-    const fragmentShader = new Shader(mockGL.FRAGMENT_SHADER, invalidFragment);
-
-    // Fragment shader should fail to compile
-    expect(mockGL.getShaderParameter(fragmentShader.shader, mockGL.COMPILE_STATUS)).toBe(0);
-
-    // Program should fail to link
+    
+    // Fragment shader should fail to compile and throw
     expect(() => {
-      new ShaderProgram([vertexShader, fragmentShader]);
-    }).toThrow();
+      new Shader(mockGL.FRAGMENT_SHADER, invalidFragment);
+    }).toThrow('Shader must contain a main() function');
+
+    // Since fragment shader creation throws, we can't create a program with it
+    // This test verifies that invalid shaders are caught at creation time
   });
 
   test('should retrieve uniform locations', () => {

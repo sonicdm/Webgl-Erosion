@@ -1,4 +1,3 @@
-import { WebGL2RenderingContext } from 'webgl2';
 import { AppContext } from './bootstrap';
 import { resizeScreenTextures } from '../simulation/texture-management';
 

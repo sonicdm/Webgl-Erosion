@@ -2,7 +2,7 @@ import {vec2} from 'gl-matrix';
 import {gl} from '../../../globals';
 
 // Cache for uniform locations per program
-const uniformLocationCache = new Map<WebGLProgram, Map<string, WebGLUniformLocation>>();
+const uniformLocationCache = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
 
 function getCachedUniformLocation(prog: WebGLProgram, name: string): WebGLUniformLocation | null {
     let progCache = uniformLocationCache.get(prog);

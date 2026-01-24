@@ -19,6 +19,7 @@
 - Terrain height extraction stores raw heights and reuses `createHeightmapSourceFromHeights` helper for consistency.
 - Added Jest coverage for height encoding, HeightmapSource uniform block, stored-height creation, geometry extraction, and upload path RGBA32F handling (`src/three/utils/__tests__/heightmap-source.test.ts`).
 - Heightmap extraction logs are gated behind a DEBUG flag to keep tests and CI clean.
+- Workstream A delivered: bootstrap/services/DTO/state holders under `src/app/*` plus Jest coverage (bootstrap services, context setup, DTO packers, state holders).
 
 ## Progress — 2026-01-24 (Workstream A Complete)
 - **Composition Root**: Created `src/app/bootstrap.ts` with full service interfaces and implementations:
@@ -135,7 +136,7 @@
 - Manual smoke: launch legacy path and Three path separately; verify controls still map (brush, water/lava sources, BVH raycast toggle).
 
 ## Status by Workstream (as of 2026-01-24)
-- **A (composition root)**: ✅ **COMPLETE** - Bootstrap created with all services, DTOs defined, state holders implemented. Files migrated to optionally use state holders (backward compatible). Ready for integration in Workstream B.
+- **A (composition root)**: ✅ COMPLETE — Bootstrap/services/DTO/state holders in `src/app/*`; tests added for services, context setup, DTO packers, state holders.
 - **B (entry split)**: Not started; `main.ts` still monolithic. Can now use `createApp()` from bootstrap.
 - **C (Three runtime split)**: Not started; `integration.ts` still one class; no `TerrainSetup/TerrainSync` extraction. `executeSimulationStep()` now accepts `SimulationParams`.
 - **D (pass manager restructure)**: Not started; `SimulationPassManager` unchanged structurally.
