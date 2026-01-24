@@ -5,7 +5,7 @@ import {setGL} from './globals';
 import ShaderProgram from './rendering/gl/ShaderProgram';
 import { ControlsConfig, getMouseButtonAction, isModifierPressed } from './controls-config';
 import { loadSettings } from './settings';
-import { setupGUI, GUIControllers } from './gui/gui-setup';
+import { setupGUI, GUIControllers, type Controls } from './gui/gui-setup';
 import { createEventHandlers, EventHandlerDependencies } from './events/event-handlers';
 import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
 import { updatePaletteSelection } from './brush-palette';
@@ -53,7 +53,7 @@ import { createShaders, Shaders } from './rendering/shader-factory';
 import { THREEJS_CONFIG } from './three/config';
 import { ThreeJSSimulationRuntime } from './three/integration';
 import { createTerrainIO } from './three/utils/terrain-io';
-import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner, createLegacyRunner, initializeLegacyPipeline, type AppContext } from './app';
+import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner, createLegacyRunner, initializeLegacyPipeline, createControls, type AppContext } from './app';
 import { setTerrainRandom, type TerrainRandomParams } from './utils/terrain-random';
 
 // Note: Most state variables are now imported from simulation-state.ts
@@ -64,119 +64,8 @@ var gl_context : WebGL2RenderingContext;
 
 
 
-// controlscomp removed - was backup/legacy object, no longer used
-
-
-const controls = {
-    tesselations: 5,
-    pipelen:  0.8,//
-    Kc : 0.06,
-    Ks : 0.036,
-    Kd : 0.006,
-    timestep : 0.05,
-    pipeAra :  0.6,
-    ErosionMode : 0, // 0 river erosion, 1 : mountain erosion, 2 : polygonal mode
-    RainErosion : false, //
-    RainErosionStrength : 0.2,
-    RainErosionDropSize : 2.0,
-    EvaporationConstant : 0.003,
-    VelocityMultiplier : 1,
-    RainDegree : 4.5,
-    AdvectionSpeedScaling : 1.0,
-    spawnposx : 0.5,
-    spawnposy : 0.5,
-    posTemp : vec2.fromValues(0.0,0.0),
-    'Pause/Resume' :StartGeneration,
-    'ResetTerrain' : Reset,
-    'setTerrainRandom':setTerrainRandom,
-    'Import Height Map': () => {}, // Will be set in main() after gl_context is available
-    'Clear Height Map': () => {}, // Will be set in main() after gl_context is available
-    'Export Height Map': () => {}, // Will be set in main() after gl_context is available
-    SimulationSpeed : 3,
-    TerrainBaseMap : 0,
-    TerrainBaseType : 0,//0 ordinary fbm, 1 domain warping, 2 terrace, 3 voroni
-    TerrainBiomeType : 1,
-    TerrainScale : 3.2,
-    TerrainHeight : 2.0,
-    TerrainMask : 0,//0 off, 1 sphere
-    TerrainDebug : 0,
-    WaterTransparency : 0.50,
-    SedimentTrace : true, // 0 on, 1 off
-    ShowFlowTrace : false,
-    TerrainPlatte : 1, // 0 normal alphine mtn, 1 desert, 2 jungle
-    SnowRange : 0,
-    ForestRange : 0,
-    brushType : 2, // 0 : no brush, 1 : terrain, 2 : water, 3 : rock, 4 : smooth, 5 : flatten, 6 : slope
-    brushSize : 4,
-    brushStrenth : 0.25,
-    brushOperation : 0, // 0 : add, 1 : subtract
-    brushPressed : 0, // 0 : not pressed, 1 : pressed
-    raycastMethod : 'bvh' as 'heightmap' | 'bvh', // Raycast method: 'heightmap' or 'bvh' (will be overridden by settings)
-    flattenTargetHeight : 0.0, // Target height for flatten brush (will be set to center height on Alt+click)
-    slopeStartPos : vec2.fromValues(0.0, 0.0), // Start position for slope brush
-    slopeEndPos : vec2.fromValues(0.0, 0.0), // End position for slope brush
-    slopeActive : 0, // 0 : not active, 1 : start set, 2 : end set
-    sourceCount : 0, // Number of active water sources
-    rockErosionResistance : 0.8, // 0.0 = erodes normally, 1.0 = doesn't erode (multiplier for Ks/Kc) - increased default so rock actually erodes much slower
-    thermalTalusAngleScale : 8.0,
-    thermalRate : 0.5,
-    thermalErosionScale : 1.0,
-    lightPosX : 0.4,
-    lightPosY : 0.8,
-    lightPosZ : -0.0,
-    showScattering : true,
-    enableBilateralBlur : true,
-    AdvectionMethod : 1,
-    VelocityAdvectionMag : 0.2,
-    SimulationResolution : simres,
-    // Lava physics parameters
-    LavaViscosityPreExp : 1e-5,
-    LavaActivationEnergy : 200000.0,
-    LavaDensity : 2700.0,
-    LavaSpecificHeat : 1200.0,
-    LavaAirHeatTransfer : 200.0, // Increased from 30.0 (6-7x faster cooling)
-    LavaWaterHeatTransfer : 2000.0,
-    LavaAmbientTemp : 20.0,
-    LavaWaterTemp : 10.0,
-    LavaContactHeatTransfer : 200.0,
-    LavaMeltThreshold : 1200.0,
-    LavaLatentHeatFusion : 400000.0,
-    LavaSolidificationTemp : 800.0,
-    LavaInitialTemp : 1200.0,
-    LavaGlowIntensity : 2.0,
-    LavaPatternFrequency : 8.0, // Pattern frequency/scale for lava texture detail
-    LavaSourceCount : 0, // Number of active lava sources
-    'Reset Erosion Parameters': () => {
-        // Reset all erosion parameters to defaults
-        controls.Kc = 0.06;
-        controls.Ks = 0.036;
-        controls.Kd = 0.006;
-        controls.ErosionMode = 0;
-        controls.EvaporationConstant = 0.003;
-        controls.VelocityMultiplier = 1;
-        controls.VelocityAdvectionMag = 0.2;
-        controls.AdvectionMethod = 1;
-        controls.RainErosion = false;
-        controls.RainErosionStrength = 0.2;
-        controls.RainErosionDropSize = 2.0;
-        
-        // Update GUI controllers to reflect the changes
-        const controllers = (window as any).erosionControllers;
-        if (controllers) {
-            controllers.kcController.updateDisplay();
-            controllers.ksController.updateDisplay();
-            controllers.kdController.updateDisplay();
-            controllers.erosionModeController.updateDisplay();
-            controllers.evaporationController.updateDisplay();
-            controllers.velocityMultiplierController.updateDisplay();
-            controllers.velocityAdvectionController.updateDisplay();
-            controllers.advectionMethodController.updateDisplay();
-            controllers.rainErosionController.updateDisplay();
-            controllers.rainErosionStrengthController.updateDisplay();
-            controllers.rainErosionDropSizeController.updateDisplay();
-        }
-    },
-};
+// Controls object is now created via createControls() factory function in main()
+let controls: Controls;
 
 
 
@@ -262,6 +151,17 @@ function main() {
 
   // Load settings (from localStorage or defaults)
   controlsConfig = loadSettings();
+  
+  // Create controls object using factory function
+  // Callbacks will be set up after helpers are created
+  controls = createControls({
+    callbacks: {
+      startGeneration: StartGeneration,
+      resetTerrain: Reset,
+      setTerrainRandom: () => setTerrainRandom(terrainRandom),
+      // Heightmap loader functions will be set later in main()
+    },
+  });
   
   // Apply raycast method from settings
   controls.raycastMethod = controlsConfig.raycast.method;

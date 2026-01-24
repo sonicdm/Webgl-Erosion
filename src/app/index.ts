@@ -40,3 +40,6 @@ export { calculateBrushInput, normalizeMousePosition, updateBrushInputFromContro
 export { createThreeRunner, type ThreeRunnerResult } from './runtime/three-runner';
 export { createLegacyRunner, type LegacyRunnerResult, type LegacyRunnerConfig } from './runtime/legacy-runner';
 export { initializeLegacyPipeline, type LegacyInitializationResult } from './runtime/legacy-initialization';
+
+// Controls
+export { createControls, type CreateControlsOptions } from './controls/controls-factory';
