@@ -1,5 +1,6 @@
 import { ThreeJSRuntime } from '../main';
 import { SimulationPassManager } from '../simulation/SimulationPassManager';
+import { SimulationParams } from '../../app/dto/SimulationParams';
 import * as THREE from 'three';
 import { createTerrainGeometry, updateTerrainGeometry } from '../../utils/terrain-geometry-builder';
 import { createTerrainProceduralMaterial, updateTerrainProceduralMaterial } from '../materials/terrain-procedural-material';
@@ -20,7 +21,7 @@ export class TerrainSync {
     private runtime: ThreeJSRuntime,
     private simres: number,
     private passManager: SimulationPassManager | null,
-    private controls: any // Will be replaced with SimulationParams in Phase 6
+    private controls: SimulationParams | any // SimulationParams preferred, but accept legacy controls for backward compatibility
   ) {}
 
   /**
@@ -572,7 +573,7 @@ export class TerrainSync {
    * Updates material uniforms with current simulation state (for real-time terraforming)
    * Called from render loop to update textures and uniforms
    */
-  public updateMaterialUniforms(controls: any, passManager: SimulationPassManager | null): void {
+  public updateMaterialUniforms(controls: SimulationParams | any, passManager: SimulationPassManager | null): void {
     if (!this.terrainMesh) {
       return;
     }
@@ -657,7 +658,7 @@ export class TerrainSync {
    * Updates material parameters from controls
    * Can be called with controls parameter or use stored this.controls
    */
-  public updateMaterialFromControls(controls?: any): void {
+  public updateMaterialFromControls(controls?: SimulationParams | any): void {
     // Update stored controls if provided
     if (controls) {
       this.controls = controls;

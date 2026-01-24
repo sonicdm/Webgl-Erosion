@@ -1,4 +1,5 @@
 import { SimulationPassManager } from '../simulation/SimulationPassManager';
+import { SimulationParams } from '../../app/dto/SimulationParams';
 
 /**
  * Heightmap bridge service
@@ -25,7 +26,7 @@ export class HeightmapBridge {
    * This is called during simulation initialization
    */
   public async initializeTextures(
-    controls: any,
+    controls: SimulationParams | any, // Accept SimulationParams or legacy controls for backward compatibility
     timer: number,
     heightmapSource: CanvasImageSource | ((heightmap: Float32Array, options: any) => void) | null = null,
     terrainRandom?: any

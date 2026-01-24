@@ -15,7 +15,7 @@ describe('HeightmapBridge', () => {
   let mockSimres: number;
 
   beforeEach(() => {
-    mockSimres = 1024;
+    mockSimres = 64; // Use smaller resolution for faster tests (1024 is too large)
     mockPassManager = {} as SimulationPassManager;
     heightmapBridge = new HeightmapBridge(mockSimres);
   });
@@ -23,9 +23,9 @@ describe('HeightmapBridge', () => {
   describe('readCombinedHeight', () => {
     it('should read combined height from pass manager initial heightmap', () => {
       const mockInitialHeightmap = new Float32Array(mockSimres * mockSimres * 4);
-      // Fill with test data
+      // Fill with test data (use pattern instead of random for faster tests)
       for (let i = 0; i < mockInitialHeightmap.length; i++) {
-        mockInitialHeightmap[i] = Math.random() * 100;
+        mockInitialHeightmap[i] = (i % 100) / 10; // Pattern-based data instead of random
       }
       
       (mockPassManager as any).getInitialHeightmap = jest.fn(() => mockInitialHeightmap);
@@ -131,8 +131,9 @@ describe('HeightmapBridge', () => {
     it('should initialize CPU buffer from initial heightmap', async () => {
       const mockControls = {};
       const mockInitialHeightmap = new Float32Array(mockSimres * mockSimres * 4);
+      // Fill with pattern-based data for faster tests
       for (let i = 0; i < mockInitialHeightmap.length; i++) {
-        mockInitialHeightmap[i] = Math.random() * 100;
+        mockInitialHeightmap[i] = (i % 100) / 10; // Pattern-based data instead of random
       }
       
       heightmapBridge.setPassManager(mockPassManager);

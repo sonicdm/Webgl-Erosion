@@ -35,7 +35,7 @@ export class ThreeJSSimulationRuntime {
   private passManager: SimulationPassManager | null = null;
   private simres: number;
   private renderDebugCounter = 0;
-  private controls: any = null; // Store controls for material updates (will be replaced with SimulationParams in Phase 6)
+  private controls: SimulationParams | any = null; // Store controls for material updates (SimulationParams preferred)
   private cameraService: CameraService; // Camera service for camera management
   private terrainSync: TerrainSync; // Terrain sync service for geometry and BVH management
   private heightmapBridge: HeightmapBridge; // Heightmap bridge for readback and buffer management
@@ -205,7 +205,7 @@ export class ThreeJSSimulationRuntime {
    * Updates material parameters from controls
    * Can be called with controls parameter or use stored this.controls
    */
-  public updateMaterialFromControls(controls?: any): void {
+  public updateMaterialFromControls(controls?: SimulationParams | any): void {
     if (controls) {
       this.controls = controls;
       this.terrainSync.setControls(controls);
@@ -400,7 +400,7 @@ export class ThreeJSSimulationRuntime {
   /**
    * Regenerates terrain with new parameters
    */
-  public async regenerateTerrain(controls: any, terrainRandom?: any): Promise<void> {
+  public async regenerateTerrain(controls: SimulationParams | any, terrainRandom?: any): Promise<void> {
     console.log('[RegenerateTerrain] ===== START REGENERATE ====');
     if (!this.passManager) {
       console.error('[RegenerateTerrain] ERROR: Simulation not initialized');
