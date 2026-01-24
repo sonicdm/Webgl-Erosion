@@ -1,6 +1,11 @@
 import { vec2 } from 'gl-matrix';
-import { Controls } from '../../gui/gui-setup';
+import { Controls as GUIControls } from '../../gui/gui-setup';
+import { Controls as EventHandlerControls } from '../../events/event-handlers';
+import { Controls as HeightmapLoaderControls } from '../../utils/heightmap-loader';
 import { simres } from '../../simulation/simulation-state';
+
+// Unified Controls type that satisfies all module requirements
+export type Controls = GUIControls & EventHandlerControls & HeightmapLoaderControls;
 
 /**
  * Options for creating controls object
@@ -160,5 +165,5 @@ export function createControls(options: CreateControlsOptions = {}): Controls {
     },
   };
 
-  return controls;
+  return controls as Controls;
 }

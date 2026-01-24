@@ -42,4 +42,4 @@ export { createLegacyRunner, type LegacyRunnerResult, type LegacyRunnerConfig } 
 export { initializeLegacyPipeline, type LegacyInitializationResult } from './runtime/legacy-initialization';
 
 // Controls
-export { createControls, type CreateControlsOptions } from './controls/controls-factory';
+export { createControls, type CreateControlsOptions, type Controls } from './controls/controls-factory';
