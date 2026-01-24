@@ -106,14 +106,26 @@
 - Cleaned up unused imports and variables — Removed ~50+ unused imports from `main.ts`
 - All tests passing (115 tests), build succeeds, no linter errors
 
-## Workstream C — Three Runtime Split (`src/three`)
-1. Break `integration.ts` into services:
-   - `camera/CameraService.ts` (camera + controls ownership),
-   - `terrain/TerrainSync.ts` (geometry creation + BVH build/rebuild cadence),
-   - `simulation/StepRunner.ts` (per-frame uniforms, source array packing, calls into pass manager),
-   - `io/HeightmapBridge.ts` (combined height readback + initial map handling).
-2. Narrow `controls` usage: consume typed `SimulationParams` and `BrushInput` instead of `any`.
-3. Keep a small `ThreeIntegration.ts` orchestrator that wires the services and exposes a minimal surface to `main.ts`.
+## Workstream C — Three Runtime Split (`src/three`) ✅ COMPLETE
+1. ✅ Break `integration.ts` into services:
+   - ✅ `camera/CameraService.ts` (camera + controls ownership),
+   - ✅ `terrain/TerrainSync.ts` (geometry creation + BVH build/rebuild cadence),
+   - ✅ `simulation/StepRunner.ts` (per-frame uniforms, source array packing, calls into pass manager),
+   - ✅ `io/HeightmapBridge.ts` (combined height readback + initial map handling).
+2. ✅ Narrow `controls` usage: consume typed `SimulationParams` and `BrushInput` instead of `any`.
+3. ✅ Keep a small `ThreeJSSimulationRuntime` orchestrator that wires the services and exposes a minimal surface to `main.ts`.
+
+**Progress — 2026-01-24 (Workstream C Complete)**
+- **Service Extraction**: Created four focused services:
+  - `CameraService` - Manages camera setup, configuration, and updates
+  - `TerrainSync` - Handles terrain geometry creation, BVH building, and material management
+  - `HeightmapBridge` - Manages heightmap readback and CPU buffer management
+  - `StepRunner` - Encapsulates simulation step execution with typed DTOs
+- **Orchestrator Refactoring**: `integration.ts` (now `ThreeJSSimulationRuntime`) reduced from monolithic class to thin orchestrator (~500 lines from ~1200+)
+- **Type Safety**: Replaced `any` types with `SimulationParams` and `BrushInput` DTOs throughout service interfaces
+- **Test Coverage**: Added comprehensive unit tests for all services (170 tests passing, up from 145)
+- **Backward Compatibility**: Maintained existing public API while improving internal structure
+- All tests passing, build successful, no linter errors
 
 ## Workstream D — Pass Manager Restructure
 1. Move render-target setup to `simulation/targets/RenderTargets.ts`.
@@ -152,7 +164,7 @@
 ## Suggested Sequence
 1) Workstream A (bootstrap + DTOs) — unlocks DI-style wiring. ✅ COMPLETE
 2) Workstream B (entry split) — reduces main monolith. ✅ COMPLETE
-3) Workstream C (Three services) — isolates camera/BVH/step logic.
+3) Workstream C (Three services) — isolates camera/BVH/step logic. ✅ COMPLETE
 4) Workstream H (heightmap/VTF stabilization) — lock the encoding/denorm path before broader refactors.
 5) Workstream D (pass manager) — organizes GPGPU responsibilities.
 6) Workstream E (shader move/rename) — align TS imports via manifest.
@@ -167,8 +179,8 @@
 ## Status by Workstream (as of 2026-01-24)
 - **A (composition root)**: ✅ COMPLETE — Bootstrap/services/DTO/state holders in `src/app/*`; tests added for services, context setup, DTO packers, state holders.
 - **B (entry split)**: ✅ COMPLETE — `main.ts` reduced from ~850+ lines to 530 lines; all modules extracted (`app/ui/gui.ts`, `app/input/brush-controls.ts`, `app/runtime/legacy-runner.ts`, `app/runtime/three-runner.ts`, `app/context.ts`); additional modules created (`legacy-initialization.ts`, `controls-factory.ts`, `terrain-random.ts`); unified Controls type; all tests passing.
-- **C (Three runtime split)**: Not started; `integration.ts` still one class; no `TerrainSetup/TerrainSync` extraction. `executeSimulationStep()` now accepts `SimulationParams`.
-- **D (pass manager restructure)**: Not started; `SimulationPassManager` unchanged structurally.
+- **C (Three runtime split)**: ✅ COMPLETE — `integration.ts` refactored into thin orchestrator (~500 lines from ~1200+); extracted `CameraService`, `TerrainSync`, `HeightmapBridge`, and `StepRunner` services; replaced `any` types with `SimulationParams` and `BrushInput` DTOs; comprehensive test coverage (170 tests passing); all tests and build passing.
+- **D (pass manager restructure)**: In progress; extracting render targets, grouping passes by domain, creating pass registry, separating terrain readback.
 - **E (shader layout/naming)**: Not started; flat folder, debug logic inline.
 - **F (naming/state cleanup)**: Not started; typos (`Hight*`, etc.) still present. State holders provide foundation for cleanup.
 - **G (cleanup/hygiene)**: Not started; `temp_*` files remain.
