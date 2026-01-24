@@ -5,54 +5,26 @@ import {setGL} from './globals';
 import ShaderProgram from './rendering/gl/ShaderProgram';
 import { ControlsConfig, getMouseButtonAction, isModifierPressed } from './controls-config';
 import { loadSettings } from './settings';
-import { setupGUI, GUIControllers, type Controls } from './gui/gui-setup';
+import { GUIControllers, type Controls } from './gui/gui-setup';
 import { createEventHandlers, EventHandlerDependencies } from './events/event-handlers';
-import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
+import { getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
 import { updatePaletteSelection } from './brush-palette';
-import { MAX_WATER_SOURCES, waterSources, getWaterSourceCount } from './utils/water-sources';
-import { MAX_LAVA_SOURCES, lavaSources, getLavaSourceCount } from './utils/lava-sources';
-import { rayCast } from './utils/raycast';
-import { rayCastBVH } from './utils/bvh-raycast';
-import { createTerrainGeometry, updateTerrainGeometry } from './utils/terrain-geometry-builder';
-import { MeshBVH, SAH } from 'three-mesh-bvh';
+// Removed unused imports: MAX_WATER_SOURCES, waterSources, getWaterSourceCount, MAX_LAVA_SOURCES, lavaSources, getLavaSourceCount, rayCast, rayCastBVH, createTerrainGeometry, MeshBVH, SAH
 import { createHeightMapLoader } from './utils/heightmap-loader';
-import { getCachedUniformLocation } from './utils/uniform-cache';
-import { LoadProgressTracker, LoadPhase } from './utils/load-progress';
+// Removed unused imports: getCachedUniformLocation, LoadProgressTracker, LoadPhase
 import { 
-    simres, shadowMapResolution, SimFramecnt, TerrainGeometryDirty, PauseGeneration, 
-    HightMapCpuBuf, HightMapBufCounter, MaxHightMapBufCounter, shouldReadHeightmap, setSimRes, setGlContext, 
-    setClientDimensions, setLastMousePosition, clientWidth, clientHeight, lastX, lastY,
-    setPauseGeneration, setSimFramecnt, incrementSimFramecnt, setTerrainGeometryDirty,
-    resizeHightMapCpuBuf, incrementHightMapBufCounter, resetHightMapBufCounter,
-    terrainGeometry, terrainBVH, setTerrainGeometry, setTerrainBVH,
-    terrainBVHBuildInProgress, setTerrainBVHBuildInProgress,
-    HightMapBufIsFresh, setHightMapBufIsFresh,
-    geometryUpdateCounter, geometryNeedsUpdate, geometryUpdateInterval, enableBVHUpdates,
-    incrementGeometryUpdateCounter, resetGeometryUpdateCounter,
-    setGeometryNeedsUpdate, shouldUpdateGeometry, setEnableBVHUpdates
+    simres, PauseGeneration,
+    HightMapCpuBuf, setGlContext, 
+    setLastMousePosition,
+    setPauseGeneration, setSimFramecnt, setTerrainGeometryDirty,
+    terrainGeometry
 } from './simulation/simulation-state';
-import {
-    frame_buffer, shadowMap_frame_buffer, deferred_frame_buffer,
-    render_buffer, shadowMap_render_buffer, deferred_render_buffer,
-    shadowMap_tex, scene_depth_tex, bilateral_filter_horizontal_tex, bilateral_filter_vertical_tex,
-    color_pass_tex, color_pass_reflection_tex, scatter_pass_tex,
-    read_terrain_tex, write_terrain_tex, read_flux_tex, write_flux_tex,
-    read_terrain_flux_tex, write_terrain_flux_tex, read_maxslippage_tex, write_maxslippage_tex,
-    read_vel_tex, write_vel_tex, read_sediment_tex, write_sediment_tex,
-    terrain_nor, read_sediment_blend, write_sediment_blend,
-    sediment_advect_a, sediment_advect_b,
-    read_lava_tex, write_lava_tex, read_lava_flux_tex, write_lava_flux_tex,
-    setupFramebufferandtextures, resizeTextures4Simulation, resizeScreenTextures,
-    setHeightMapTexture, getHeightMapTexture,
-    swapTerrainTextures, swapFluxTextures, swapVelTextures, swapSedimentTextures,
-    swapSedimentBlendTextures, swapMaxSlippageTextures, swapTerrainFluxTextures,
-    swapBilateralFilterTextures, swapLavaTextures, swapLavaFluxTextures
-} from './simulation/texture-management';
-import { Render2Texture } from './rendering/render-utils';
-import { createShaders, Shaders } from './rendering/shader-factory';
+// Removed unused texture-management imports (all textures/framebuffers now used in legacy-runner.ts)
+// Removed unused Render2Texture import (only in comment)
+// Removed unused createShaders, Shaders imports (shaders created in initializeLegacyPipeline)
 import { THREEJS_CONFIG } from './three/config';
 import { ThreeJSSimulationRuntime } from './three/integration';
-import { createTerrainIO } from './three/utils/terrain-io';
+// Removed unused createTerrainIO import
 import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner, createLegacyRunner, initializeLegacyPipeline, createControls, type AppContext } from './app';
 import { setTerrainRandom, type TerrainRandomParams } from './utils/terrain-random';
 
