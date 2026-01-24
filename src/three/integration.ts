@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { vec2, vec3 } from 'gl-matrix';
 import Camera from '../Camera';
 import { ControlsConfig } from '../controls-config';
+import { CameraService } from './camera/CameraService';
 import { createTerrainGeometry, updateTerrainGeometry } from '../utils/terrain-geometry-builder';
 import { createTerrainProceduralMaterial, updateTerrainProceduralMaterial } from './materials/terrain-procedural-material';
 import { getWaterSourceCount, waterSources as waterSourcesList, MAX_WATER_SOURCES } from '../utils/water-sources';
@@ -38,14 +39,15 @@ export class ThreeJSSimulationRuntime {
   private renderDebugCounter = 0;
   private heightMapInitialized: boolean = false;
   private controls: any = null; // Store controls for material updates
-  private camera: Camera | null = null; // Custom camera with WASD movement
-  private controlsConfig: ControlsConfig | null = null; // Camera configuration
+  private cameraService: CameraService; // Camera service for camera management
+  private controlsConfig: ControlsConfig | null = null; // Camera configuration (stored for reference)
   // terraformingActive flag removed - terraforming is now GPU-based (rain shader)
 
   constructor(canvas: HTMLCanvasElement, glContext: WebGL2RenderingContext, simres: number) {
     this.runtime = new ThreeJSRuntime(canvas, glContext);
     this.simres = simres;
     this.heightMapCpuBuffer = new Float32Array(simres * simres * 4);
+    this.cameraService = new CameraService(this.runtime);
   }
   
   /**
@@ -53,51 +55,21 @@ export class ThreeJSSimulationRuntime {
    */
   public setControlsConfig(controlsConfig: ControlsConfig, brushUsesLeftClick: boolean): void {
     this.controlsConfig = controlsConfig;
-    
-    // Create Camera instance - it creates its own Three.js camera internally
-    // Use initial position that provides a good view of the terrain
-    // Terrain will be scaled to ~300 units, so camera should be positioned accordingly
-    // Position camera at a reasonable distance to see the terrain clearly
-    // Camera constructor expects vec3 from gl-matrix, so create proper vec3 arrays
-    const initialPos = vec3.fromValues(150, 200, 150); // Closer position for scaled terrain
-    const initialTarget = vec3.fromValues(0, 0, 0); // Look at terrain center
-    
-    this.camera = new Camera(
-      initialPos,
-      initialTarget,
-      controlsConfig.camera,
-      brushUsesLeftClick
-    );
-    
-    // Ensure OrbitControls target is set to look at terrain center
-    if (this.camera.threeControls) {
-      this.camera.threeControls.target.set(initialTarget[0], initialTarget[1], initialTarget[2]);
-    }
-    
-    // Replace the runtime's camera with the Camera's Three.js camera
-    // This way the Camera class owns the camera and controls it properly
-    this.runtime.setCamera(this.camera.threeCamera);
-    
-    console.log('Custom Camera initialized with WASD movement support');
-    console.log('Camera position:', this.camera.threeCamera.position);
-    console.log('Camera target:', this.camera.threeControls?.target);
+    this.cameraService.setControlsConfig(controlsConfig, brushUsesLeftClick);
   }
   
   /**
    * Gets the Three.js camera for rendering (from Camera wrapper)
    */
   public getThreeJSCamera(): THREE.Camera {
-    if (this.camera) {
-      return this.camera.threeCamera;
-    }
-    return this.runtime.getCamera();
+    return this.cameraService.getThreeJSCamera();
   }
   
   /**
    * Gets the custom Camera instance (for event handlers)
    */
   public getCamera(): Camera | null {
-    return this.camera;
+    return this.cameraService.getCamera();
   }
 
   /**
@@ -741,7 +713,7 @@ export class ThreeJSSimulationRuntime {
     mouseWorldDir: [number, number, number];
     brushPos: [number, number];
   } | null {
-    if (!this.camera) {
+    if (!this.cameraService.getCamera()) {
       return null;
     }
     
@@ -770,7 +742,7 @@ export class ThreeJSSimulationRuntime {
     
     // Update camera to ensure matrices are current
     if (this.controlsConfig) {
-      this.camera.update(this.controlsConfig.camera);
+      this.cameraService.update(this.controlsConfig.camera);
     }
     
     // Use Three.js Raycaster for proper mouse-to-world unprojection
@@ -783,7 +755,7 @@ export class ThreeJSSimulationRuntime {
     mouseNDC.y = -((mouseY - rect.top) / rect.height) * 2 + 1; // Flip Y axis
     
     // Set raycaster to use the camera and mouse position
-    const threeCamera = this.camera.threeCamera;
+    const threeCamera = this.cameraService.getThreeJSCamera();
     raycaster.setFromCamera(mouseNDC, threeCamera);
     
     // Get ray origin and direction from raycaster
@@ -1000,14 +972,16 @@ export class ThreeJSSimulationRuntime {
     
     try {
       // Update camera (handles OrbitControls + WASD movement)
-      if (this.camera && this.controlsConfig) {
+      const cameraInstance = this.cameraService.getCamera();
+      if (cameraInstance && this.controlsConfig) {
+        const threeCamera = this.cameraService.getThreeJSCamera();
         const aspect = rendererSize.x / rendererSize.y;
-        if (this.camera.threeCamera.aspect !== aspect) {
-          this.camera.threeCamera.aspect = aspect;
-          this.camera.threeCamera.updateProjectionMatrix();
+        if (threeCamera instanceof THREE.PerspectiveCamera && threeCamera.aspect !== aspect) {
+          threeCamera.aspect = aspect;
+          threeCamera.updateProjectionMatrix();
         }
-        this.camera.update(this.controlsConfig.camera);
-        renderer.render(scene, this.camera.threeCamera);
+        this.cameraService.update(this.controlsConfig.camera);
+        renderer.render(scene, threeCamera);
       } else {
         renderer.render(scene, camera);
       }
@@ -1215,7 +1189,7 @@ export class ThreeJSSimulationRuntime {
    * Disposes of all resources
    */
   public dispose(): void {
-    this.camera = null;
+    // Camera service will be disposed with the service
     if (this.passManager) {
       this.passManager.dispose();
     }
