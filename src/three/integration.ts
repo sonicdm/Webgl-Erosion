@@ -7,7 +7,7 @@ import { ThreeJSRuntime } from './main';
 import { SimulationPassManager } from './simulation/SimulationPassManager';
 import { readCombinedHeight } from './utils/combined-height-readback';
 import * as THREE from 'three';
-import { vec2, vec3 } from 'gl-matrix';
+import { vec2, vec3, vec4 } from 'gl-matrix';
 import Camera from '../Camera';
 import { ControlsConfig } from '../controls-config';
 import { CameraService } from './camera/CameraService';
@@ -19,7 +19,6 @@ import { lavaSources as lavaSourcesList } from '../utils/lava-sources';
 import { SimulationParams, createSimulationParams } from '../app/dto/SimulationParams';
 import { BrushInput, createBrushInput } from '../app/dto/BrushInput';
 import { SourceArrays } from '../app/dto/SourceArrays';
-import { vec2, vec3, vec4 } from 'gl-matrix';
 import { createHeightmapTexture } from './utils/terrain-heightmap-converter';
 import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { setTerrainGeometry, setTerrainBVH, setTerrainBVHBuildInProgress, terrainBVHBuildInProgress, terrainBVH, terrainGeometry } from '../simulation/simulation-state';
@@ -49,6 +48,7 @@ export class ThreeJSSimulationRuntime {
     this.cameraService = new CameraService(this.runtime);
     this.terrainSync = new TerrainSync(this.runtime, simres, null, null);
     this.heightmapBridge = new HeightmapBridge(simres);
+    this.stepRunner = new StepRunner(null, simres);
   }
   
   /**
