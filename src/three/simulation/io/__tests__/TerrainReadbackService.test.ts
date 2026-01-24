@@ -1,5 +1,5 @@
 import { TerrainReadbackService } from '../TerrainReadbackService';
-import { PingPongTarget } from '../../../gpgpu/PingPongTarget';
+import { PingPongTarget } from '../../../gpgpu';
 import * as THREE from 'three';
 
 // Mock dependencies

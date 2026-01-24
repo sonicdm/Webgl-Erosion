@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { GpgpuPass } from '../../../gpgpu/GpgpuPass';
-import { PassRunner } from '../../../gpgpu/PassRunner';
+import { GpgpuPass, PassRunner } from '../../../gpgpu';
 import { MRTRenderTarget } from '../../../gpgpu/MRTRenderTarget';
 import { RenderTargets } from '../../targets/RenderTargets';
 import { shaderManifest } from '../../../../shaders/manifest';

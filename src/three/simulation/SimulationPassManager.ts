@@ -1,14 +1,8 @@
 import * as THREE from 'three';
-import { GpgpuPass } from '../gpgpu/GpgpuPass';
-import { PingPongTarget } from '../gpgpu/PingPongTarget';
+import { GpgpuPass, PassRunner, PingPongTarget } from '../gpgpu';
 import { MRTRenderTarget } from '../gpgpu/MRTRenderTarget';
-import { PassRunner } from '../gpgpu/PassRunner';
 import { RenderTargets } from './targets/RenderTargets';
-import { WaterPasses } from './passes/water/WaterPasses';
-import { SedimentPasses } from './passes/sediment/SedimentPasses';
-import { ThermalPasses } from './passes/thermal/ThermalPasses';
-import { LavaPasses } from './passes/lava/LavaPasses';
-import { PostPasses } from './passes/post/PostPasses';
+import { WaterPasses, SedimentPasses, ThermalPasses, LavaPasses, PostPasses } from './passes';
 import { TerrainReadbackService } from './io/TerrainReadbackService';
 import { SimulationParams } from '../../app/dto/SimulationParams';
 

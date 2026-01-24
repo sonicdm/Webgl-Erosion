@@ -1,8 +1,6 @@
 import * as THREE from 'three';
 import { RenderTargets } from '../../../targets/RenderTargets';
-import { PassRunner } from '../../../../gpgpu/PassRunner';
-import { GpgpuPass } from '../../../../gpgpu/GpgpuPass';
-import { MRTRenderTarget } from '../../../../gpgpu/MRTRenderTarget';
+import { GpgpuPass, PassRunner } from '../../../../gpgpu';
 
 // Mock GpgpuPass
 const mockSetInputTexture = jest.fn();

@@ -34,7 +34,6 @@
 
 ### Remaining Work
 - **Naming**: Typos present (`Hight*`, etc.); need standardization (Workstream F).
-- **Cleanup**: `temp_*` backup files remain (Workstream G).
 - **Heightmap/VTF**: Partially done (RAW contract, helper, tests, debug-gating). Pending: central contract helper, uploader abstraction, debug gating in fragment shader, displacement regression test (Workstream H).
 
 
@@ -118,10 +117,10 @@
 3. Replace ad-hoc `any` controls with typed structs and enforce them at boundaries.
 4. Rename files and functions to JS/TS-preferred conventions (e.g., camelCase for functions/variables, PascalCase for classes, kebab-case for filenames where appropriate); align legacy names/typos to the new standards.
 
-## Workstream G — Cleanup & Hygiene
-1. Move `temp_*` backups to `research/archives/` with a short README or delete if superseded.
-2. Remove IDE-tab reference to missing `src/three/integration-clean-render.ts` and/or recreate it as a documented experiment stub if needed.
-3. Add lint-friendly barrel files only where they reduce import noise; avoid deep wildcard exports until the split stabilizes.
+## Workstream G — Cleanup & Hygiene ✅ COMPLETE
+1. ✅ Move `temp_*` backups to `research/archives/` with a short README or delete if superseded. — No `temp_*` files found; created `research/archives/` and `research/archives/README.md`.
+2. ✅ Remove IDE-tab reference to missing `src/three/integration-clean-render.ts` and/or recreate it as a documented experiment stub if needed. — Removed from `tsconfig.json` exclude; added stub at `src/three/integration-clean-render.ts`.
+3. ✅ Add lint-friendly barrel files only where they reduce import noise; avoid deep wildcard exports until the split stabilizes. — Added `three/gpgpu/index.ts` (GpgpuPass, PassRunner, PingPongTarget; MRTRenderTarget imported directly where needed) and `three/simulation/passes/index.ts` (WaterPasses, SedimentPasses, ThermalPasses, LavaPasses, PostPasses).
 
 ## Workstream H — Heightmap/VTF Stabilization (in flight)
 1. Treat `HeightmapSource` as the single source of truth: ensure it’s created once during terrain generation, retained through swaps, and injected into materials via a typed provider (not `passManager?.getHeightmapSource()` from random call sites).
@@ -220,11 +219,10 @@
 - Need to encapsulate mutable counters behind small services.
 - Need to replace ad-hoc `any` controls with typed structs.
 
-### ⏳ G (cleanup/hygiene) — Not started
-- `temp_*` files remain.
-- Need to move `temp_*` backups to `research/archives/` or delete if superseded.
-- Need to remove IDE-tab reference to missing `src/three/integration-clean-render.ts`.
-- Need to add lint-friendly barrel files where they reduce import noise.
+### ✅ G (cleanup/hygiene) — COMPLETE
+- **temp_***: None found; created `research/archives/` with README for future backup/experiment files.
+- **integration-clean-render**: Removed from `tsconfig` exclude; added documented stub at `src/three/integration-clean-render.ts`.
+- **Barrel files**: `three/gpgpu/index.ts` (GpgpuPass, PassRunner, PingPongTarget); `three/simulation/passes/index.ts` (all five domain pass classes). MRTRenderTarget remains a direct import where needed (avoids pulling WebGLMultipleRenderTargets/TS into tests that do not use it). `RenderTargets.test` and `TerrainReadbackService.test` use concrete `PingPongTarget` import for the same reason.
 
 ### 🔄 H (heightmap/VTF) — Partially done
 - **Completed**: RAW contract enforcement (stored = worldHeight * simres), helper functions, tests, debug-gating.
