@@ -96,6 +96,7 @@ jest.mock('../ThermalPasses', () => {
 });
 
 // Import after mocks
+import { createSimulationParams } from '../../../../../app/dto/SimulationParams';
 import { ThermalPasses } from '../ThermalPasses';
 
 describe('ThermalPasses', () => {
@@ -142,13 +143,7 @@ describe('ThermalPasses', () => {
 
   describe('executeMaxSlippage', () => {
     it('should set input textures and uniforms', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        pipeAra: 1.0,
-        thermalTalusAngleScale: 1.0,
-        RainErosion: false,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, thermalTalusAngleScale: 1.0, RainErosion: false, SimulationResolution: simres }, simres);
 
       thermalPasses.executeMaxSlippage(controls);
 
@@ -159,12 +154,7 @@ describe('ThermalPasses', () => {
 
   describe('executeThermalFlux', () => {
     it('should set input textures and uniforms', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        pipeAra: 1.0,
-        thermalRate: 0.5,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, thermalRate: 0.5, SimulationResolution: simres }, simres);
 
       thermalPasses.executeThermalFlux(controls);
 
@@ -176,12 +166,7 @@ describe('ThermalPasses', () => {
 
   describe('executeThermalApply', () => {
     it('should set input textures and uniforms', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        pipeAra: 1.0,
-        thermalErosionScale: 1.0,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, thermalErosionScale: 1.0, SimulationResolution: simres }, simres);
 
       thermalPasses.executeThermalApply(controls);
 

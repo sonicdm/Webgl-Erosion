@@ -63,7 +63,7 @@ export function rayCast(
     ro: vec3,
     rd: vec3,
     simres: number,
-    HightMapCpuBuf: Float32Array,
+    heightMapCpuBuf: Float32Array,
     out: vec2
 ): void {
     out[0] = -10.0;
@@ -93,7 +93,7 @@ export function rayCast(
     if (startTexSpace[0] >= 0.0 && startTexSpace[0] <= 1.0 && 
         startTexSpace[1] >= 0.0 && startTexSpace[1] <= 1.0) {
         // Use bilinear sampling for smooth height
-        let startHval = sampleHeightBilinear(startTexSpace, simres, HightMapCpuBuf);
+        let startHval = sampleHeightBilinear(startTexSpace, simres, heightMapCpuBuf);
         let startTerrainHeight = startHval / simres;
         if (ro[1] <= startTerrainHeight) {
             // Ray starts at or below terrain, return current position
@@ -131,7 +131,7 @@ export function rayCast(
         }
         
         // Use bilinear sampling for smooth height values
-        let hval = sampleHeightBilinear(curTexSpace, simres, HightMapCpuBuf);
+        let hval = sampleHeightBilinear(curTexSpace, simres, heightMapCpuBuf);
         let terrainHeight = hval / simres;
         
         // Check if we've hit the terrain (first hit detection)
@@ -168,7 +168,7 @@ export function rayCast(
                 }
                 
                 // Use bilinear sampling for smooth height
-                let midHval = sampleHeightBilinear(midTexSpace, simres, HightMapCpuBuf);
+                let midHval = sampleHeightBilinear(midTexSpace, simres, heightMapCpuBuf);
                 let midTerrainHeight = midHval / simres;
                 
                 // Track distance to surface for best position selection
@@ -199,7 +199,7 @@ export function rayCast(
             
             if (finalTexSpace[0] >= 0.0 && finalTexSpace[0] <= 1.0 && 
                 finalTexSpace[1] >= 0.0 && finalTexSpace[1] <= 1.0) {
-            let finalHval = sampleHeightBilinear(finalTexSpace, simres, HightMapCpuBuf);
+            let finalHval = sampleHeightBilinear(finalTexSpace, simres, heightMapCpuBuf);
             let finalTerrainHeight = finalHval / simres;
                 
                 // Use resolution-dependent threshold for better precision at high resolutions

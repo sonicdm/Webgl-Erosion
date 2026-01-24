@@ -8,6 +8,7 @@
     "build:webpack": "webpack",
     "dev:webpack": "concurrently \"webpack --watch\" \"browser-sync start --server --files 'dist/*.js' --port 8080 --open\"",
     "test": "jest",
+    "test:ci": "jest --runInBand",
     "test:watch": "jest --watch"
   },
   "devDependencies": {

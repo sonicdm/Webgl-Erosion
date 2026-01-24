@@ -21,19 +21,19 @@ describe('SimulationStateHolder', () => {
     expect(stateHolder.simres).toBe(512);
   });
 
-  test('should initialize simFramecnt to 0', () => {
-    expect(stateHolder.simFramecnt).toBe(0);
+  test('should initialize simFrameCount to 0', () => {
+    expect(stateHolder.simFrameCount).toBe(0);
   });
 
-  test('should allow setting simFramecnt', () => {
-    stateHolder.simFramecnt = 100;
-    expect(stateHolder.simFramecnt).toBe(100);
+  test('should allow setting simFrameCount', () => {
+    stateHolder.simFrameCount = 100;
+    expect(stateHolder.simFrameCount).toBe(100);
   });
 
-  test('should increment simFramecnt', () => {
-    stateHolder.simFramecnt = 5;
-    stateHolder.incrementSimFramecnt();
-    expect(stateHolder.simFramecnt).toBe(6);
+  test('should increment simFrameCount', () => {
+    stateHolder.simFrameCount = 5;
+    stateHolder.incrementSimFrameCount();
+    expect(stateHolder.simFrameCount).toBe(6);
   });
 
   test('should initialize pauseGeneration to false', () => {

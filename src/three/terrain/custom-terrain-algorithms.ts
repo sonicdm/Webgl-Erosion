@@ -405,8 +405,8 @@ export function createCustomTerrainHeightmap(
         terrain_height = base_height;
       }
       
-      // Apply height scaling (matching shader: terrain_hight *= u_TerrainHeight*120.0)
-      // Match initial-frag.glsl exactly: terrain_hight *= u_TerrainHeight*120.0
+      // Apply height scaling (matching shader: terrain_height *= u_TerrainHeight*120.0)
+      // Match initial-frag.glsl exactly: terrain_height *= u_TerrainHeight*120.0
       terrain_height *= terrainHeight * 120.0;
       
       // Apply masks (matching shader masks)

@@ -154,6 +154,7 @@ jest.mock('../WaterPasses', () => {
 });
 
 // Import after mocks
+import { createSimulationParams } from '../../../../../app/dto/SimulationParams';
 import { WaterPasses } from '../WaterPasses';
 
 describe('WaterPasses', () => {
@@ -224,7 +225,7 @@ describe('WaterPasses', () => {
 
   describe('executeRain', () => {
     it('should set input textures and uniforms', () => {
-      const controls = {
+      const controls = createSimulationParams({
         RainDegree: 0.5,
         brushSize: 10,
         brushStrenth: 0.5,
@@ -236,7 +237,8 @@ describe('WaterPasses', () => {
         RainErosion: true,
         RainErosionStrength: 1.0,
         RainErosionDropSize: 1.0,
-      };
+        SimulationResolution: simres,
+      }, simres);
       const timer = 0.1;
 
       waterPasses.executeRain(controls, timer);
@@ -246,10 +248,7 @@ describe('WaterPasses', () => {
     });
 
     it('should handle brushState with valid brushPos', () => {
-      const controls = {
-        RainDegree: 0.5,
-        brushSize: 10,
-      };
+      const controls = createSimulationParams({ RainDegree: 0.5, brushSize: 10, SimulationResolution: simres }, simres);
       const brushState = {
         brushPos: [0.5, 0.5] as [number, number],
         mouseWorldPos: [1, 2, 3, 1] as [number, number, number, number],
@@ -262,7 +261,7 @@ describe('WaterPasses', () => {
     });
 
     it('should handle waterSources', () => {
-      const controls = { RainDegree: 0.5 };
+      const controls = createSimulationParams({ RainDegree: 0.5, SimulationResolution: simres }, simres);
       const waterSources = {
         count: 2,
         positions: new Float32Array([0.1, 0.2, 0.3, 0.4]),
@@ -278,11 +277,7 @@ describe('WaterPasses', () => {
 
   describe('executeFlow', () => {
     it('should set input textures and uniforms', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        pipeAra: 1.0,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, SimulationResolution: simres }, simres);
 
       waterPasses.executeFlow(controls);
 
@@ -295,13 +290,7 @@ describe('WaterPasses', () => {
 
   describe('executeWaterHeight', () => {
     it('should execute MRT pass and swap targets', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        pipeAra: 1.0,
-        VelocityMultiplier: 1.0,
-        VelocityAdvectionMag: 1.0,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, VelocityMultiplier: 1.0, VelocityAdvectionMag: 1.0, SimulationResolution: simres }, simres);
       const timer = 0.1;
 
       waterPasses.executeWaterHeight(controls, timer);
@@ -318,9 +307,7 @@ describe('WaterPasses', () => {
 
   describe('executeEvaporation', () => {
     it('should set input textures and uniforms', () => {
-      const controls = {
-        EvaporationConstant: 0.1,
-      };
+      const controls = createSimulationParams({ EvaporationConstant: 0.1, SimulationResolution: simres }, simres);
 
       waterPasses.executeEvaporation(controls);
 

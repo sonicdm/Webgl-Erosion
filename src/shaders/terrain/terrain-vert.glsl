@@ -9,7 +9,7 @@ uniform vec2 u_PlanePos; // Our location in the virtual world displayed by the p
 uniform mat4 u_sproj;
 uniform mat4 u_sview;
 
-uniform sampler2D hightmap;
+uniform sampler2D heightmap;
 uniform sampler2D sedimap;
 uniform sampler2D lavamap;
 uniform float u_SimRes;
@@ -34,8 +34,8 @@ void main()
 
   fs_Uv = vs_Uv;
   float sval = 1.f*texture(sedimap,vs_Uv).x;
-  float yval = 1.f*texture(hightmap,vs_Uv).x;
-  float wval = 1.f*texture(hightmap,vs_Uv).y;
+  float yval = 1.f*texture(heightmap,vs_Uv).x;
+  float wval = 1.f*texture(heightmap,vs_Uv).y;
   // Sample lava volume for pooling (like water), but DO NOT raise terrain by water volume.
   // Terrain geometry should be based on terrain height + sediment + lava only.
   // Water bulges are rendered by the separate water mesh (water-vert.glsl).

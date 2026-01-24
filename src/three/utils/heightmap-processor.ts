@@ -2,6 +2,8 @@
  * Utility to process imported heightmap images and convert them to the format expected by the terrain system
  */
 
+import type { SimulationParams } from '../../app/dto/SimulationParams';
+
 /**
  * Processes an imported heightmap image and extracts height data
  * @param img - The imported image
@@ -12,7 +14,7 @@
 export function processHeightmapImage(
   img: HTMLImageElement | HTMLCanvasElement,
   simres: number,
-  controls: any
+  controls: SimulationParams | any
 ): Float32Array {
   // Get height scaling from controls (respects TerrainHeight and TerrainScale settings)
   const terrainHeight = controls.TerrainHeight || 2.0;

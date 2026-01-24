@@ -3,7 +3,7 @@ import { ControlsConfig, getMouseButtonAction, isModifierPressed } from "./contr
 import { sampleHeightBilinear, rayCast } from "./utils/raycast";
 import { rayCastBVH } from "./utils/bvh-raycast";
 import Camera from "./Camera";
-import { terrainGeometry, terrainBVH, simres, HightMapCpuBuf } from "./simulation/simulation-state"; // @deprecated - will be replaced with state holders
+import { terrainGeometry, terrainBVH, simres, heightMapCpuBuf } from "./simulation/simulation-state"; // @deprecated - will be replaced with state holders
 import { SimulationStateHolder } from "./app/state/SimulationStateHolder";
 import { TerrainStateHolder } from "./app/state/TerrainStateHolder";
 
@@ -37,7 +37,7 @@ export interface BrushContext {
     controls: BrushControls;
     controlsConfig: ControlsConfig;
     simres: number;
-    HightMapCpuBuf: Float32Array;
+    heightMapCpuBuf: Float32Array;
     camera: Camera;
     // Optional state holders (for new code paths)
     simulationState?: SimulationStateHolder;
@@ -148,14 +148,14 @@ export function handleBrushMouseDown(
                 const hit = rayCastBVH(rayOrigin, rayDir, bvh, geometry, freshPos);
                 if (!hit) {
                     const heightmapPos = vec2.create();
-                    const buffer = context.terrainState?.heightMapCpuBuf ?? context.HightMapCpuBuf;
+                    const buffer = context.terrainState?.heightMapCpuBuf ?? context.heightMapCpuBuf;
                     const res = context.simulationState?.simres ?? context.simres;
                     rayCast(rayOrigin, rayDir, res, buffer, heightmapPos);
                     freshPos[0] = heightmapPos[0];
                     freshPos[1] = heightmapPos[1];
                 }
             } else {
-                const buffer = context.terrainState?.heightMapCpuBuf ?? context.HightMapCpuBuf;
+                const buffer = context.terrainState?.heightMapCpuBuf ?? context.heightMapCpuBuf;
                 const res = context.simulationState?.simres ?? context.simres;
                 rayCast(rayOrigin, rayDir, res, buffer, freshPos);
             }
@@ -180,7 +180,7 @@ export function handleBrushMouseDown(
             const brushUV = vec2.fromValues(freshPos[0], freshPos[1]);
             
             
-            const rawHeight = sampleHeightBilinear(brushUV, context.simres, context.HightMapCpuBuf);
+            const rawHeight = sampleHeightBilinear(brushUV, context.simres, context.heightMapCpuBuf);
             // Convert from texture space (0-2000.30) to 0-500 range for UI
             // The shader will convert this back to texture space for comparison
             const MAX_TEXTURE_HEIGHT = 2000.30;
@@ -342,7 +342,7 @@ export function updateBrushState(
     if (brushTypeNum === 5 && controls.brushPressed === 1 && controls.brushOperation === 1) {
         // Secondary modifier is pressed - read target height from CPU buffer at brush center using bilinear interpolation
         const brushUV = vec2.fromValues(pos[0], pos[1]);
-        const buffer = context.terrainState?.heightMapCpuBuf ?? context.HightMapCpuBuf;
+        const buffer = context.terrainState?.heightMapCpuBuf ?? context.heightMapCpuBuf;
         const res = context.simulationState?.simres ?? context.simres;
         const rawHeight = sampleHeightBilinear(brushUV, res, buffer);
         // Convert from texture space (0-2000.30) to 0-500 range for UI

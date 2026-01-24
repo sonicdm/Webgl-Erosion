@@ -4,6 +4,7 @@ import { PassRunner } from '../../../gpgpu/PassRunner';
 import { MRTRenderTarget } from '../../../gpgpu/MRTRenderTarget';
 import { RenderTargets } from '../../targets/RenderTargets';
 import { shaderManifest } from '../../../../shaders/manifest';
+import { SimulationParams } from '../../../../app/dto/SimulationParams';
 
 /**
  * Water simulation passes
@@ -38,7 +39,7 @@ export class WaterPasses {
    * Executes the rain pass
    */
   public executeRain(
-    controls: any,
+    controls: SimulationParams,
     timer: number,
     brushState?: {
       mouseWorldPos?: [number, number, number, number];
@@ -139,7 +140,7 @@ export class WaterPasses {
   /**
    * Executes the flow pass
    */
-  public executeFlow(controls: any): void {
+  public executeFlow(controls: SimulationParams): void {
     this.flowPass.setInputTexture('readTerrain', this.renderTargets.terrainPP.getReadTexture());
     this.flowPass.setInputTexture('readFlux', this.renderTargets.fluxPP.getReadTexture());
     this.flowPass.setInputTexture('readSedi', this.renderTargets.sedimentPP.getReadTexture());
@@ -153,7 +154,7 @@ export class WaterPasses {
   /**
    * Executes the water height pass (MRT pass with 2 outputs)
    */
-  public executeWaterHeight(controls: any, timer: number): void {
+  public executeWaterHeight(controls: SimulationParams, timer: number): void {
     // This is an MRT pass (2 outputs)
     const mrtTarget = new MRTRenderTarget(this.simres, this.simres, 2);
     mrtTarget.getTargets().texture[0] = this.renderTargets.terrainPP.getWriteTarget().texture;
@@ -179,7 +180,7 @@ export class WaterPasses {
   /**
    * Executes the evaporation pass
    */
-  public executeEvaporation(controls: any): void {
+  public executeEvaporation(controls: SimulationParams): void {
     this.evaporationPass.setInputTexture('terrain', this.renderTargets.terrainPP.getReadTexture());
     this.evaporationPass.setUniform('evapod', controls.EvaporationConstant);
     this.passRunner.executePingPongPass(this.evaporationPass, this.renderTargets.terrainPP);

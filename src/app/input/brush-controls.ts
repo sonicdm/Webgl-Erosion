@@ -171,7 +171,7 @@ export function calculateBrushInput(
         controls: controls as BrushControls,
         controlsConfig: appContext.controlsConfig,
         simres: appContext.simulationState.simres,
-        HightMapCpuBuf: appContext.terrainStateHolder.heightMapCpuBuf,
+        heightMapCpuBuf: appContext.terrainStateHolder.heightMapCpuBuf,
         camera: camera,
         simulationState: appContext.simulationState,
         terrainState: appContext.terrainStateHolder,

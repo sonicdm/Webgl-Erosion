@@ -22,7 +22,7 @@ describe('LegacyRunner', () => {
     mockAppContext = {
       simulationState: {
         simres: 1024,
-        simFramecnt: 0,
+        simFrameCount: 0,
         pauseGeneration: false,
         terrainGeometryDirty: false,
       },
@@ -138,7 +138,7 @@ describe('LegacyRunner', () => {
         glContext: mockGL,
         renderer: {} as any,
         camera: {} as any,
-        shaders: {} as any,
+        shaders: { waterHeight: {} as any } as any,
         geometries: {} as any,
         terrainRandom: {
           seedOffset: [0.0, 0.0],

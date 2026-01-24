@@ -3,6 +3,7 @@ import { GpgpuPass } from '../../../gpgpu/GpgpuPass';
 import { PassRunner } from '../../../gpgpu/PassRunner';
 import { RenderTargets } from '../../targets/RenderTargets';
 import { shaderManifest } from '../../../../shaders/manifest';
+import { SimulationParams } from '../../../../app/dto/SimulationParams';
 
 /**
  * Thermal erosion simulation passes
@@ -32,7 +33,7 @@ export class ThermalPasses {
   /**
    * Executes the max slippage pass
    */
-  public executeMaxSlippage(controls: any): void {
+  public executeMaxSlippage(controls: SimulationParams): void {
     this.maxslippagePass.setInputTexture('readTerrain', this.renderTargets.terrainPP.getReadTexture());
     this.maxslippagePass.setUniform('u_SimRes', this.simres);
     this.maxslippagePass.setUniform('u_PipeLen', controls.pipelen);
@@ -46,7 +47,7 @@ export class ThermalPasses {
   /**
    * Executes the thermal flux pass
    */
-  public executeThermalFlux(controls: any): void {
+  public executeThermalFlux(controls: SimulationParams): void {
     this.thermalFluxPass.setInputTexture('readTerrain', this.renderTargets.terrainPP.getReadTexture());
     this.thermalFluxPass.setInputTexture('readMaxSlippage', this.renderTargets.maxslippagePP.getReadTexture());
     this.thermalFluxPass.setUniform('u_SimRes', this.simres);
@@ -60,7 +61,7 @@ export class ThermalPasses {
   /**
    * Executes the thermal apply pass
    */
-  public executeThermalApply(controls: any): void {
+  public executeThermalApply(controls: SimulationParams): void {
     this.thermalApplyPass.setInputTexture('readTerrainFlux', this.renderTargets.terrainFluxPP.getReadTexture());
     this.thermalApplyPass.setInputTexture('readTerrain', this.renderTargets.terrainPP.getReadTexture());
     this.thermalApplyPass.setUniform('u_SimRes', this.simres);

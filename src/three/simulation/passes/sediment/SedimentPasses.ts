@@ -4,6 +4,7 @@ import { PassRunner } from '../../../gpgpu/PassRunner';
 import { MRTRenderTarget } from '../../../gpgpu/MRTRenderTarget';
 import { RenderTargets } from '../../targets/RenderTargets';
 import { shaderManifest } from '../../../../shaders/manifest';
+import { SimulationParams } from '../../../../app/dto/SimulationParams';
 
 /**
  * Sediment simulation passes
@@ -36,7 +37,7 @@ export class SedimentPasses {
   /**
    * Executes the sediment pass (4-output MRT)
    */
-  public executeSediment(controls: any, timer: number): void {
+  public executeSediment(controls: SimulationParams, timer: number): void {
     // This is a 4-output MRT pass
     const mrtTarget = new MRTRenderTarget(this.simres, this.simres, 4);
     mrtTarget.getTargets().texture[0] = this.renderTargets.terrainPP.getWriteTarget().texture;
@@ -65,7 +66,7 @@ export class SedimentPasses {
   /**
    * Executes MacCormack advection (3 subpasses)
    */
-  public executeMacCormackAdvection(controls: any): void {
+  public executeMacCormackAdvection(controls: SimulationParams): void {
     // Subpass 1
     const mrt1 = new MRTRenderTarget(this.simres, this.simres, 3);
     mrt1.getTargets().texture[0] = this.renderTargets.sedimentAdvectA.texture;
@@ -110,7 +111,7 @@ export class SedimentPasses {
   /**
    * Executes simple advection (single MRT pass)
    */
-  public executeSimpleAdvection(controls: any): void {
+  public executeSimpleAdvection(controls: SimulationParams): void {
     const mrt = new MRTRenderTarget(this.simres, this.simres, 3);
     mrt.getTargets().texture[0] = this.renderTargets.sedimentPP.getWriteTarget().texture;
     mrt.getTargets().texture[1] = this.renderTargets.velocityPP.getWriteTarget().texture;
@@ -134,7 +135,7 @@ export class SedimentPasses {
   /**
    * Executes the average smoothing pass (2-output MRT)
    */
-  public executeAverage(controls: any): void {
+  public executeAverage(controls: SimulationParams): void {
     const mrt = new MRTRenderTarget(this.simres, this.simres, 2);
     mrt.getTargets().texture[0] = this.renderTargets.terrainPP.getWriteTarget().texture;
     mrt.getTargets().texture[1] = this.renderTargets.terrainNor.texture;

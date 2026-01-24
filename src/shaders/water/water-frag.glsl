@@ -7,7 +7,7 @@ in vec3 fs_Pos;
 in vec4 fs_Nor;
 in vec4 fs_Col;
 
-uniform sampler2D hightmap;
+uniform sampler2D heightmap;
 uniform sampler2D normap;
 uniform sampler2D sceneDepth;
 uniform sampler2D colorReflection;
@@ -31,9 +31,9 @@ uniform float u_near;
 
 vec3 calnor(vec2 uv){
     float eps = 1.0/u_SimRes;
-    vec4 cur = texture(hightmap,uv);
-    vec4 r = texture(hightmap,uv+vec2(eps,0.f));
-    vec4 t = texture(hightmap,uv+vec2(0.f,eps));
+    vec4 cur = texture(heightmap,uv);
+    vec4 r = texture(heightmap,uv+vec2(eps,0.f));
+    vec4 t = texture(heightmap,uv+vec2(0.f,eps));
 
     vec3 n1 = normalize(vec3(-1.0, cur.y + cur.x - r.y - r.x, 0.f));
     vec3 n2 = normalize(vec3(-1.0, t.x + t.y - r.y - r.x, 1.0));
@@ -91,11 +91,11 @@ void main()
 
     //lamb =1.f;
 
-    float wval = texture(hightmap,fs_Uv).y;
+    float wval = texture(heightmap,fs_Uv).y;
     wval /= 1.0;
 
     // Check if underlying terrain is rock (B channel > 0.1)
-    vec4 terrainSample = texture(hightmap, fs_Uv);
+    vec4 terrainSample = texture(heightmap, fs_Uv);
     float rockVal = terrainSample.z;
     bool isRock = rockVal > 0.1;
 

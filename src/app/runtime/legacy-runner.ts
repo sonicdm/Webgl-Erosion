@@ -61,26 +61,26 @@ import {
 import {
   simres,
   shadowMapResolution,
-  SimFramecnt,
+  simFrameCount,
   TerrainGeometryDirty,
   PauseGeneration,
-  HightMapCpuBuf,
-  HightMapBufCounter,
-  MaxHightMapBufCounter,
+  heightMapCpuBuf,
+  heightMapBufCounter,
+  maxHeightMapBufCounter,
   shouldReadHeightmap,
   setSimRes,
-  incrementSimFramecnt,
+  incrementSimFrameCount,
   setTerrainGeometryDirty,
-  incrementHightMapBufCounter,
-  resetHightMapBufCounter,
+  incrementHeightMapBufCounter,
+  resetHeightMapBufCounter,
   terrainGeometry,
   terrainBVH,
   setTerrainGeometry,
   setTerrainBVH,
   terrainBVHBuildInProgress,
   setTerrainBVHBuildInProgress,
-  HightMapBufIsFresh,
-  setHightMapBufIsFresh,
+  heightMapBufIsFresh,
+  setHeightMapBufIsFresh,
   geometryUpdateCounter,
   geometryNeedsUpdate,
   geometryUpdateInterval,
@@ -89,7 +89,7 @@ import {
   resetGeometryUpdateCounter,
   setGeometryNeedsUpdate,
   shouldUpdateGeometry,
-  resizeHightMapCpuBuf,
+  resizeHeightMapCpuBuf,
 } from '../../simulation/simulation-state';
 import { getCachedUniformLocation } from '../../utils/uniform-cache';
 import { rayCast } from '../../utils/raycast';
@@ -125,7 +125,7 @@ export interface LegacyRunnerConfig {
     lambert: ShaderProgram;
     flat: ShaderProgram;
     flow: ShaderProgram;
-    waterhight: ShaderProgram;
+    waterHeight: ShaderProgram;
     sediment: ShaderProgram;
     sediadvect: ShaderProgram;
     macCormack: ShaderProgram;
@@ -187,7 +187,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     lambert,
     flat,
     flow,
-    waterhight,
+    waterHeight,
     sediment,
     sediadvect,
     macCormack,
@@ -283,7 +283,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context: WebGL2RenderingContext,
     camera: Camera,
     shader: ShaderProgram,
-    waterhight: ShaderProgram,
+    waterHeight: ShaderProgram,
     veladvect: ShaderProgram,
     sedi: ShaderProgram,
     advect: ShaderProgram,
@@ -405,25 +405,25 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
 
     renderer.clear();
-    waterhight.use();
+    waterHeight.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog, "readTerrain"), 0);
+    gl_context.uniform1i(getCachedUniformLocation(waterHeight.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_flux_tex);
-    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog, "readFlux"), 1);
+    gl_context.uniform1i(getCachedUniformLocation(waterHeight.prog, "readFlux"), 1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
-    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog, "readSedi"), 2);
+    gl_context.uniform1i(getCachedUniformLocation(waterHeight.prog, "readSedi"), 2);
 
     gl_context.activeTexture(gl_context.TEXTURE3);
     gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
-    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog, "readVel"), 3);
+    gl_context.uniform1i(getCachedUniformLocation(waterHeight.prog, "readVel"), 3);
 
-    renderer.render(camera, waterhight, [square]);
+    renderer.render(camera, waterHeight, [square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //-----swap terrain ping and pong and velocity ping pong
@@ -1043,7 +1043,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
   function SimulationStep(
     curstep: number,
     flow: ShaderProgram,
-    waterhight: ShaderProgram,
+    waterHeight: ShaderProgram,
     veladvect: ShaderProgram,
     sediment: ShaderProgram,
     advect: ShaderProgram,
@@ -1076,7 +1076,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         gl_context,
         camera,
         flow,
-        waterhight,
+        waterHeight,
         veladvect,
         sediment,
         advect,
@@ -1246,7 +1246,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                     console.log(`[Loading] Resolution change detected: ${oldRes} -> ${newRes}`);
                     setSimRes(newRes);
                     resizeTextures4Simulation(glContext, newRes);
-                    resizeHightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
+                    resizeHeightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
                     
                     // Clear old BVH and geometry when resolution changes (they're invalid for new resolution)
                     if (terrainBVH) {
@@ -1286,9 +1286,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                     glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, read_terrain_tex, 0);
                     glContext.readBuffer(glContext.COLOR_ATTACHMENT0);
                     progressTracker.updateSubPhaseProgress(0.5);
-                    glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, HightMapCpuBuf);
+                    glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, heightMapCpuBuf);
                     glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
-                    setHightMapBufIsFresh(true); // Mark buffer as fresh
+                    setHeightMapBufIsFresh(true); // Mark buffer as fresh
                     progressTracker.updateSubPhaseProgress(1.0);
                     progressTracker.endPhase(LoadPhase.READBACK);
                 }
@@ -1300,8 +1300,8 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                     terrainBVH: !!terrainBVH,
                     terrainBVHBuildInProgress,
                     terrainGeometry: !!terrainGeometry,
-                    HightMapBufIsFresh,
-                    bufferLength: HightMapCpuBuf?.length,
+                    heightMapBufIsFresh,
+                    bufferLength: heightMapCpuBuf?.length,
                     requiredLength: simres * simres * 4
                 });
                 
@@ -1326,13 +1326,13 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                 // Create new terrain geometry from heightmap
                 // Only build BVH if buffer is fresh (just read after terrain generation)
                 // This prevents building BVH with stale data
-                if (HightMapBufIsFresh && HightMapCpuBuf && HightMapCpuBuf.length >= simres * simres * 4) {
+                if (heightMapBufIsFresh && heightMapCpuBuf && heightMapCpuBuf.length >= simres * simres * 4) {
                     // Verify buffer has actual data (not all zeros)
                     let hasData = false;
                     const sampleCount = Math.min(100, simres * simres);
                     for (let i = 0; i < sampleCount; i++) {
                         const idx = Math.floor(Math.random() * simres * simres) * 4;
-                        if (HightMapCpuBuf[idx] !== 0) {
+                        if (heightMapCpuBuf[idx] !== 0) {
                             hasData = true;
                             break;
                         }
@@ -1366,7 +1366,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                                 console.log('[Loading] Starting geometry creation');
                                 const newGeometry = createTerrainGeometry(
                                     simres, 
-                                    HightMapCpuBuf, 
+                                    heightMapCpuBuf, 
                                     1.0,
                                     (progress) => {
                                         const overallProgress = progressTracker.getProgress().progress;
@@ -1452,7 +1452,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                                         setTerrainBVH(bvh); // This will clear terrainBVHBuildInProgress
                                         progressTracker.updateSubPhaseProgress(1.0);
                                         progressTracker.endPhase(LoadPhase.BVH);
-                                        setHightMapBufIsFresh(false); // Mark as consumed
+                                        setHeightMapBufIsFresh(false); // Mark as consumed
                                         
                                         // Log timing information
                                         const timings = progressTracker.getAllTimings();
@@ -1485,7 +1485,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                         } catch (error) {
                             console.error('[BVH] Failed to build BVH:', error);
                             setTerrainBVHBuildInProgress(false); // Clear flag on error
-                            setHightMapBufIsFresh(false); // Mark as consumed even on error
+                            setHeightMapBufIsFresh(false); // Mark as consumed even on error
                             setTerrainGeometryDirty(false);
                             if (loadingOverlay) {
                                 loadingOverlay.classList.remove('visible');
@@ -1494,7 +1494,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                         }
                     } else {
                         console.log('[BVH] Heightmap buffer has no valid data');
-                        setHightMapBufIsFresh(false); // Mark as consumed
+                        setHeightMapBufIsFresh(false); // Mark as consumed
                         setTerrainGeometryDirty(false);
                         if (loadingOverlay) {
                             loadingOverlay.classList.remove('visible');
@@ -1526,13 +1526,13 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         if (!hit) {
             // Fallback to heightmap if BVH misses
             const heightmapPos = vec2.create();
-            rayCast(reusableRo, reusableDir, simres, HightMapCpuBuf, heightmapPos);
+            rayCast(reusableRo, reusableDir, simres, heightMapCpuBuf, heightmapPos);
             reusablePos[0] = heightmapPos[0];
             reusablePos[1] = heightmapPos[1];
         }
     } else {
         // Use heightmap raycast (default)
-        rayCast(reusableRo, reusableDir, simres, HightMapCpuBuf, reusablePos);
+        rayCast(reusableRo, reusableDir, simres, heightMapCpuBuf, reusablePos);
     }
     
     
@@ -1639,7 +1639,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
             controls: controls as BrushControls,
             controlsConfig: appContext.controlsConfig,
             simres: Number(simres), // Ensure it's a number, not a string
-            HightMapCpuBuf: HightMapCpuBuf,
+            heightMapCpuBuf: heightMapCpuBuf,
             camera: camera
         };
     updateBrushState(reusablePos, brushContext);
@@ -1721,13 +1721,13 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     glContext.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaDensity"), controls.LavaDensity);
     glContext.uniform1f(getCachedUniformLocation(lavaTerrain.prog,"u_LavaWaterTemp"), controls.LavaWaterTemp);
 
-    waterhight.setPipeLen(controls.pipelen);
-    waterhight.setSimres(simres);
-    waterhight.setTimestep(controls.timestep);
-    waterhight.setPipeArea(controls.pipeAra);
-    waterhight.setFloat(controls.VelocityMultiplier, 'u_VelMult');
-    waterhight.setFloat(controls.VelocityAdvectionMag, 'u_VelAdvMag');
-    waterhight.setTime(timer);
+    waterHeight.setPipeLen(controls.pipelen);
+    waterHeight.setSimres(simres);
+    waterHeight.setTimestep(controls.timestep);
+    waterHeight.setPipeArea(controls.pipeAra);
+    waterHeight.setFloat(controls.VelocityMultiplier, 'u_VelMult');
+    waterHeight.setFloat(controls.VelocityAdvectionMag, 'u_VelAdvMag');
+    waterHeight.setTime(timer);
 
     sediment.setSimres(simres);
     sediment.setPipeLen(controls.pipelen);
@@ -1796,14 +1796,14 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     const brushVisible = Number(controls.brushType) !== 0;
     const justPressed = brushPressed && lastBrushPressed === 0;
     const justReleased = !brushPressed && lastBrushPressed === 1; // Brush was just released
-    incrementHightMapBufCounter();
+    incrementHeightMapBufCounter();
     stats.begin();
 
       //==========================  we begin simulation from now ===========================================
 
     for(let i = 0;i<controls.SimulationSpeed;i++) {
-        SimulationStep(SimFramecnt, flow, waterhight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, lavaFlow, lavaUpdate, lavaTerrain, reusableLavaSourcePositions, reusableLavaSourceSizes, reusableLavaSourceStrengths, getLavaSourceCount(), controls, renderer, glContext, camera, reusableMousePoint, reusableDir, reusablePos);
-        incrementSimFramecnt();
+        SimulationStep(simFrameCount, flow, waterHeight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, lavaFlow, lavaUpdate, lavaTerrain, reusableLavaSourcePositions, reusableLavaSourceSizes, reusableLavaSourceStrengths, getLavaSourceCount(), controls, renderer, glContext, camera, reusableMousePoint, reusableDir, reusablePos);
+        incrementSimFrameCount();
     }
     
     // Only track update counter if BVH updates are enabled
@@ -1826,14 +1826,14 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         glContext.bindFramebuffer(glContext.FRAMEBUFFER, frame_buffer);
         glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, read_terrain_tex, 0);
         glContext.readBuffer(glContext.COLOR_ATTACHMENT0);
-        glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, HightMapCpuBuf);
+        glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, heightMapCpuBuf);
         glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
         // Mark as fresh so BVH updates can piggyback on this read (no extra readPixels cost)
-        setHightMapBufIsFresh(true);
+        setHeightMapBufIsFresh(true);
         lastReadMouseX = appContext.clientState.lastX;
         lastReadMouseY = appContext.clientState.lastY;
-        if (!brushPressed && !brushVisible && HightMapBufCounter >= MaxHightMapBufCounter) {
-            resetHightMapBufCounter();
+        if (!brushPressed && !brushVisible && heightMapBufCounter >= maxHeightMapBufCounter) {
+            resetHeightMapBufCounter();
         }
     }
 
@@ -1844,7 +1844,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // This avoids expensive readPixels calls - we piggyback on existing heightmap reads
     // Also triggers immediately on brush release to update after terrain modifications
     // IMPORTANT: Updates are deferred to avoid blocking the render loop (BVH is not visible)
-    const shouldUpdateNow = enableBVHUpdates && terrainGeometry && terrainBVH && !terrainBVHBuildInProgress && HightMapBufIsFresh;
+    const shouldUpdateNow = enableBVHUpdates && terrainGeometry && terrainBVH && !terrainBVHBuildInProgress && heightMapBufIsFresh;
     const updateTriggeredByBrush = justReleased; // Immediate update after brush stroke
     const updateTriggeredByInterval = shouldUpdateGeometry(); // Periodic update during erosion
     
@@ -1854,10 +1854,10 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         // BVH updates can proceed normally
         
         // Copy heightmap data to avoid race conditions (heightmap buffer might be overwritten)
-        const heightmapCopy = new Float32Array(HightMapCpuBuf);
+        const heightmapCopy = new Float32Array(heightMapCpuBuf);
         
         // Clear fresh flag immediately (before async work) to prevent duplicate updates
-        setHightMapBufIsFresh(false);
+        setHeightMapBufIsFresh(false);
         
         // Defer the actual update work to avoid blocking the render loop
         // Since BVH is only used for raycasting (not rendering), we can update it asynchronously
@@ -1894,13 +1894,13 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     const ENABLE_BVH_ACCURACY_TEST = false; // Set to true to enable test
     const BVH_TEST_INTERVAL = 1000; // Test every N simulation frames
     
-    if (ENABLE_BVH_ACCURACY_TEST && terrainGeometry && terrainBVH && SimFramecnt % BVH_TEST_INTERVAL === 0 && SimFramecnt > 0) {
+    if (ENABLE_BVH_ACCURACY_TEST && terrainGeometry && terrainBVH && simFrameCount % BVH_TEST_INTERVAL === 0 && simFrameCount > 0) {
         // Read heightmap if not already fresh
-        if (!HightMapBufIsFresh) {
+        if (!heightMapBufIsFresh) {
             glContext.bindFramebuffer(glContext.FRAMEBUFFER, frame_buffer);
             glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, read_terrain_tex, 0);
             glContext.readBuffer(glContext.COLOR_ATTACHMENT0);
-            glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, HightMapCpuBuf);
+            glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, heightMapCpuBuf);
             glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
         }
         
@@ -1910,11 +1910,11 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         const bvhPosBefore = vec2.create();
         const heightmapPosBefore = vec2.create();
         const bvhHitBefore = rayCastBVH(testRayOrigin, testRayDir, terrainBVH, terrainGeometry, bvhPosBefore);
-        rayCast(testRayOrigin, testRayDir, simres, HightMapCpuBuf, heightmapPosBefore);
+        rayCast(testRayOrigin, testRayDir, simres, heightMapCpuBuf, heightmapPosBefore);
         
         // Measure performance: Update + Refit
         const updateStartTime = performance.now();
-        updateTerrainGeometry(terrainGeometry, simres, HightMapCpuBuf, 1.0);
+        updateTerrainGeometry(terrainGeometry, simres, heightMapCpuBuf, 1.0);
         const updateTime = performance.now() - updateStartTime;
         
         const refitStartTime = performance.now();
@@ -1931,7 +1931,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         const bvhPosAfter = vec2.create();
         const heightmapPosAfter = vec2.create();
         const bvhHitAfter = rayCastBVH(testRayOrigin, testRayDir, terrainBVH, terrainGeometry, bvhPosAfter);
-        rayCast(testRayOrigin, testRayDir, simres, HightMapCpuBuf, heightmapPosAfter);
+        rayCast(testRayOrigin, testRayDir, simres, heightMapCpuBuf, heightmapPosAfter);
         
         // Calculate differences
         const diffBefore = vec2.distance(bvhPosBefore, heightmapPosBefore);
@@ -1953,7 +1953,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
             const bvhPos = vec2.create();
             const heightmapPos = vec2.create();
             const bvhHit = rayCastBVH(testRay.origin, testRay.dir, terrainBVH, terrainGeometry, bvhPos);
-            rayCast(testRay.origin, testRay.dir, simres, HightMapCpuBuf, heightmapPos);
+            rayCast(testRay.origin, testRay.dir, simres, heightMapCpuBuf, heightmapPos);
             
             if (bvhHit && heightmapPos[0] >= 0 && heightmapPos[0] <= 1) {
                 const diff = vec2.distance(bvhPos, heightmapPos);
@@ -1967,7 +1967,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
             avgDiff /= testCount;
         }
         
-        console.log('[BVH Accuracy Test] Frame:', SimFramecnt, 'Resolution:', simres);
+        console.log('[BVH Accuracy Test] Frame:', simFrameCount, 'Resolution:', simres);
         console.log('  Steps since last update:', geometryUpdateCounter);
         console.log('  Update interval:', geometryUpdateInterval);
         console.log('  Max BVH vs Heightmap diff:', maxDiff.toFixed(6));
@@ -2012,7 +2012,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
 
       glContext.activeTexture(glContext.TEXTURE0);
       glContext.bindTexture(glContext.TEXTURE_2D,read_terrain_tex);
-      glContext.uniform1i(getCachedUniformLocation(shadowMapShader.prog,"hightmap"),0);
+      glContext.uniform1i(getCachedUniformLocation(shadowMapShader.prog,"heightmap"),0);
 
       glContext.activeTexture(glContext.TEXTURE1);
       glContext.bindTexture(glContext.TEXTURE_2D, read_sediment_tex);
@@ -2045,7 +2045,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
       // Bind terrain textures for the depth pass so vertex displacement matches terrain render.
       glContext.activeTexture(glContext.TEXTURE0);
       glContext.bindTexture(glContext.TEXTURE_2D, read_terrain_tex);
-      glContext.uniform1i(getCachedUniformLocation(sceneDepthShader.prog, "hightmap"), 0);
+      glContext.uniform1i(getCachedUniformLocation(sceneDepthShader.prog, "heightmap"), 0);
 
       glContext.activeTexture(glContext.TEXTURE1);
       glContext.bindTexture(glContext.TEXTURE_2D, read_sediment_tex);
@@ -2075,7 +2075,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     //plane.setDrawMode(glContext.LINE_STRIP);
     glContext.activeTexture(glContext.TEXTURE0);
     glContext.bindTexture(glContext.TEXTURE_2D,read_terrain_tex);
-    let PingUniform = getCachedUniformLocation(lambert.prog,"hightmap");
+    let PingUniform = getCachedUniformLocation(lambert.prog,"heightmap");
     glContext.uniform1i(PingUniform,0);
 
     glContext.activeTexture(glContext.TEXTURE1);
@@ -2145,7 +2145,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     water.use();
     glContext.activeTexture(glContext.TEXTURE0);
     glContext.bindTexture(glContext.TEXTURE_2D,read_terrain_tex);
-    PingUniform = getCachedUniformLocation(water.prog,"hightmap");
+    PingUniform = getCachedUniformLocation(water.prog,"heightmap");
     glContext.uniform1i(PingUniform,0);
 
     glContext.activeTexture(glContext.TEXTURE1);
@@ -2196,7 +2196,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
 
     glContext.activeTexture(glContext.TEXTURE0);
     glContext.bindTexture(glContext.TEXTURE_2D, read_sediment_tex);
-    glContext.uniform1i(getCachedUniformLocation(flat.prog,"hightmap"),0);
+    glContext.uniform1i(getCachedUniformLocation(flat.prog,"heightmap"),0);
 
     glContext.activeTexture(glContext.TEXTURE1);
     glContext.bindTexture(glContext.TEXTURE_2D, scene_depth_tex);

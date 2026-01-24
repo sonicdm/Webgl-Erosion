@@ -104,7 +104,7 @@ export function createWaterScene(
       u_PlanePos: { value: new THREE.Vector2(0, 0) },
       
       // Textures
-      hightmap: { value: terrainTexture || null },
+      heightmap: { value: terrainTexture || null },
       sedimap: { value: sedimentTexture || null },
       normap: { value: normalTexture || null },
       sceneDepth: { value: null },
@@ -148,7 +148,7 @@ export function createWaterScene(
     colorReflection?: THREE.Texture;
   }) => {
     if (textures.terrain !== undefined) {
-      material.uniforms.hightmap.value = textures.terrain;
+      material.uniforms.heightmap.value = textures.terrain;
     }
     if (textures.sediment !== undefined) {
       material.uniforms.sedimap.value = textures.sediment;

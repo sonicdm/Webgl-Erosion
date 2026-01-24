@@ -1,7 +1,7 @@
 #version 300 es
 precision highp float;
 
-uniform sampler2D hightmap;
+uniform sampler2D heightmap;
 uniform sampler2D sceneDepth;
 uniform sampler2D shadowMap;
 

@@ -10,6 +10,7 @@ import { ThermalPasses } from './passes/thermal/ThermalPasses';
 import { LavaPasses } from './passes/lava/LavaPasses';
 import { PostPasses } from './passes/post/PostPasses';
 import { TerrainReadbackService } from './io/TerrainReadbackService';
+import { SimulationParams } from '../../app/dto/SimulationParams';
 
 /**
  * Manages all simulation passes and their execution order.
@@ -95,7 +96,7 @@ export class SimulationPassManager {
    * Initializes all textures by clearing them and generating initial terrain
    */
   public async initializeTextures(
-    controls: any,
+    controls: SimulationParams | any,
     timer: number,
     heightmapSource: CanvasImageSource | ((heightmap: Float32Array, options: any) => void) | null = null,
     terrainRandom?: any
@@ -120,7 +121,7 @@ export class SimulationPassManager {
    * @param lavaSources - Lava source arrays (optional)
    */
   public executeStep(
-    controls: any,
+    controls: SimulationParams,
     timer: number = 0,
     brushState?: {
       mouseWorldPos?: [number, number, number, number];
@@ -194,7 +195,7 @@ export class SimulationPassManager {
     return this.renderTargets.terrainPP.getReadTexture();
   }
 
-  private executeFlowPass(controls: any): void {
+  private executeFlowPass(controls: SimulationParams): void {
     this.flowPass.setInputTexture('readTerrain', this.terrainPP.getReadTexture());
     this.flowPass.setInputTexture('readFlux', this.renderTargets.fluxPP.getReadTexture());
     this.flowPass.setInputTexture('readSedi', this.renderTargets.sedimentPP.getReadTexture());
@@ -205,7 +206,7 @@ export class SimulationPassManager {
     this.passRunner.executePingPongPass(this.flowPass, this.renderTargets.fluxPP);
   }
 
-  private executeWaterHeightPass(controls: any, timer: number): void {
+  private executeWaterHeightPass(controls: SimulationParams, timer: number): void {
     // This is an MRT pass (2 outputs)
     const mrtTarget = new MRTRenderTarget(this.simres, this.simres, 2);
     mrtTarget.getTargets().texture[0] = this.terrainPP.getWriteTarget().texture;
@@ -228,7 +229,7 @@ export class SimulationPassManager {
     this.velocityPP.swap();
   }
 
-  private executeSedimentPass(controls: any, timer: number): void {
+  private executeSedimentPass(controls: SimulationParams, timer: number): void {
     // This is a 4-output MRT pass
     const mrtTarget = new MRTRenderTarget(this.simres, this.simres, 4);
     mrtTarget.getTargets().texture[0] = this.terrainPP.getWriteTarget().texture;
@@ -254,7 +255,7 @@ export class SimulationPassManager {
     this.velocityPP.swap();
   }
 
-  private executeMacCormackAdvection(controls: any): void {
+  private executeMacCormackAdvection(controls: SimulationParams): void {
     // Subpass 1
     const mrt1 = new MRTRenderTarget(this.simres, this.simres, 3);
     mrt1.getTargets().texture[0] = this.renderTargets.sedimentAdvectA.texture;
@@ -296,7 +297,7 @@ export class SimulationPassManager {
     this.velocityPP.swap();
   }
 
-  private executeSimpleAdvection(controls: any): void {
+  private executeSimpleAdvection(controls: SimulationParams): void {
     const mrt = new MRTRenderTarget(this.simres, this.simres, 3);
     mrt.getTargets().texture[0] = this.renderTargets.sedimentPP.getWriteTarget().texture;
     mrt.getTargets().texture[1] = this.velocityPP.getWriteTarget().texture;
@@ -317,7 +318,7 @@ export class SimulationPassManager {
     this.velocityPP.swap();
   }
 
-  private executeMaxSlippagePass(controls: any): void {
+  private executeMaxSlippagePass(controls: SimulationParams): void {
     this.maxslippagePass.setInputTexture('readTerrain', this.terrainPP.getReadTexture());
     this.maxslippagePass.setUniform('u_SimRes', this.simres);
     this.maxslippagePass.setUniform('u_PipeLen', controls.pipelen);
@@ -328,7 +329,7 @@ export class SimulationPassManager {
     this.passRunner.executePingPongPass(this.maxslippagePass, this.renderTargets.maxslippagePP);
   }
 
-  private executeThermalFluxPass(controls: any): void {
+  private executeThermalFluxPass(controls: SimulationParams): void {
     this.thermalFluxPass.setInputTexture('readTerrain', this.terrainPP.getReadTexture());
     this.thermalFluxPass.setInputTexture('readMaxSlippage', this.renderTargets.maxslippagePP.getReadTexture());
     this.thermalFluxPass.setUniform('u_SimRes', this.simres);
@@ -339,7 +340,7 @@ export class SimulationPassManager {
     this.passRunner.executePingPongPass(this.thermalFluxPass, this.renderTargets.terrainFluxPP);
   }
 
-  private executeThermalApplyPass(controls: any): void {
+  private executeThermalApplyPass(controls: SimulationParams): void {
     this.thermalApplyPass.setInputTexture('readTerrainFlux', this.renderTargets.terrainFluxPP.getReadTexture());
     this.thermalApplyPass.setInputTexture('readTerrain', this.terrainPP.getReadTexture());
     this.thermalApplyPass.setUniform('u_SimRes', this.simres);
@@ -350,13 +351,13 @@ export class SimulationPassManager {
     this.passRunner.executePingPongPass(this.thermalApplyPass, this.terrainPP);
   }
 
-  private executeEvaporationPass(controls: any): void {
+  private executeEvaporationPass(controls: SimulationParams): void {
     this.evaporationPass.setInputTexture('terrain', this.terrainPP.getReadTexture());
     this.evaporationPass.setUniform('evapod', controls.EvaporationConstant);
     this.passRunner.executePingPongPass(this.evaporationPass, this.terrainPP);
   }
 
-  private executeLavaFlowPass(controls: any, timer: number, lavaSources?: {
+  private executeLavaFlowPass(controls: SimulationParams, timer: number, lavaSources?: {
     count: number;
     positions: Float32Array;
     sizes: Float32Array;
@@ -405,7 +406,7 @@ export class SimulationPassManager {
   }
 
   private executeLavaUpdatePass(
-    controls: any,
+    controls: SimulationParams,
     timer: number,
     brushState?: {
       mouseWorldPos?: [number, number, number, number];
@@ -484,7 +485,7 @@ export class SimulationPassManager {
     this.passRunner.executePingPongPass(this.lavaUpdatePass, this.renderTargets.lavaPP);
   }
 
-  private executeLavaTerrainPass(controls: any, lavaSources?: {
+  private executeLavaTerrainPass(controls: SimulationParams, lavaSources?: {
     count: number;
     positions: Float32Array;
     sizes: Float32Array;
@@ -535,7 +536,7 @@ export class SimulationPassManager {
     this.renderTargets.lavaPP.swap();
   }
 
-  private executeAveragePass(controls: any): void {
+  private executeAveragePass(controls: SimulationParams): void {
     const mrt = new MRTRenderTarget(this.simres, this.simres, 2);
     mrt.getTargets().texture[0] = this.terrainPP.getWriteTarget().texture;
     mrt.getTargets().texture[1] = this.renderTargets.terrainNor.texture;

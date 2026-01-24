@@ -1,7 +1,7 @@
 #version 300 es
 precision highp float;
 
-uniform sampler2D readTerrainFlux;//water and hight map R: hight map, G: water map, B: , A:
+uniform sampler2D readTerrainFlux;//water and height map R: height map, G: water map, B: , A:
 uniform sampler2D readTerrain;
 
 uniform float u_SimRes;

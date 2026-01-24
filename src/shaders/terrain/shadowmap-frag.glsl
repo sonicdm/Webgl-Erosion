@@ -9,7 +9,7 @@ in vec4 fs_Nor;
 in vec4 fs_Col;
 
 
-uniform sampler2D hightmap;
+uniform sampler2D heightmap;
 
 uniform sampler2D sedimap;
 

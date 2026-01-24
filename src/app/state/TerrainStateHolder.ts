@@ -1,5 +1,7 @@
 import { BufferGeometry } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
+import { CounterService } from '../services/CounterService';
+import { GeometryUpdateService } from '../services/GeometryUpdateService';
 
 /**
  * Holds terrain state: geometry, BVH, heightmap CPU buffer, update counters
@@ -10,20 +12,19 @@ export class TerrainStateHolder {
   private _terrainBVH: MeshBVH | null = null;
   private _terrainBVHBuildInProgress: boolean = false;
   private _heightMapCpuBuf: Float32Array;
-  private _heightMapBufCounter: number = 0;
   private _heightMapBufIsFresh: boolean = false;
-  private _geometryUpdateCounter: number = 0;
-  private _geometryNeedsUpdate: boolean = false;
-  private _geometryUpdateInterval: number = 2000;
-  private _enableBVHUpdates: boolean = true;
+  private readonly counterService: CounterService;
+  private readonly geometryUpdateService: GeometryUpdateService;
 
-  // Constants
+  // Constants (delegated to services)
   readonly MaxHeightMapBufCounter = 200;
   readonly ActiveHeightmapReadInterval = 2;
   readonly HoverHeightmapReadInterval = 4;
 
   constructor(initialSimres: number = 1024) {
     this._heightMapCpuBuf = new Float32Array(initialSimres * initialSimres * 4);
+    this.counterService = new CounterService();
+    this.geometryUpdateService = new GeometryUpdateService();
   }
 
   get terrainGeometry(): BufferGeometry | null {
@@ -64,15 +65,15 @@ export class TerrainStateHolder {
   }
 
   get heightMapBufCounter(): number {
-    return this._heightMapBufCounter;
+    return this.counterService.getHeightMapBufCounter();
   }
 
   incrementHeightMapBufCounter(): void {
-    this._heightMapBufCounter++;
+    this.counterService.incrementHeightMapBufCounter();
   }
 
   resetHeightMapBufCounter(): void {
-    this._heightMapBufCounter = 0;
+    this.counterService.resetHeightMapBufCounter();
   }
 
   get heightMapBufIsFresh(): boolean {
@@ -84,60 +85,46 @@ export class TerrainStateHolder {
   }
 
   get geometryUpdateCounter(): number {
-    return this._geometryUpdateCounter;
+    return this.geometryUpdateService.getGeometryUpdateCounter();
   }
 
   incrementGeometryUpdateCounter(): void {
-    this._geometryUpdateCounter++;
+    this.geometryUpdateService.incrementGeometryUpdateCounter();
   }
 
   resetGeometryUpdateCounter(): void {
-    this._geometryUpdateCounter = 0;
+    this.geometryUpdateService.resetGeometryUpdateCounter();
   }
 
   get geometryNeedsUpdate(): boolean {
-    return this._geometryNeedsUpdate;
+    return this.geometryUpdateService.getGeometryNeedsUpdate();
   }
 
   set geometryNeedsUpdate(value: boolean) {
-    this._geometryNeedsUpdate = value;
+    this.geometryUpdateService.setGeometryNeedsUpdate(value);
   }
 
   get geometryUpdateInterval(): number {
-    return this._geometryUpdateInterval;
+    return this.geometryUpdateService.getGeometryUpdateInterval();
   }
 
   set geometryUpdateInterval(value: number) {
-    this._geometryUpdateInterval = Math.max(1, value);
+    this.geometryUpdateService.setGeometryUpdateInterval(value);
   }
 
   get enableBVHUpdates(): boolean {
-    return this._enableBVHUpdates;
+    return this.geometryUpdateService.getEnableBVHUpdates();
   }
 
   set enableBVHUpdates(value: boolean) {
-    this._enableBVHUpdates = value;
+    this.geometryUpdateService.setEnableBVHUpdates(value);
   }
 
   shouldUpdateGeometry(): boolean {
-    return this._enableBVHUpdates && (this._geometryNeedsUpdate || this._geometryUpdateCounter >= this._geometryUpdateInterval);
+    return this.geometryUpdateService.shouldUpdateGeometry();
   }
 
   shouldReadHeightmap(brushPressed: boolean, brushVisible: boolean, simres: number): boolean {
-    if (brushPressed) {
-      const scale = this.getResolutionScale(simres);
-      return this._heightMapBufCounter % (this.ActiveHeightmapReadInterval * scale) === 0;
-    }
-    if (brushVisible) {
-      const scale = this.getResolutionScale(simres);
-      return this._heightMapBufCounter % (this.HoverHeightmapReadInterval * scale) === 0;
-    }
-    return this._heightMapBufCounter >= this.MaxHeightMapBufCounter;
-  }
-
-  private getResolutionScale(simres: number): number {
-    const basePixels = 1024 * 1024;
-    const currentPixels = simres * simres;
-    return Math.max(1, Math.round(currentPixels / basePixels));
+    return this.counterService.shouldReadHeightmap(brushPressed, brushVisible, simres);
   }
 }

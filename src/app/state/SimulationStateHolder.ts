@@ -4,7 +4,7 @@
  */
 export class SimulationStateHolder {
   private _simres: number;
-  private _simFramecnt: number = 0;
+  private _simFrameCount: number = 0;
   private _pauseGeneration: boolean = false;
   private _terrainGeometryDirty: boolean = true;
   private _speed: number = 3;
@@ -21,16 +21,16 @@ export class SimulationStateHolder {
     this._simres = value;
   }
 
-  get simFramecnt(): number {
-    return this._simFramecnt;
+  get simFrameCount(): number {
+    return this._simFrameCount;
   }
 
-  set simFramecnt(value: number) {
-    this._simFramecnt = value;
+  set simFrameCount(value: number) {
+    this._simFrameCount = value;
   }
 
-  incrementSimFramecnt(): void {
-    this._simFramecnt++;
+  incrementSimFrameCount(): void {
+    this._simFrameCount++;
   }
 
   get pauseGeneration(): boolean {

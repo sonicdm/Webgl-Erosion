@@ -4,6 +4,7 @@ import { HeightmapSource } from '../../utils/HeightmapSource';
 import { ensureTerrainLibrary } from '../../terrain/THREE.Terrain';
 import { createCustomTerrainHeightmap } from '../../terrain/custom-terrain-algorithms';
 import { PingPongTarget } from '../../gpgpu/PingPongTarget';
+import { SimulationParams } from '../../../app/dto/SimulationParams';
 
 /**
  * Service responsible for terrain mesh generation and heightmap readback
@@ -96,7 +97,7 @@ export class TerrainReadbackService {
    * Generates terrain mesh and initializes heightmap
    */
   public async generateTerrain(
-    controls: any,
+    controls: SimulationParams | any,
     timer: number,
     heightmapSource: CanvasImageSource | ((heightmap: Float32Array, options: any) => void) | null = null,
     terrainRandom?: any

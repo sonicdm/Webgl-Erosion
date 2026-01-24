@@ -6,7 +6,7 @@ uniform mat4 u_ModelInvTr;
 uniform mat4 u_ViewProj;
 uniform vec2 u_PlanePos; // Our location in the virtual world displayed by the plane
 
-uniform sampler2D hightmap;
+uniform sampler2D heightmap;
 uniform sampler2D sedimap;
 uniform float u_SimRes;
 
@@ -28,8 +28,8 @@ void main()
 
   fs_Uv = vs_Uv;
   float sval = 1.f*texture(sedimap,vs_Uv).x;
-  float yval = 1.f*texture(hightmap,vs_Uv).x;
-  float wval = 1.f*texture(hightmap,vs_Uv).y;
+  float yval = 1.f*texture(heightmap,vs_Uv).x;
+  float wval = 1.f*texture(heightmap,vs_Uv).y;
   vec4 modelposition = vec4(vs_Pos.x, (yval + sval + wval)/u_SimRes, vs_Pos.z, 1.0);
   fs_Pos = modelposition.xyz;
 

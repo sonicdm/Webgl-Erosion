@@ -153,6 +153,7 @@ jest.mock('../LavaPasses', () => {
 });
 
 // Import after mocks
+import { createSimulationParams } from '../../../../../app/dto/SimulationParams';
 import { LavaPasses } from '../LavaPasses';
 
 describe('LavaPasses', () => {
@@ -211,11 +212,7 @@ describe('LavaPasses', () => {
 
   describe('executeLavaFlow', () => {
     it('should set input textures and uniforms', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        pipeAra: 1.0,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, SimulationResolution: simres }, simres);
       const timer = 0.1;
 
       lavaPasses.executeLavaFlow(controls, timer);
@@ -226,7 +223,7 @@ describe('LavaPasses', () => {
     });
 
     it('should handle lavaSources', () => {
-      const controls = { pipelen: 1.0, timestep: 0.01, pipeAra: 1.0 };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, SimulationResolution: simres }, simres);
       const lavaSources = {
         count: 2,
         positions: new Float32Array([0.1, 0.2, 0.3, 0.4]),
@@ -242,11 +239,7 @@ describe('LavaPasses', () => {
 
   describe('executeLavaUpdate', () => {
     it('should set input textures and uniforms', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        pipeAra: 1.0,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, SimulationResolution: simres }, simres);
       const timer = 0.1;
 
       lavaPasses.executeLavaUpdate(controls, timer);
@@ -257,7 +250,7 @@ describe('LavaPasses', () => {
     });
 
     it('should handle brushState', () => {
-      const controls = { pipelen: 1.0, timestep: 0.01, pipeAra: 1.0 };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, SimulationResolution: simres }, simres);
       const brushState = {
         brushPos: [0.5, 0.5] as [number, number],
         mouseWorldPos: [1, 2, 3, 1] as [number, number, number, number],
@@ -271,9 +264,7 @@ describe('LavaPasses', () => {
 
   describe('executeLavaTerrain', () => {
     it('should execute MRT pass and swap targets', () => {
-      const controls = {
-        timestep: 0.01,
-      };
+      const controls = createSimulationParams({ timestep: 0.01, SimulationResolution: simres }, simres);
 
       lavaPasses.executeLavaTerrain(controls);
 

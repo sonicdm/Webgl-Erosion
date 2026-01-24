@@ -398,14 +398,14 @@ void main() {
   vec2 rdp2 = vec2(0.1,0.8);
   vec2 uv = 0.5f*fs_Pos+vec2(0.5f);
 
-    float terrain_hight;
+    float terrain_height;
     float rainfall = .0f;
     
     // Check if we should use the imported height map
     if(u_UseHeightMap == 1){
         // Sample from the height map texture
         vec4 heightMapSample = texture(u_HeightMap, uv);
-        terrain_hight = heightMapSample.x; // R channel contains terrain height
+        terrain_height = heightMapSample.x; // R channel contains terrain height
         // Optionally preserve water and rock from height map if they exist
         // rainfall = heightMapSample.y; // G channel for water (currently 0.0)
         // rock material = heightMapSample.z; // B channel for rock (currently 0.0)
@@ -417,27 +417,27 @@ void main() {
         cpos += u_TerrainSeedOffset;
 
         float base_height = pow(fbm(cpos * 2.0) * 1.1, 3.0);
-        terrain_hight = base_height;
+        terrain_height = base_height;
 
         if(u_terrainBaseType == 2){
-            terrain_hight = teR(base_height / 1.2);
+            terrain_height = teR(base_height / 1.2);
         }else if(u_terrainBaseType == 1){
-            terrain_hight = domainwarp(cpos * 2.0);
+            terrain_height = domainwarp(cpos * 2.0);
         }else if(u_terrainBaseType == 3){
-            terrain_hight = voroni(cpos * 2.0) / 3.0;
+            terrain_height = voroni(cpos * 2.0) / 3.0;
         }else if(u_terrainBaseType == 4){
-            terrain_hight = ridgenoise(pow(fbm(cpos * 1.5), 2.0));
+            terrain_height = ridgenoise(pow(fbm(cpos * 1.5), 2.0));
         }else if(u_terrainBaseType == 5){
-            terrain_hight = billow_noise(cpos * 1.6);
+            terrain_height = billow_noise(cpos * 1.6);
         }else if(u_terrainBaseType == 6){
-            terrain_hight = turbulence(cpos * 1.5);
+            terrain_height = turbulence(cpos * 1.5);
         }else if(u_terrainBaseType == 7){
             float crater_base = pow(fbm(cpos * 1.2), 2.2);
             float crater_density = clamp(u_CraterDensity, 0.6, 1.8);
-            terrain_hight = crater_base * crater_mask(cpos * 1.1 * crater_density);
+            terrain_height = crater_base * crater_mask(cpos * 1.1 * crater_density);
         }else if(u_terrainBaseType == 8){
             float dune_base = fbm(cpos * 0.6) * 0.35 + 0.65;
-            terrain_hight = dune_base * dune_mask(cpos * 1.2);
+            terrain_height = dune_base * dune_mask(cpos * 1.2);
         }else if(u_terrainBaseType == 9){
             float canyon = canyon_mask(cpos * 1.1);
             float centerDist = distance(uv, vec2(0.5));
@@ -446,63 +446,63 @@ void main() {
             float plateau = fbm(cpos * 0.5) * 0.6 + 0.35;
             float ridge = ridged_mf(cpos * 0.9) * 0.22;
             float carve = (1.0 - canyon) * 1.15 * centerPull;
-            terrain_hight = clamp(plateau + ridge - carve, 0.0, 1.2);
+            terrain_height = clamp(plateau + ridge - carve, 0.0, 1.2);
         }else if(u_terrainBaseType == 10){
-            terrain_hight = mountains(cpos * 1.4);
+            terrain_height = mountains(cpos * 1.4);
         }else if(u_terrainBaseType == 11){
-            terrain_hight = billowy_ridges(cpos * 1.3);
+            terrain_height = billowy_ridges(cpos * 1.3);
         }
 
-        terrain_hight *= u_TerrainHeight*120.0;
+        terrain_height *= u_TerrainHeight*120.0;
         if(u_TerrainMask == 1){
             // Sphere mask - circular gradient from center
-            terrain_hight *= 2.0 * pow(c_mask, 1.0);
+            terrain_height *= 2.0 * pow(c_mask, 1.0);
         }else if(u_TerrainMask == 2){
             // Slope mask - diagonal gradient
-            terrain_hight *= (uv.x + uv.y) * 1.0;
+            terrain_height *= (uv.x + uv.y) * 1.0;
         }else if(u_TerrainMask == 3){
             // Square mask - square gradient from center
             float sq_mask = square_mask(uv);
-            terrain_hight *= 2.0 * pow(sq_mask, 1.0);
+            terrain_height *= 2.0 * pow(sq_mask, 1.0);
         }else if(u_TerrainMask == 4){
             // Ring mask - donut shape
             float ring = ring_mask(uv);
-            terrain_hight *= 2.0 * ring;
+            terrain_height *= 2.0 * ring;
         }else if(u_TerrainMask == 5){
             // Radial gradient - smooth falloff from center
             float radial = radial_gradient_mask(uv);
-            terrain_hight *= 2.0 * radial;
+            terrain_height *= 2.0 * radial;
         }else if(u_TerrainMask == 6){
             // Corner mask - highest in bottom-left corner
             float corner = corner_mask(uv);
-            terrain_hight *= 2.0 * corner;
+            terrain_height *= 2.0 * corner;
         }else if(u_TerrainMask == 7){
             // Diagonal mask - diagonal stripe pattern
             float diag = diagonal_mask(uv);
-            terrain_hight *= 1.0 + diag * 0.5;
+            terrain_height *= 1.0 + diag * 0.5;
         }else if(u_TerrainMask == 8){
             // Cross mask - cross pattern from center
             float cross = cross_mask(uv);
-            terrain_hight *= 1.0 + cross * 0.5;
+            terrain_height *= 1.0 + cross * 0.5;
         }else if(u_TerrainMask == 10){
             // Crater mask - adds impact basins
             float crater_density = clamp(u_CraterDensity, 0.6, 1.8);
             float crater = crater_mask(cpos * 1.1 * crater_density);
-            terrain_hight *= crater;
+            terrain_height *= crater;
         }else if(u_TerrainMask == 11){
             // Dune mask - adds wind-aligned ridges
             float dune = dune_mask(cpos * 1.2);
-            terrain_hight *= dune;
+            terrain_height *= dune;
         }
-        //terrain_hight = test(uv) * 500.0;
+        //terrain_height = test(uv) * 500.0;
     }
 
 //    if(uv.x > 0.5)
-//    terrain_hight = (40.0 * (uv.x - 0.5));
+//    terrain_height = (40.0 * (uv.x - 0.5));
 //    else
-//    terrain_hight = 0.0;
+//    terrain_height = 0.0;
 
   //if(uv.x>0.6||uv.x<0.5||uv.y>0.6||uv.y<0.5) rainfall = 0.f;
-    initial = vec4(terrain_hight,rainfall,0.0,1.f);
-    initial2= vec4(terrain_hight,rainfall,0.0,1.f);
+    initial = vec4(terrain_height,rainfall,0.0,1.f);
+    initial2= vec4(terrain_height,rainfall,0.0,1.f);
 }

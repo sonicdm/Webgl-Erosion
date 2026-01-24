@@ -91,6 +91,17 @@ export interface SimulationParams {
   // Source counts (for shader packing)
   sourceCount: number; // Water sources
   LavaSourceCount: number; // Lava sources
+
+  // Brush (optional; used by rain/lava pass when brushState is provided via controls)
+  brushSize?: number;
+  brushStrenth?: number;
+  brushType?: number;
+  brushPressed?: number;
+  brushOperation?: number;
+  flattenTargetHeight?: number;
+  slopeStartPos?: vec2;
+  slopeEndPos?: vec2;
+  slopeActive?: number;
 }
 
 /**
@@ -172,5 +183,15 @@ export function createSimulationParams(controls: any, simres: number): Simulatio
     
     sourceCount: controls.sourceCount ?? 0,
     LavaSourceCount: controls.LavaSourceCount ?? 0,
+
+    brushSize: controls.brushSize,
+    brushStrenth: controls.brushStrenth,
+    brushType: controls.brushType,
+    brushPressed: controls.brushPressed,
+    brushOperation: controls.brushOperation,
+    flattenTargetHeight: controls.flattenTargetHeight,
+    slopeStartPos: controls.slopeStartPos ? vec2.clone(controls.slopeStartPos) : undefined,
+    slopeEndPos: controls.slopeEndPos ? vec2.clone(controls.slopeEndPos) : undefined,
+    slopeActive: controls.slopeActive,
   };
 }

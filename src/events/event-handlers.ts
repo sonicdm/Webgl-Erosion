@@ -28,7 +28,7 @@ import {
     clearAllLavaSources,
     getLavaSourceCount
 } from '../utils/lava-sources';
-import { simres, HightMapCpuBuf } from '../simulation/simulation-state'; // @deprecated - will be replaced with state holders
+import { simres, heightMapCpuBuf } from '../simulation/simulation-state'; // @deprecated - will be replaced with state holders
 import { ThreeJSSimulationRuntime } from '../three/integration';
 import Camera from '../Camera';
 import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
@@ -231,13 +231,13 @@ export function createEventHandlers(
             const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() 
                 || deps?.terrainState?.heightMapCpuBuf 
                 || deps?.heightMapBuffer 
-                || HightMapCpuBuf;
+                || heightMapCpuBuf;
             
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
                 simres: deps?.simulationState?.simres || deps?.simres || Number(simres), // Use injected simres if available
-                HightMapCpuBuf: heightMapBuffer,
+                heightMapCpuBuf: heightMapBuffer,
                 camera: camera,
                 simulationState: deps?.simulationState,
                 terrainState: deps?.terrainState
@@ -269,13 +269,13 @@ export function createEventHandlers(
             const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() 
                 || deps?.terrainState?.heightMapCpuBuf 
                 || deps?.heightMapBuffer 
-                || HightMapCpuBuf;
+                || heightMapCpuBuf;
             
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
                 simres: deps?.simulationState?.simres || deps?.simres || Number(simres), // Use injected simres if available
-                HightMapCpuBuf: heightMapBuffer,
+                heightMapCpuBuf: heightMapBuffer,
                 camera: camera,
                 simulationState: deps?.simulationState,
                 terrainState: deps?.terrainState

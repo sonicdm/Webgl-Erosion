@@ -129,7 +129,7 @@ export function resizeTextures4Simulation(
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     // recreate CPU read texture buffer for simulation & User interaction
-    // Note: HightMapCpuBuf is imported from simulation-state, but we need to update it
+    // Note: heightMapCpuBuf is imported from simulation-state, but we need to update it
     // This will be handled by the caller
 }
 

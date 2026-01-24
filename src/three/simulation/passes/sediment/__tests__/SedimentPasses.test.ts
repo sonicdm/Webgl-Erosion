@@ -184,6 +184,7 @@ jest.mock('../SedimentPasses', () => {
 });
 
 // Import after mocks
+import { createSimulationParams } from '../../../../../app/dto/SimulationParams';
 import { SedimentPasses } from '../SedimentPasses';
 
 describe('SedimentPasses', () => {
@@ -250,13 +251,7 @@ describe('SedimentPasses', () => {
 
   describe('executeSediment', () => {
     it('should execute MRT pass and swap targets', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        Kc: 0.1,
-        Ks: 0.2,
-        Kd: 0.3,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, Kc: 0.1, Ks: 0.2, Kd: 0.3, SimulationResolution: simres }, simres);
       const timer = 0.1;
 
       sedimentPasses.executeSediment(controls, timer);
@@ -274,10 +269,7 @@ describe('SedimentPasses', () => {
 
   describe('executeMacCormackAdvection', () => {
     it('should execute all three subpasses and swap targets', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, SimulationResolution: simres }, simres);
 
       sedimentPasses.executeMacCormackAdvection(controls);
 
@@ -291,10 +283,7 @@ describe('SedimentPasses', () => {
 
   describe('executeSimpleAdvection', () => {
     it('should execute MRT pass and swap targets', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, SimulationResolution: simres }, simres);
 
       sedimentPasses.executeSimpleAdvection(controls);
 
@@ -307,11 +296,7 @@ describe('SedimentPasses', () => {
 
   describe('executeAverage', () => {
     it('should execute MRT pass and swap terrain target', () => {
-      const controls = {
-        pipelen: 1.0,
-        timestep: 0.01,
-        pipeAra: 1.0,
-      };
+      const controls = createSimulationParams({ pipelen: 1.0, timestep: 0.01, pipeAra: 1.0, SimulationResolution: simres }, simres);
 
       sedimentPasses.executeAverage(controls);
 

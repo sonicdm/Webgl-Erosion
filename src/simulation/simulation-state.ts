@@ -14,29 +14,29 @@ export const shadowMapResolution = 4096;
 export const enableBilateralBlur = false;
 
 export let speed = 3;
-export let SimFramecnt = 0;
+export let simFrameCount = 0;
 export let TerrainGeometryDirty = true;
 export let PauseGeneration = false;
 // CPU buffer for raycasting - dynamically sized to match simulation resolution
-export let HightMapCpuBuf = new Float32Array(1024 * 1024 * 4); // Initial size, will be resized
-export let HightMapBufCounter = 0;
+export let heightMapCpuBuf = new Float32Array(1024 * 1024 * 4); // Initial size, will be resized
+export let heightMapBufCounter = 0;
 // Flag to track if heightmap buffer is fresh (just read after terrain generation)
-export let HightMapBufIsFresh = false;
+export let heightMapBufIsFresh = false;
 
-export function setHightMapBufIsFresh(isFresh: boolean): void {
-    HightMapBufIsFresh = isFresh;
+export function setHeightMapBufIsFresh(isFresh: boolean): void {
+    heightMapBufIsFresh = isFresh;
 }
 
-export function incrementHightMapBufCounter(): void {
-    HightMapBufCounter++;
+export function incrementHeightMapBufCounter(): void {
+    heightMapBufCounter++;
 }
 
-export function resetHightMapBufCounter(): void {
-    HightMapBufCounter = 0;
+export function resetHeightMapBufCounter(): void {
+    heightMapBufCounter = 0;
 }
 
 // Read heightmap to CPU every 200 frames for raycasting (when brush is idle)
-export const MaxHightMapBufCounter = 200;
+export const maxHeightMapBufCounter = 200;
 
 // Read heightmap more frequently when brush is active/visible
 // Higher values reduce CPU readback cost but can make brush hover slightly stale
@@ -54,22 +54,22 @@ function getResolutionScale(simres: number): number {
 export function shouldReadHeightmap(brushPressed: boolean, brushVisible: boolean, simres: number): boolean {
     if (brushPressed) {
         const scale = getResolutionScale(simres);
-        return HightMapBufCounter % (ActiveHeightmapReadInterval * scale) === 0;
+        return heightMapBufCounter % (ActiveHeightmapReadInterval * scale) === 0;
     }
     if (brushVisible) {
         const scale = getResolutionScale(simres);
-        return HightMapBufCounter % (HoverHeightmapReadInterval * scale) === 0;
+        return heightMapBufCounter % (HoverHeightmapReadInterval * scale) === 0;
     }
-    return HightMapBufCounter >= MaxHightMapBufCounter;
+    return heightMapBufCounter >= maxHeightMapBufCounter;
 }
 export let simres: number = simresolution;
 
-export function resizeHightMapCpuBuf(newRes: number): void {
+export function resizeHeightMapCpuBuf(newRes: number): void {
     // Resize CPU buffer to match simulation resolution for accurate raycasting
     // Only reallocate if size changed to avoid unnecessary allocations
     const newSize = newRes * newRes * 4;
-    if (!HightMapCpuBuf || HightMapCpuBuf.length !== newSize) {
-        HightMapCpuBuf = new Float32Array(newSize);
+    if (!heightMapCpuBuf || heightMapCpuBuf.length !== newSize) {
+        heightMapCpuBuf = new Float32Array(newSize);
     }
 }
 
@@ -104,12 +104,12 @@ export function setPauseGeneration(value: boolean): void {
     PauseGeneration = value;
 }
 
-export function setSimFramecnt(value: number): void {
-    SimFramecnt = value;
+export function setSimFrameCount(value: number): void {
+    simFrameCount = value;
 }
 
-export function incrementSimFramecnt(): void {
-    SimFramecnt++;
+export function incrementSimFrameCount(): void {
+    simFrameCount++;
 }
 
 export function setTerrainGeometryDirty(value: boolean): void {
@@ -174,3 +174,27 @@ export function shouldUpdateGeometry(): boolean {
     return enableBVHUpdates && (geometryNeedsUpdate || geometryUpdateCounter >= geometryUpdateInterval);
 }
 
+// Deprecated aliases for backward compatibility (will be removed in future)
+// These maintain compatibility with legacy code while new code uses corrected names
+/** @deprecated Use heightMapCpuBuf instead */
+export { heightMapCpuBuf as HightMapCpuBuf };
+/** @deprecated Use heightMapBufCounter instead */
+export { heightMapBufCounter as HightMapBufCounter };
+/** @deprecated Use heightMapBufIsFresh instead */
+export { heightMapBufIsFresh as HightMapBufIsFresh };
+/** @deprecated Use maxHeightMapBufCounter instead */
+export { maxHeightMapBufCounter as MaxHightMapBufCounter };
+/** @deprecated Use simFrameCount instead */
+export { simFrameCount as SimFramecnt };
+/** @deprecated Use setHeightMapBufIsFresh instead */
+export { setHeightMapBufIsFresh as setHightMapBufIsFresh };
+/** @deprecated Use incrementHeightMapBufCounter instead */
+export { incrementHeightMapBufCounter as incrementHightMapBufCounter };
+/** @deprecated Use resetHeightMapBufCounter instead */
+export { resetHeightMapBufCounter as resetHightMapBufCounter };
+/** @deprecated Use resizeHeightMapCpuBuf instead */
+export { resizeHeightMapCpuBuf as resizeHightMapCpuBuf };
+/** @deprecated Use setSimFrameCount instead */
+export { setSimFrameCount as setSimFramecnt };
+/** @deprecated Use incrementSimFrameCount instead */
+export { incrementSimFrameCount as incrementSimFramecnt };

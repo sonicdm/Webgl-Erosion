@@ -47,7 +47,7 @@ export interface Shaders {
     flat: ShaderProgram;
     noiseterrain: ShaderProgram;
     flow: ShaderProgram;
-    waterhight: ShaderProgram;
+    waterHeight: ShaderProgram;
     sediment: ShaderProgram;
     sediadvect: ShaderProgram;
     macCormack: ShaderProgram;
@@ -90,7 +90,7 @@ export function createShaders(gl_context: any): Shaders {
         new Shader(gl_context.FRAGMENT_SHADER, flowFrag),
     ]);
 
-    const waterhight = new ShaderProgram([
+    const waterHeight = new ShaderProgram([
         new Shader(gl_context.VERTEX_SHADER, quadVert),
         new Shader(gl_context.FRAGMENT_SHADER, waterHeightFrag),
     ]);
@@ -117,7 +117,7 @@ export function createShaders(gl_context: any): Shaders {
 
     const evaporation = new ShaderProgram([
         new Shader(gl_context.VERTEX_SHADER, quadVert),
-        new Shader(gl_context.FRAGMENT_SHADER, evaFrag),
+        new Shader(gl_context.FRAGMENT_SHADER, evaporationFrag),
     ]);
 
     const average = new ShaderProgram([
@@ -195,7 +195,7 @@ export function createShaders(gl_context: any): Shaders {
         flat,
         noiseterrain,
         flow,
-        waterhight,
+        waterHeight,
         sediment,
         sediadvect,
         macCormack,

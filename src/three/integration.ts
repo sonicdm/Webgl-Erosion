@@ -103,7 +103,7 @@ export class ThreeJSSimulationRuntime {
    * Initializes terrain textures with procedural generation or heightmap
    */
   public async initializeTextures(
-    controls: any,
+    controls: SimulationParams | any,
     timer: number,
     heightmapSource: CanvasImageSource | ((heightmap: Float32Array, options: any) => void) | null = null,
     terrainRandom?: any

@@ -15,9 +15,9 @@ import { createHeightMapLoader } from './utils/heightmap-loader';
 // Removed unused imports: getCachedUniformLocation, LoadProgressTracker, LoadPhase
 import { 
     simres, PauseGeneration,
-    HightMapCpuBuf, setGlContext, 
+    heightMapCpuBuf, setGlContext, 
     setLastMousePosition,
-    setPauseGeneration, setSimFramecnt, setTerrainGeometryDirty,
+    setPauseGeneration, setSimFrameCount, setTerrainGeometryDirty,
     terrainGeometry
 } from './simulation/simulation-state';
 // Removed unused texture-management imports (all textures/framebuffers now used in legacy-runner.ts)
@@ -64,7 +64,7 @@ function StartGeneration(){
 // This is set up after threeRuntime is created
 // Note: resetWithThreeRuntime is declared at module level (line 1322)
 function Reset(){
-    setSimFramecnt(0);
+    setSimFrameCount(0);
     setTerrainRandom(terrainRandom);
     setTerrainGeometryDirty(true);
     // Resolution change will be handled in the TerrainGeometryDirty block
@@ -183,8 +183,8 @@ function main() {
     
     // Update Reset to use AppContext
     const resetWrapper = () => {
-      appContext.simulationState.simFramecnt = 0;
-      setSimFramecnt(0); // Also update global for backward compatibility
+      appContext.simulationState.simFrameCount = 0;
+      setSimFrameCount(0); // Also update global for backward compatibility
       
       // Update terrain random
       setTerrainRandom(terrainRandom);
@@ -243,7 +243,7 @@ function main() {
     
     // Create dependency object for event handlers (dependency injection)
     const eventHandlerDeps: EventHandlerDependencies = {
-      heightMapBuffer: threeRuntime?.getHeightMapCpuBuffer() || HightMapCpuBuf, // Fallback for WebGL
+      heightMapBuffer: threeRuntime?.getHeightMapCpuBuffer() || heightMapCpuBuf, // Fallback for WebGL
       threeRuntime: threeRuntime,
       camera: camera,
       controls: controls,

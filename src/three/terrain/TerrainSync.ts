@@ -467,7 +467,7 @@ export class TerrainSync {
   /**
    * Updates the controls reference (for material updates)
    */
-  public setControls(controls: any): void {
+  public setControls(controls: SimulationParams | any): void {
     this.controls = controls;
   }
 

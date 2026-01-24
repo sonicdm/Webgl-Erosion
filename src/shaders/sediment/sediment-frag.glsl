@@ -1,7 +1,7 @@
 #version 300 es
 precision highp float;
 
-uniform sampler2D readTerrain;//water and hight map R: hight map, G: water map, B: , A:
+uniform sampler2D readTerrain;//water and height map R: height map, G: water map, B: , A:
 uniform sampler2D readVelocity;
 uniform sampler2D readSediment;
 uniform sampler2D readLava; // R: lava volume, G: temperature
@@ -239,7 +239,7 @@ void main() {
 
 
   float cursedi = curSediment.x;
-  float hight = curTerrain.x;
+  float height = curTerrain.x;
   float outsedi = curSediment.x;
 
   float water = curTerrain.y;
@@ -252,7 +252,7 @@ void main() {
   
   if(sedicap >cursedi){
     // Check if we're eroding sediment on top of rock or the rock itself
-    bool erodingSedimentLayer = hasSedimentOnRock && hight > baseRockSurfaceHeight;
+    bool erodingSedimentLayer = hasSedimentOnRock && height > baseRockSurfaceHeight;
     
     // Only apply rock resistance if we're eroding the actual rock, not sediment on top
     float effectiveRockFactor = erodingSedimentLayer ? 1.0 : rockFactor;
@@ -262,12 +262,12 @@ void main() {
     float changesedi = (sedicap -cursedi) * (Ks * effectiveRockFactor) * erosionMultiplier;
     //changesedi = min(changesedi, curTerrain.y);
 
-      hight = hight - changesedi;
+      height = height - changesedi;
       heightChange = -changesedi; // Negative = erosion
       
       // If we've eroded down to the base rock surface, reset the base surface height
-      if (hasSedimentOnRock && hight <= baseRockSurfaceHeight) {
-        baseRockSurfaceHeight = hight; // Update base to current height
+      if (hasSedimentOnRock && height <= baseRockSurfaceHeight) {
+        baseRockSurfaceHeight = height; // Update base to current height
       }
       
       // water = water + (sedicap-cursedi)*Ks;
@@ -302,7 +302,7 @@ void main() {
       baseRockSurfaceHeight = curTerrain.x;
     }
     
-    hight = hight + changesedi;
+    height = height + changesedi;
     heightChange = changesedi; // Positive = deposition
     //water = water - (cursedi-sedicap)*Kd;
     outsedi = outsedi - changesedi;
@@ -319,7 +319,7 @@ void main() {
   
   // Check if this area is below the water surface by comparing total height (terrain + water)
   // to neighboring rock's total height
-  float currentTotalHeight = hight + waterLevel; // Current terrain + water height
+  float currentTotalHeight = height + waterLevel; // Current terrain + water height
   
   // Only spread rock if:
   // 1. There's little or no water (water < 0.1) AND
@@ -387,7 +387,7 @@ void main() {
     // Only spread if original terrain was above rock and has eroded well below it
     if (contiguousRockCount > 0 && originalTerrainHeight > lowestContiguousRockHeight) {
       // Calculate how far the CURRENT height is below the lowest contiguous painted edge
-      float depthBelowContiguousEdge = lowestContiguousRockHeight - hight;
+      float depthBelowContiguousEdge = lowestContiguousRockHeight - height;
       
       // Check if this area is below the water surface by comparing total height (terrain + water)
       // to neighboring rock's total height - if water would need to flow through here, don't spread rock
@@ -446,7 +446,7 @@ void main() {
           // But be very conservative - only small adjustment to prevent material creation
           float rockDensityRatio = 1.1; // Rock is 10% denser than soil (conservative)
           float heightAdjustment = rockMaterialAdded * effectiveDepth * 0.05 * rockDensityRatio; // Very small adjustment
-          hight = hight + heightAdjustment;
+          height = height + heightAdjustment;
         }
         
         // Use max to ensure rock value increases (doesn't decrease if already partially rock)
@@ -454,18 +454,18 @@ void main() {
         
         // When rock spreads, set the base rock surface height to current height
         // This marks where the rock surface is before any future sediment deposition
-        baseRockSurfaceHeight = hight;
+        baseRockSurfaceHeight = height;
       }
     }
   }
   
   // If this cell became rock (through spreading), ensure base surface is initialized
   if (finalRockMaterial > 0.5 && baseRockSurfaceHeight < 0.001) {
-    baseRockSurfaceHeight = hight;
+    baseRockSurfaceHeight = height;
   }
   
   writeTerrainNormal = vec4(vec3(abs(slopeSin)),1.f);
   writeSediment = vec4(outsedi,0.0f,0.0f,1.0f);
-  writeTerrain = vec4(hight,curTerrain.y,finalRockMaterial,baseRockSurfaceHeight);
+  writeTerrain = vec4(height,curTerrain.y,finalRockMaterial,baseRockSurfaceHeight);
   writeVelocity = curvel;
 }

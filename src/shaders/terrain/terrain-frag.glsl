@@ -11,7 +11,7 @@ in float fs_Sine;
 in vec2 fs_Uv;
 in vec4 fs_shadowPos;
 
-uniform sampler2D hightmap;
+uniform sampler2D heightmap;
 uniform sampler2D normap;
 uniform sampler2D sedimap;
 uniform sampler2D velmap;
@@ -66,11 +66,11 @@ uniform mat4 u_sview;
 
 vec3 calnor(vec2 uv){
     float eps = 1.f/u_SimRes;
-    vec4 cur = texture(hightmap,uv);
-    vec4 r = texture(hightmap,uv+vec2(eps,0.f));
-    vec4 t = texture(hightmap,uv+vec2(0.f,eps));
-    vec4 b = texture(hightmap,uv+vec2(0.f,-eps));
-    vec4 l = texture(hightmap,uv+vec2(-eps,0.f));
+    vec4 cur = texture(heightmap,uv);
+    vec4 r = texture(heightmap,uv+vec2(eps,0.f));
+    vec4 t = texture(heightmap,uv+vec2(0.f,eps));
+    vec4 b = texture(heightmap,uv+vec2(0.f,-eps));
+    vec4 l = texture(heightmap,uv+vec2(-eps,0.f));
 
     vec3 nor = vec3(l.x - r.x, 2.0, t.x - b.x);
     nor = -normalize(nor);
@@ -121,7 +121,7 @@ float fbm (in vec2 st) {
 
 
 float computeTerrainAO(){
-    vec4 HC = texture(hightmap,fs_Uv);
+    vec4 HC = texture(heightmap,fs_Uv);
     return 1.0;
 }
 
@@ -244,7 +244,7 @@ void main()
 
 
     //lamb =1.f;
-    vec4 fH = texture(hightmap,fs_Uv);
+    vec4 fH = texture(heightmap,fs_Uv);
     float yval = fH.x * 4.0;
     float wval = fH.y;
     float rockVal = fH.z; // Rock material value (1.0 = rock, 0.0 = normal)
@@ -398,7 +398,7 @@ void main()
         //fcol = nor1;
         //fcol.xy = fcol.xy / 2.0 + vec2(0.5);
     }else if(u_TerrainDebug == 3){
-        fcol = texture(hightmap,fs_Uv).xyz;
+        fcol = texture(heightmap,fs_Uv).xyz;
         fcol.xy /= 200.0;
         fcol.y *= 80.0;
         //fcol = vec3(fcol.z);
@@ -530,7 +530,7 @@ void main()
         // Water Contact with Lava debug view
         // Show where water and lava are in contact
         // Blue = water only, Red = lava only, Purple = both (contact)
-        vec4 terrainData = texture(hightmap, fs_Uv);
+        vec4 terrainData = texture(heightmap, fs_Uv);
         float waterVol = terrainData.y;
         float lavaVol = lavaVolume;
         
@@ -550,7 +550,7 @@ void main()
     }else if(u_TerrainDebug == 15){
         // Rock Material debug view (with layering)
         // Shows rock material value and sediment layering on top
-        vec4 terrainData = texture(hightmap, fs_Uv);
+        vec4 terrainData = texture(heightmap, fs_Uv);
         float rockVal = terrainData.z; // Rock material (0.0 to 1.0)
         float baseRockHeight = terrainData.w; // Base rock surface height
         float terrainHeight = terrainData.x; // Current terrain height

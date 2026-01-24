@@ -1,0 +1,16 @@
+---
+description: Use test:ci when running tests from the Cursor agent to avoid spawn EPERM
+alwaysApply: true
+---
+
+# Running Tests and Build from the Cursor Agent
+
+When running tests from the Cursor agent (run_terminal_cmd / Shell), use:
+
+- **Tests:** `npm run test:ci` (not `npm test`)
+
+`npm test` runs Jest with parallel workers (`child_process.fork`). In the Cursor agent execution environment this can fail with `spawn EPERM`. `test:ci` uses `jest --runInBand` (single process, no workers) and runs correctly.
+
+- **Build:** `npm run build` — use as usual.
+
+- **Local/terminal:** `npm test` works; use it. `test:ci` is only for agent/CI environments where `npm test` fails.

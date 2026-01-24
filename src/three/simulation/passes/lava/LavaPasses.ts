@@ -4,6 +4,7 @@ import { PassRunner } from '../../../gpgpu/PassRunner';
 import { MRTRenderTarget } from '../../../gpgpu/MRTRenderTarget';
 import { RenderTargets } from '../../targets/RenderTargets';
 import { shaderManifest } from '../../../../shaders/manifest';
+import { SimulationParams } from '../../../../app/dto/SimulationParams';
 
 /**
  * Lava simulation passes
@@ -35,7 +36,7 @@ export class LavaPasses {
    * Executes the lava flow pass
    */
   public executeLavaFlow(
-    controls: any,
+    controls: SimulationParams,
     timer: number,
     lavaSources?: {
       count: number;
@@ -90,7 +91,7 @@ export class LavaPasses {
    * Executes the lava update pass
    */
   public executeLavaUpdate(
-    controls: any,
+    controls: SimulationParams,
     timer: number,
     brushState?: {
       mouseWorldPos?: [number, number, number, number];
@@ -173,7 +174,7 @@ export class LavaPasses {
    * Executes the lava-terrain interaction pass (2-output MRT)
    */
   public executeLavaTerrain(
-    controls: any,
+    controls: SimulationParams,
     lavaSources?: {
       count: number;
       positions: Float32Array;

@@ -28,7 +28,7 @@ export class HeightmapBridge {
   public async initializeTextures(
     controls: SimulationParams | any, // Accept SimulationParams or legacy controls for backward compatibility
     timer: number,
-    heightmapSource: CanvasImageSource | ((heightmap: Float32Array, options: any) => void) | null = null,
+    heightmapSource: CanvasImageSource | ((heightmap: Float32Array, options: SimulationParams | any) => void) | null = null,
     terrainRandom?: any
   ): Promise<void> {
     if (!this.passManager) {
