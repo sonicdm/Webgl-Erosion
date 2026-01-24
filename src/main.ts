@@ -60,7 +60,8 @@ import { createShaders, Shaders } from './rendering/shader-factory';
 import { THREEJS_CONFIG } from './three/config';
 import { ThreeJSSimulationRuntime } from './three/integration';
 import { createTerrainIO } from './three/utils/terrain-io';
-import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner, createLegacyRunner, type AppContext } from './app';
+import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner, createLegacyRunner, initializeLegacyPipeline, type AppContext } from './app';
+import { setTerrainRandom, type TerrainRandomParams } from './utils/terrain-random';
 
 // Note: Most state variables are now imported from simulation-state.ts
 // Additional local variables
@@ -286,7 +287,7 @@ function StartGeneration(){
 // Note: resetWithThreeRuntime is declared at module level (line 1322)
 function Reset(){
     setSimFramecnt(0);
-    setTerrainRandom();
+    setTerrainRandom(terrainRandom);
     setTerrainGeometryDirty(true);
     // Resolution change will be handled in the TerrainGeometryDirty block
     //PauseGeneration = true;
@@ -297,18 +298,7 @@ function Reset(){
     }
 }
 
-function setTerrainRandom() {
-    const angle = Math.random() * Math.PI * 2.0;
-    terrainRandom.duneDir[0] = Math.cos(angle);
-    terrainRandom.duneDir[1] = Math.sin(angle);
-
-    terrainRandom.craterDensity = 0.8 + Math.random() * 0.7;
-    terrainRandom.canyonDepth = 0.45 + Math.random() * 0.5;
-    terrainRandom.seedOffset[0] = Math.random() * 256.0;
-    terrainRandom.seedOffset[1] = Math.random() * 256.0;
-
-    setTerrainGeometryDirty(true);
-}
+// setTerrainRandom extracted to utils/terrain-random.ts
 
 // Heightmap loading functions are now created via createHeightMapLoader in main()
 
@@ -424,13 +414,7 @@ function main() {
       setSimFramecnt(0); // Also update global for backward compatibility
       
       // Update terrain random
-      const angle = Math.random() * Math.PI * 2.0;
-      terrainRandom.duneDir[0] = Math.cos(angle);
-      terrainRandom.duneDir[1] = Math.sin(angle);
-      terrainRandom.craterDensity = 0.8 + Math.random() * 0.7;
-      terrainRandom.canyonDepth = 0.45 + Math.random() * 0.5;
-      terrainRandom.seedOffset[0] = Math.random() * 256.0;
-      terrainRandom.seedOffset[1] = Math.random() * 256.0;
+      setTerrainRandom(terrainRandom);
       
       appContext.simulationState.terrainGeometryDirty = true;
       setTerrainGeometryDirty(true); // Also update global for backward compatibility
@@ -443,14 +427,7 @@ function main() {
     
     // Update setTerrainRandom to use AppContext
     const setTerrainRandomWrapper = () => {
-      const angle = Math.random() * Math.PI * 2.0;
-      terrainRandom.duneDir[0] = Math.cos(angle);
-      terrainRandom.duneDir[1] = Math.sin(angle);
-      terrainRandom.craterDensity = 0.8 + Math.random() * 0.7;
-      terrainRandom.canyonDepth = 0.45 + Math.random() * 0.5;
-      terrainRandom.seedOffset[0] = Math.random() * 256.0;
-      terrainRandom.seedOffset[1] = Math.random() * 256.0;
-      
+      setTerrainRandom(terrainRandom);
       appContext.simulationState.terrainGeometryDirty = true;
       setTerrainGeometryDirty(true); // Also update global for backward compatibility
     };
@@ -751,102 +728,27 @@ function main() {
     // If modifier is not pressed, do nothing - let OrbitControls handle zoom normally
   }, { capture: true, passive: false }); // capture: true to intercept before OrbitControls, passive: false allows preventDefault
 
-    if (!gl_context) {
-    alert('WebGL 2 not supported!');
-  }
-    var extensions = gl_context.getSupportedExtensions();
-    for(let e in extensions){
-        console.log(e);
-    }
-  if(!gl_context.getExtension('OES_texture_float_linear')){
-        console.log("float texture not supported");
-    }
-  if(!gl_context.getExtension('OES_texture_float')){
-      console.log("no float texutre!!!?? y am i here?");
-  }
-  if(!gl_context.getExtension('EXT_color_buffer_float')) {
-      console.log("cant render to float texture ");
-  }
-  // `setGL` is a function imported above which sets the value of `gl_context` in the `globals.ts` module.
-  // Later, we can import `gl_context` from `globals.ts` to access it
-  setGL(gl_context);
-
-  // Initial call to load scene
-  loadScene();
-
-  // Camera is already created above, just check brushUsesLeftClick here for reference
-  const brushUsesLeftClick = controlsConfig.mouse.brushActivate === 'LEFT' || 
-                             (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
-  const renderer = new OpenGLRenderer(canvas);
-  renderer.setClearColor(0.0, 0.0, 0.0, 0);
-  gl_context.enable(gl_context.DEPTH_TEST);
-
-    setupFramebufferandtextures(gl_context, simres);
-    
-    // Create all shaders
-    const shaders = createShaders(gl_context);
-    const {
-        lambert, flat, flow, waterhight, sediment, sediadvect, macCormack,
-        rains, evaporation, average, clean, water, thermalterrainflux,
-        thermalapply, maxslippageheight, shadowMapShader, sceneDepthShader,
-        combinedShader, bilateralBlur, veladvect, lavaFlow, lavaUpdate, lavaTerrain
-    } = shaders;
-    noiseterrain = shaders.noiseterrain;
-    setTerrainRandom();
-
-
-    // timer is still used for threeRuntime.initializeTextures() calls
-    let timer = 0;
-
-    // cleanUpTextures and reusable variables have been moved to legacy-runner.ts
-    // They are now part of the LegacyRunner implementation
-
-  // Create legacy runner with all dependencies
-  // tick(), SimulatePerStep(), and SimulationStep() have been extracted to legacy-runner.ts
-  const legacyRunner = createLegacyRunner({
+  // Initialize legacy WebGL pipeline
+  // This handles WebGL extension validation, geometry creation, renderer setup,
+  // texture/framebuffer setup, shader creation, and terrain random initialization
+  const legacyInit = initializeLegacyPipeline(
     appContext,
-    controls,
+    gl_context,
     canvas,
-    glContext: gl_context,
-    renderer,
-    camera,
-    shaders: {
-      lambert,
-      flat,
-      flow,
-      waterhight,
-      sediment,
-      sediadvect,
-      macCormack,
-      rains,
-      evaporation,
-      average,
-      clean,
-      water,
-      thermalterrainflux,
-      thermalapply,
-      maxslippageheight,
-      shadowMapShader,
-      sceneDepthShader,
-      combinedShader,
-      bilateralBlur,
-      veladvect,
-      lavaFlow,
-      lavaUpdate,
-      lavaTerrain,
-      noiseterrain,
-    },
-    geometries: {
-      square,
-      plane,
-    },
-    terrainRandom: {
-      seedOffset: [terrainRandom.seedOffset[0], terrainRandom.seedOffset[1]],
-      duneDir: [terrainRandom.duneDir[0], terrainRandom.duneDir[1]],
-      craterDensity: terrainRandom.craterDensity,
-      canyonDepth: terrainRandom.canyonDepth,
-    },
-  });
+    controls,
+    controlsConfig,
+    camera
+  );
+
+  // Store terrainRandom for helper functions (Reset, setTerrainRandom)
+  terrainRandom.seedOffset = legacyInit.terrainRandom.seedOffset;
+  terrainRandom.duneDir = legacyInit.terrainRandom.duneDir;
+  terrainRandom.craterDensity = legacyInit.terrainRandom.craterDensity;
+  terrainRandom.canyonDepth = legacyInit.terrainRandom.canyonDepth;
+  noiseterrain = legacyInit.config.shaders.noiseterrain;
+
+  // Create legacy runner with initialized config
+  const legacyRunner = createLegacyRunner(legacyInit.config);
 
   // Start the render loop using the legacy runner
   legacyRunner.start();
