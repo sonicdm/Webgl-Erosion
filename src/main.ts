@@ -29,9 +29,7 @@ import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner, creat
 import { setTerrainRandom, type TerrainRandomParams } from './utils/terrain-random';
 
 // Note: Most state variables are now imported from simulation-state.ts
-// Additional local variables
-let speed = 3;
-const enableBilateralBlur = false;
+// Removed unused variables: speed, enableBilateralBlur (now handled in legacy-runner.ts)
 var gl_context : WebGL2RenderingContext;
 
 
