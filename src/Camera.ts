@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 // @ts-ignore
 import { PerspectiveCamera } from 'three';
-import {OrbitControls} from "three/examples/jsm/controls/OrbitControls";
+import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js";
 
 import {vec3, mat4} from 'gl-matrix';
 // @ts-ignore
 
-import {Vector3, Spherical} from "three";
+import {Vector3} from "three";
 import { ControlsConfig } from './controls-config';
 
 

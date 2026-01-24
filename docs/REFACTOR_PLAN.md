@@ -64,9 +64,7 @@
 - **Testing**: All 115 tests passing, build succeeds, no linter errors
 - **Result**: `main.ts` is now a thin bootstrap that delegates to composition root and modularized runners
 
-## Current Issue Snapshot (Three terrain flat/yellow)
-- Symptom: Terrain renders flat and yellow → likely VTF displacement reads ~0 height and fragment shader shows debug/low-height color.
-- Risks: missing `u_StoredHeightMin/Max` wiring in the vertex shader/material, fallback min/max from geometry still active, or texture uploaded/normalized incorrectly despite RGBA32F intent.
+
 
 ## Near-term terrain/VTF plan
 1. **Contract enforcement layer**: Add a `HeightmapContract/HeightmapUniforms` helper that builds `{u_SimRes, u_StoredHeightMin, u_StoredHeightMax}` from HeightmapSource; fail fast if missing.
