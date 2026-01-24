@@ -39,6 +39,7 @@ export class ThreeJSSimulationRuntime {
   private cameraService: CameraService; // Camera service for camera management
   private terrainSync: TerrainSync; // Terrain sync service for geometry and BVH management
   private heightmapBridge: HeightmapBridge; // Heightmap bridge for readback and buffer management
+  private stepRunner: StepRunner; // Step runner for simulation execution
   private controlsConfig: ControlsConfig | null = null; // Camera configuration (stored for reference)
   // terraformingActive flag removed - terraforming is now GPU-based (rain shader)
 
@@ -332,40 +333,6 @@ export class ThreeJSSimulationRuntime {
     };
   }
 
-  /**
-   * @deprecated - Use TerrainSync.configureTextureForVTF directly
-   * This method is kept for backward compatibility but is now handled by TerrainSync
-   */
-  private configureTextureForVTF(texture: THREE.Texture): void {
-    // This method is no longer used - TerrainSync handles VTF configuration
-    // Keeping for backward compatibility only
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.generateMipmaps = false;
-    
-    // CRITICAL: Ensure texture type and format are explicitly set for FloatType
-    // This prevents Three.js from normalizing the texture when binding for VTF
-    texture.type = THREE.FloatType;
-    texture.format = THREE.RGBAFormat;
-    texture.needsUpdate = true;
-    
-    // CRITICAL: Force Three.js internal state to recognize FloatType
-    // This ensures the texture is bound with RGBA32F internal format, not normalized
-    const renderer = this.runtime.getRenderer();
-    const properties = (renderer as any).properties;
-    if (properties) {
-      const textureProperties = properties.get(texture);
-      if (textureProperties) {
-        const gl = renderer.getContext() as WebGL2RenderingContext;
-        // Ensure internal format is RGBA32F (not normalized)
-        (textureProperties as any).__webglTextureType = gl.FLOAT;
-        (textureProperties as any).__webglTextureFormat = gl.RGBA;
-        (textureProperties as any).__webglTextureInternalFormat = gl.RGBA32F || 0x8814;
-      }
-    }
-  }
 
   /**
    * Renders the scene
