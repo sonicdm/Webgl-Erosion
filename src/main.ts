@@ -1,15 +1,8 @@
-import {mat4, vec2, vec3, vec4} from 'gl-matrix';
-// @ts-ignore
-import Stats from 'stats-js';
+import {vec2, vec3} from 'gl-matrix';
 import * as DAT from 'dat-gui';
-import Square from './geometry/Square';
-import Plane from './geometry/Plane';
-import OpenGLRenderer from './rendering/gl/OpenGLRenderer';
 import Camera from './Camera';
-import {gl, setGL} from './globals';
-import ShaderProgram, {Shader} from './rendering/gl/ShaderProgram';
-import {stat} from "fs";
-import mouseChange from 'mouse-change';
+import {setGL} from './globals';
+import ShaderProgram from './rendering/gl/ShaderProgram';
 import { ControlsConfig, getMouseButtonAction, isModifierPressed } from './controls-config';
 import { loadSettings } from './settings';
 import { setupGUI, GUIControllers } from './gui/gui-setup';
@@ -71,63 +64,7 @@ var gl_context : WebGL2RenderingContext;
 
 
 
-//  (for backup)
-const controlscomp = {
-
-
-    tesselations: 5,
-    pipelen:  0.8,//
-    Kc : 0.10,
-    Ks : 0.020,
-    Kd : 0.013,
-    timestep : 0.05,
-    pipeAra :  0.6,
-    RainErosion : false, //
-    RainErosionStrength : 1.0,
-    RainErosionDropSize : 1.0,
-    EvaporationConstant : 0.005,
-    VelocityMultiplier : 1,
-    RainDegree : 4.5,
-    AdvectionSpeedScaling : 1.0,
-    spawnposx : 0.5,
-    spawnposy : 0.5,
-    posTemp : vec2.fromValues(0.0,0.0),
-    'Load Scene': loadScene, // A function pointer, essentially
-    'Start/Resume' :StartGeneration,
-    'ResetTerrain' : Reset,
-    'setTerrainRandom':setTerrainRandom,
-    SimulationSpeed : 3,
-    TerrainBaseMap : 0,
-    TerrainBaseType : 0,//0 ordinary fbm, 1 domain warping, 2 terrace, 3 voroni
-    TerrainBiomeType : 1,
-    TerrainScale : 3.2,
-    TerrainHeight : 2.0,
-    TerrainMask : 0,//0 off, 1 sphere
-    TerrainDebug : 0,
-    DebugMode: 0,
-    UseSimHeightmap: false,
-    WaterTransparency : 0.50,
-    SedimentTrace : 0, // 0 on, 1 off
-    TerrainPlatte : 1, // 0 normal alphine mtn, 1 desert, 2 jungle
-    SnowRange : 0,
-    ForestRange : 0,
-    brushType : 2, // 0 : no brush, 1 : terrain, 2 : water
-    brushSize : 4,
-    brushStrenth : 0.40,
-    brushOperation : 0, // 0 : add, 1 : subtract
-    brushPressed : 0, // 0 : not pressed, 1 : pressed
-    sourceCount : 0, // Number of active water sources
-    thermalRate : 0.5,
-    thermalErosionScale : 1.0,
-    lightPosX : 0.4,
-    lightPosY : 0.2,
-    lightPosZ : -1.0,
-    showScattering : true,
-    enableBilateralBlur : true,
-    AdvectionMethod : 1,
-    SimulationResolution : simres,
-
-};
+// controlscomp removed - was backup/legacy object, no longer used
 
 
 const controls = {
@@ -149,7 +86,6 @@ const controls = {
     spawnposx : 0.5,
     spawnposy : 0.5,
     posTemp : vec2.fromValues(0.0,0.0),
-    'Load Scene': loadScene, // A function pointer, essentially
     'Pause/Resume' :StartGeneration,
     'ResetTerrain' : Reset,
     'setTerrainRandom':setTerrainRandom,
@@ -246,14 +182,8 @@ const controls = {
 
 
 
-// ================ geometries ============
-// =============================================================
-let square: Square;
-let plane : Plane;
-let waterPlane : Plane;
-
-
 // Note: All texture and framebuffer variables are now imported from texture-management.ts
+// Geometries (square, plane) are now created in initializeLegacyPipeline()
 
 // Reference to the initial terrain shader (set in main function)
 let noiseterrain: ShaderProgram | null = null;
@@ -263,18 +193,6 @@ const terrainRandom = {
     craterDensity: 1.0,
     canyonDepth: 0.7
 };
-
-// ================ dat gui button call backs ============
-// =============================================================
-
-function loadScene() {
-  square = new Square(vec3.fromValues(0, 0, 0));
-  square.create();
-  plane = new Plane(vec3.fromValues(0,0,0), vec2.fromValues(1,1), 18);
-  plane.create();
-  waterPlane = new Plane(vec3.fromValues(0,0,0), vec2.fromValues(1,1), 18);
-  waterPlane.create();
-}
 
 // Helper functions - will be updated in main() to use AppContext
 // These are placeholders that will be replaced with AppContext-aware versions
@@ -313,23 +231,7 @@ function Reset(){
 
 
 
-// SimulationStep extracted to legacy-runner.ts
-// Unified coordinate normalization function
-// Converts viewport coordinates (clientX/clientY) to canvas-relative normalized coordinates [0, 1]
-// normalizeMousePosition imported from brush-controls
-function handleInteraction (buttons : number, x : number, y : number){
-    // mouseChange provides element-local coordinates (relative to canvas)
-    // NOTE: This function may be interfering with pointer events
-    // Disabled to prevent coordinate conflicts - pointer events handle mouse position directly
-    // const canvas = document.getElementById('canvas') as HTMLCanvasElement;
-    // if (canvas) {
-    //     const rect = canvas.getBoundingClientRect();
-    //     if (rect.width > 0 && rect.height > 0) {
-    //         setLastMousePosition(rect.left + x, rect.top + y);
-    //     }
-    // }
-    //console.log(x + ' ' + y);
-}
+// handleInteraction removed - was disabled/unused, pointer events handle mouse position directly
 
 // Controls configuration - can be changed at runtime if needed
 // controlsConfig will be loaded from settings in main() function
