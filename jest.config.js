@@ -18,8 +18,9 @@ export default {
         ignoreCodes: [2693], // Ignore "only refers to a type" errors for three.js
       },
     }],
+    '^.+\\.glsl(\\?raw)?$': '<rootDir>/jest.glsl-transformer.cjs',
   },
-  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'glsl'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
@@ -33,4 +34,3 @@ export default {
   ],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
 };
-
