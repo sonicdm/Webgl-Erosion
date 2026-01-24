@@ -20,6 +20,26 @@
 - Added Jest coverage for height encoding, HeightmapSource uniform block, stored-height creation, geometry extraction, and upload path RGBA32F handling (`src/three/utils/__tests__/heightmap-source.test.ts`).
 - Heightmap extraction logs are gated behind a DEBUG flag to keep tests and CI clean.
 
+## Progress — 2026-01-24 (Workstream A Complete)
+- **Composition Root**: Created `src/app/bootstrap.ts` with full service interfaces and implementations:
+  - `IGLContext`, `IRendererFactory`, `IBrushState`, `ITerrainState`, `IHeightmapIO`, `IRaycaster`, `ISimulationStepRunner`, `ICameraService`
+  - All services implemented and wired via `createApp()` composition root function
+- **Typed DTOs**: Created complete DTO layer:
+  - `SimulationParams` - typed simulation parameters with `createSimulationParams()` helper
+  - `BrushInput` - typed brush input with `createBrushInput()` helper  
+  - `SourceArrays` - water/lava source arrays with packing methods for shader uniforms
+  - `RenderTargetsSnapshot` - render target snapshot DTO (optional, for debugging)
+- **State Holders**: Created state holder classes replacing global state:
+  - `SimulationStateHolder` - wraps simres, frameCount, pause, terrainGeometryDirty
+  - `TerrainStateHolder` - wraps terrain geometry, BVH, heightmap CPU buffer, update counters
+  - `ClientStateHolder` - wraps client dimensions and pointer position
+- **Migration**: Updated files to optionally accept state holders (backward compatible):
+  - `brush-handler.ts`, `event-handlers.ts`, `heightmap-loader.ts`, `render-utils.ts`, `texture-management.ts`, `three/integration.ts`
+  - Added deprecation comments to `simulation-state.ts` and all importing files
+  - `ThreeJSSimulationRuntime.executeSimulationStep()` now accepts `SimulationParams`
+- **Barrel Exports**: Created `src/app/index.ts` for convenient imports
+- All code compiles successfully with no linter errors; backward compatibility maintained throughout
+
 ## Current Issue Snapshot (Three terrain flat/yellow)
 - Symptom: Terrain renders flat and yellow → likely VTF displacement reads ~0 height and fragment shader shows debug/low-height color.
 - Risks: missing `u_StoredHeightMin/Max` wiring in the vertex shader/material, fallback min/max from geometry still active, or texture uploaded/normalized incorrectly despite RGBA32F intent.
@@ -37,11 +57,15 @@
 - One responsibility per module; prefer folders by domain (render, sim, IO, input) over grab-bag files.
 - Keep shader and TypeScript naming in sync; fix typos while moving.
 
-## Workstream A — Composition Root & State
-1. Introduce `src/app/bootstrap.ts` as composition root that builds:
+## Workstream A — Composition Root & State ✅ COMPLETE
+1. ✅ Introduce `src/app/bootstrap.ts` as composition root that builds:
    - `GLContext`, `RendererFactory`, `ControlsConfig`, `BrushState`, `TerrainState`, `HeightmapIO`, `Raycaster`, `SimulationStepRunner`, `CameraService`.
-2. Define typed DTOs: `SimulationParams`, `BrushInput`, `SourceArrays` (water/lava), `RenderTargetsSnapshot`.
-3. Replace global imports (`simulation-state`) with injected state holders and setters where needed.
+   - All service interfaces defined and implemented; `SimulationStepRunner` delegates to `ThreeJSSimulationRuntime`
+2. ✅ Define typed DTOs: `SimulationParams`, `BrushInput`, `SourceArrays` (water/lava), `RenderTargetsSnapshot`.
+   - All DTOs created with helper functions for conversion from legacy controls objects
+3. ✅ Replace global imports (`simulation-state`) with injected state holders and setters where needed.
+   - State holders created and integrated; files updated to optionally use them (backward compatible)
+   - Deprecation comments added; gradual migration path established
 
 ## Workstream B — Entry Point Split (`src/main.ts`)
 1. Extract modules:
@@ -111,11 +135,11 @@
 - Manual smoke: launch legacy path and Three path separately; verify controls still map (brush, water/lava sources, BVH raycast toggle).
 
 ## Status by Workstream (as of 2026-01-24)
-- **A (composition root)**: Not started; globals and ad-hoc imports remain.
-- **B (entry split)**: Not started; `main.ts` still monolithic.
-- **C (Three runtime split)**: Not started; `integration.ts` still one class; no `TerrainSetup/TerrainSync` extraction.
+- **A (composition root)**: ✅ **COMPLETE** - Bootstrap created with all services, DTOs defined, state holders implemented. Files migrated to optionally use state holders (backward compatible). Ready for integration in Workstream B.
+- **B (entry split)**: Not started; `main.ts` still monolithic. Can now use `createApp()` from bootstrap.
+- **C (Three runtime split)**: Not started; `integration.ts` still one class; no `TerrainSetup/TerrainSync` extraction. `executeSimulationStep()` now accepts `SimulationParams`.
 - **D (pass manager restructure)**: Not started; `SimulationPassManager` unchanged structurally.
 - **E (shader layout/naming)**: Not started; flat folder, debug logic inline.
-- **F (naming/state cleanup)**: Not started; typos (`Hight*`, etc.) still present.
+- **F (naming/state cleanup)**: Not started; typos (`Hight*`, etc.) still present. State holders provide foundation for cleanup.
 - **G (cleanup/hygiene)**: Not started; `temp_*` files remain.
 - **H (heightmap/VTF)**: Partially done (RAW contract, helper, tests, debug-gating). Pending: central contract helper, uploader abstraction, shader audit/manifest, debug gating in fragment shader, displacement regression test.
