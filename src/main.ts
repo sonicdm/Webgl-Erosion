@@ -60,6 +60,7 @@ import { createShaders, Shaders } from './rendering/shader-factory';
 import { THREEJS_CONFIG } from './three/config';
 import { ThreeJSSimulationRuntime } from './three/integration';
 import { createTerrainIO } from './three/utils/terrain-io';
+import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner } from './app';
 
 // Note: Most state variables are now imported from simulation-state.ts
 // Additional local variables
@@ -1324,42 +1325,64 @@ let threeRuntime: ThreeJSSimulationRuntime | undefined;
 let resetWithThreeRuntime: ((rt: ThreeJSSimulationRuntime | undefined) => void) | null = null;
 
 function main() {
-
-  // Initial display for framerate
-  const stats = Stats();
-  stats.setMode(0);
-  stats.domElement.style.position = 'absolute';
-  stats.domElement.style.left = '0px';
-  stats.domElement.style.bottom = '0px';
-  stats.domElement.style.top = 'auto';
-  document.body.appendChild(stats.domElement);
-
-
-    //HightMapCpuBuf = new Float32Array(simresolution * simresolution * 4);
-
-  // Setup GUI - will be called after threeRuntime is created (dependency injection)
-  // Declare variables first, will be initialized after threeRuntime is available
-  let gui: DAT.GUI;
-  let controllers: GUIControllers;
-  let brushTypeController: DAT.GUIController;
-  let brushSizeController: DAT.GUIController;
-  let brushStrengthController: DAT.GUIController;
-  let brushOperationController: DAT.GUIController;
-
-  // get canvas and webgl context
+  // ============================================================================
+  // Stage 6: Refactored main.ts using new modules from Workstream B
+  // ============================================================================
+  
+  // Get canvas element
   const canvas = <HTMLCanvasElement> document.getElementById('canvas');
-  gl_context = <WebGL2RenderingContext> canvas.getContext('webgl2');
-  setGlContext(gl_context);
-  setClientDimensions(canvas.clientWidth, canvas.clientHeight);
+  if (!canvas) {
+    throw new Error('Canvas element not found');
+  }
 
-  // Load settings (from localStorage or defaults) - must be done before creating event handlers
+  // Get WebGL context
+  gl_context = <WebGL2RenderingContext> canvas.getContext('webgl2');
+  if (!gl_context) {
+    throw new Error('WebGL 2 not supported!');
+  }
+  setGL(gl_context);
+  setGlContext(gl_context);
+
+  // Load settings (from localStorage or defaults)
   controlsConfig = loadSettings();
   
   // Apply raycast method from settings
   controls.raycastMethod = controlsConfig.raycast.method;
   
-  // Heightfield raycasting uses the CPU heightmap buffer
-  
+  // Create AppContext using bootstrap
+  const appContext = createApp({
+    canvas,
+    glContext: gl_context,
+    initialSimres: simres,
+    controlsConfig,
+    getTerrainGeometry: () => {
+      // For Three.js path, get geometry from threeRuntime
+      if (threeRuntime) {
+        return threeRuntime.getTerrainGeometry();
+      }
+      // For legacy path, get from terrainGeometry global
+      return terrainGeometry;
+    },
+    onHeightmapChange: async (heightmap) => {
+      // Handle heightmap changes
+      if (threeRuntime) {
+        const timer = 0;
+        const terrainRandom = {
+          seedOffset: [0, 0],
+          duneDir: [1, 0],
+          craterDensity: 1.0,
+          canyonDepth: 1.0
+        };
+        await threeRuntime.initializeTextures(controls, timer, heightmap, terrainRandom);
+        const heightData = threeRuntime.readCombinedHeight();
+        threeRuntime.updateTerrainGeometry(heightData);
+      }
+    },
+  });
+
+  // Set up context (canvas, GL, resize handling)
+  const contextSetup = createAppContextSetup(appContext);
+
   // Create camera first (needed for event handlers)
   const brushUsesLeftClickForCamera = controlsConfig.mouse.brushActivate === 'LEFT' || 
                                        (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
@@ -1420,6 +1443,7 @@ function main() {
       if (isCanvas) {
         // Always update mouse position when clicking on canvas (needed for accurate brush positioning)
         setLastMousePosition(e.clientX, e.clientY);
+        appContext.clientState.setLastMousePosition(e.clientX, e.clientY);
         
         // Check if this is a brush action BEFORE calling handler
         const action = getMouseButtonAction(e.button, controlsConfig);
@@ -1455,6 +1479,7 @@ function main() {
         // Always update mouse position for ray casting (needed for brush preview circle)
         // Store client coordinates directly
         setLastMousePosition(e.clientX, e.clientY);
+        appContext.clientState.setLastMousePosition(e.clientX, e.clientY);
         
         // Only check modifier state when brush is actively pressed
         if (controls.brushPressed === 1) {
@@ -1491,28 +1516,32 @@ function main() {
   // Check if Three.js runtime is enabled
   // Note: threeRuntime is declared at module level for Reset() function access
   
-  // Setup GUI with dependency injection (threeRuntime will be injected if available)
-  // This follows dependency injection best practices - dependencies are passed explicitly
-  let guiResult: { gui: DAT.GUI, controllers: GUIControllers };
+  // Setup GUI - will be called after threeRuntime is created (dependency injection)
+  // Declare variables first, will be initialized after threeRuntime is available
+  let gui: DAT.GUI;
+  let controllers: GUIControllers;
+  let brushTypeController: DAT.GUIController;
+  let brushSizeController: DAT.GUIController;
+  let brushStrengthController: DAT.GUIController;
+  let brushOperationController: DAT.GUIController;
   
   if (THREEJS_CONFIG.USE_THREEJS_RUNTIME) {
     try {
-      // threeRuntime is declared at module level, assign to it here
+      // Create Three.js runtime
       threeRuntime = new ThreeJSSimulationRuntime(canvas, gl_context, simres);
       threeRuntime.initializeSimulation();
       threeRuntime.setControlsConfig(controlsConfig, brushUsesLeftClickForCamera);
+      
+      // Update AppContext's simulationStepRunner to use this threeRuntime
+      // Note: setThreeRuntime is available on the implementation, not the interface
+      (appContext.simulationStepRunner as any).setThreeRuntime?.(threeRuntime);
+      
       const threeCamera = threeRuntime.getCamera();
       if (threeCamera) {
-        // Verify Camera instance matches (DI check)
-        console.log('[WASD DI Check] Camera instance from threeRuntime.getCamera():', threeCamera);
-        console.log('[WASD DI Check] Camera instance ID/ref:', (threeCamera as any).__id || 'no id');
-        // Store reference for comparison in setupInputHandlers
-        (threeCamera as any).__wasdCheckId = 'threeRuntime_camera';
         setupInputHandlers(threeCamera);
       }
       
       // Inject threeRuntime into Reset function via closure (dependency injection)
-      // resetWithThreeRuntime is declared at module level
       resetWithThreeRuntime = (rt: ThreeJSSimulationRuntime | undefined) => {
         if (rt) {
           console.log('[Reset] ===== RESET BUTTON CLICKED =====');
@@ -1532,19 +1561,30 @@ function main() {
       };
       
       // Setup GUI with dependency injection (threeRuntime now available)
-      // This ensures terrain type changes and reset work properly
-      guiResult = setupGUI(controls, { threeRuntime: threeRuntime });
+      const guiResult = setupAppGUI(appContext, controls, threeRuntime);
+      gui = guiResult.gui;
+      controllers = guiResult.controllers;
+      brushTypeController = controllers.brushTypeController;
+      brushSizeController = controllers.brushSizeController;
+      brushStrengthController = controllers.brushStrengthController;
+      brushOperationController = controllers.brushOperationController;
+      
+      // Create Three.js runner and start it
+      const threeRunner = createThreeRunner(appContext, threeRuntime, controls, canvas);
+      threeRunner.start();
+      
+      // Exit early - Three.js runtime handles its own loop
+      return;
     } catch (error) {
       console.error('Failed to initialize Three.js runtime:', error);
-      // Fallback: setup GUI without threeRuntime
-      guiResult = setupGUI(controls);
+      console.error('Falling back to WebGL pipeline');
+      // Continue with WebGL pipeline below
     }
-  } else {
-    // Setup GUI without threeRuntime (WebGL pipeline)
-    guiResult = setupGUI(controls);
   }
   
-  // Extract GUI and controllers (dependency injection pattern)
+  // Legacy WebGL pipeline path
+  // Setup GUI without threeRuntime (WebGL pipeline)
+  const guiResult = setupAppGUI(appContext, controls);
   gui = guiResult.gui;
   controllers = guiResult.controllers;
   brushTypeController = controllers.brushTypeController;
@@ -1552,191 +1592,9 @@ function main() {
   brushStrengthController = controllers.brushStrengthController;
   brushOperationController = controllers.brushOperationController;
   
-  // If Three.js runtime is enabled, set it up and exit early (it handles its own loop)
-  if (THREEJS_CONFIG.USE_THREEJS_RUNTIME && threeRuntime) {
-    try {
-      // Set controls config on threeRuntime (must be done before creating event handlers)
-      // This will be set later when controlsConfig is loaded, but we need to prepare it
-      
-      // Initialize terrain textures with procedural generation (async)
-      const timer = 0;
-      const terrainRandom = {
-        seedOffset: [0, 0],
-        duneDir: [1, 0],
-        craterDensity: 1.0,
-        canyonDepth: 1.0
-      };
-
-      const { importHeightmap, clearHeightmap, exportHeightmap } = createTerrainIO({
-        simres,
-        controls,
-        getTerrainGeometry: () => threeRuntime!.getTerrainGeometry(),
-        onHeightmapChange: async (heightmap) => {
-          await threeRuntime!.initializeTextures(controls, timer, heightmap, terrainRandom);
-          const heightData = threeRuntime!.readCombinedHeight();
-          threeRuntime!.updateTerrainGeometry(heightData);
-        }
-      });
-
-      controls['Import Height Map'] = importHeightmap;
-      controls['Clear Height Map'] = clearHeightmap;
-      controls['Export Height Map'] = exportHeightmap;
-      
-      // Use async IIFE to handle async operations
-      (async () => {
-        try {
-          // Initialize terrain textures with procedural generation (await to ensure THREE.Terrain loads)
-          console.log('Starting texture initialization...');
-          await threeRuntime.initializeTextures(controls, timer, null, terrainRandom);
-          console.log('Texture initialization complete');
-          
-          // Wait a frame for GPU to finish processing
-          await new Promise(resolve => requestAnimationFrame(resolve));
-          
-          // Read initial height data and create terrain geometry immediately
-          let terrainInitialized = false;
-          try {
-            console.log('Reading initial height data...');
-            // readCombinedHeight now just returns initial heightmap (no expensive GPU readback)
-            const initialHeightData = threeRuntime.readCombinedHeight();
-            console.log('Height data read, length:', initialHeightData.length);
-            threeRuntime.updateTerrainGeometry(initialHeightData);
-            terrainInitialized = true;
-            console.log('Terrain geometry initialized successfully');
-          } catch (error) {
-            console.error('Failed to create initial terrain geometry:', error);
-            console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-          }
-          
-          // Set up animation loop that runs simulation and updates terrain
-          // Don't call threeRuntime.start() - we handle the loop ourselves
-          let frameCount = 0;
-          const animate = () => {
-            requestAnimationFrame(animate);
-            stats.begin();
-            
-            // Only run simulation and render if terrain is initialized
-            if (!terrainInitialized) {
-              // Try to initialize terrain on first few frames
-              if (frameCount < 10) {
-                try {
-                  // readCombinedHeight now just returns initial heightmap (no expensive GPU readback)
-                  const heightData = threeRuntime!.readCombinedHeight();
-                  threeRuntime!.updateTerrainGeometry(heightData);
-                  terrainInitialized = true;
-                } catch (error) {
-                  // Still initializing, skip this frame
-                  stats.end();
-                  return;
-                }
-              } else {
-                // Give up after 10 frames
-                console.error('Failed to initialize terrain after 10 frames');
-                stats.end();
-                return;
-              }
-            }
-            
-            // Calculate brush state (mouse world pos/dir, brush UV position) for brush uniforms
-            let brushState: {
-              mouseWorldPos?: [number, number, number, number];
-              mouseWorldDir?: [number, number, number];
-              brushPos?: [number, number];
-            } | undefined = undefined;
-            
-            if (threeRuntime) {
-              const canvas = document.getElementById('canvas') as HTMLCanvasElement;
-              if (canvas) {
-                // Calculate brush state when brush is visible or pressed
-                // Heightmap raycasting is fast, so we can do it every frame
-                const brushVisible = Number(controls.brushType) !== 0;
-                const brushPressed = controls.brushPressed === 1;
-                const shouldCalculateBrush = brushVisible || brushPressed;
-                
-                if (shouldCalculateBrush) {
-                  // Calculate brush state from current mouse position
-                  const calculatedBrushState = threeRuntime.calculateBrushState(lastX, lastY, canvas);
-                  if (calculatedBrushState) {
-                    // Only use brushState if brushPos is valid (not [-10, -10])
-                    const [brushPosX, brushPosY] = calculatedBrushState.brushPos;
-                    if (brushPosX >= 0 && brushPosX <= 1 && brushPosY >= 0 && brushPosY <= 1) {
-                      brushState = calculatedBrushState;
-                      // Update controls.posTemp for brush system compatibility (vec2 from gl-matrix)
-                      controls.posTemp = vec2.fromValues(calculatedBrushState.brushPos[0], calculatedBrushState.brushPos[1]);
-                      
-                      // Update brush state (flatten target height, slope end points, etc.) - same as WebGL path
-                      // Get camera from threeRuntime (it's not declared yet in this scope)
-                      const runtimeCamera = threeRuntime.getCamera();
-                      if (runtimeCamera) {
-                        const brushContext: BrushContext = {
-                          controls: controls as BrushControls,
-                          controlsConfig: controlsConfig,
-                          simres: Number(simres),
-                          HightMapCpuBuf: threeRuntime.getHeightMapCpuBuffer(),
-                          camera: runtimeCamera
-                        };
-                        updateBrushState(controls.posTemp, brushContext);
-                      }
-                    } else {
-                      // Invalid brushPos - don't set brushState (will use fallback from controls.posTemp)
-                      brushState = undefined;
-                    }
-                  } else {
-                    // calculateBrushState returned null - clear brushState
-                    brushState = undefined;
-                  }
-                } else {
-                  // Brush not active - clear brushState
-                  brushState = undefined;
-                }
-              }
-            }
-            
-            // Throttled debug logging for brush state (every 120 frames, only when pressed)
-            // Removed debug logging - was causing performance issues
-            
-            // Terraforming is now handled GPU-side by the rain shader
-            // The rain shader modifies the heightmap texture, and the vertex shader
-            // uses VTF to displace vertices from the texture
-            // No CPU-side terraforming needed
-            
-            // Run simulation steps
-            let timer = frameCount; // Use frame count as timer
-            for (let i = 0; i < controls.SimulationSpeed; i++) {
-              threeRuntime!.executeSimulationStep(controls, timer, brushState);
-              timer++; // Increment timer for each simulation step
-            }
-            
-            // CRITICAL PERFORMANCE: readCombinedHeight is disabled - it was taking 400ms+ per call
-            // GPU readback with FLOAT doesn't work (returns normalized values)
-            // For now, brush raycasting uses initial heightmap data
-            // Terraforming changes are applied to GPU textures but can't be read back
-            // TODO: Implement CPU-side tracking or copy pass for terraforming updates
-            
-            // Render the scene (only if terrain is initialized)
-            // Note: We don't update terrain geometry every frame anymore since we use THREE.Terrain mesh directly
-            // Geometry is only updated when terrain is regenerated (ResetTerrain) or heightmap is imported
-            if (terrainInitialized && threeRuntime) {
-              threeRuntime.render();
-            }
-            stats.end();
-          };
-          
-          animate();
-          console.log('Three.js runtime started successfully');
-        } catch (error) {
-          console.error('Failed to initialize textures:', error);
-        }
-      })();
-      
-      // Exit early - Three.js runtime handles its own loop
-      return;
-    } catch (error) {
-      console.error('Failed to set up Three.js runtime:', error);
-      console.error('Falling back to WebGL pipeline');
-      // Continue with WebGL pipeline below
-    }
-  }
+  // Legacy WebGL pipeline path
+  // TODO: Extract this to createLegacyRunner() once full extraction is complete
+  // For now, legacy initialization code continues below
   
   // Create heightmap loader functions
   const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(gl_context, simres, controls);
