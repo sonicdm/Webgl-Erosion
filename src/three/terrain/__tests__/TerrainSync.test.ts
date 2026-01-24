@@ -156,4 +156,114 @@ describe('TerrainSync', () => {
       }).not.toThrow();
     });
   });
+
+  describe('getCpuHeightmapTexture and setCpuHeightmapTexture', () => {
+    it('should return null initially', () => {
+      expect(terrainSync.getCpuHeightmapTexture()).toBeNull();
+    });
+
+    it('should set and get CPU heightmap texture', () => {
+      const texture = new THREE.DataTexture(new Float32Array(4), 1, 1);
+      terrainSync.setCpuHeightmapTexture(texture);
+      expect(terrainSync.getCpuHeightmapTexture()).toBe(texture);
+    });
+
+    it('should allow setting texture to null', () => {
+      const texture = new THREE.DataTexture(new Float32Array(4), 1, 1);
+      terrainSync.setCpuHeightmapTexture(texture);
+      terrainSync.setCpuHeightmapTexture(null);
+      expect(terrainSync.getCpuHeightmapTexture()).toBeNull();
+    });
+  });
+
+  describe('setPassManager', () => {
+    it('should set the pass manager', () => {
+      const mockPassManager = {
+        getTerrainMesh: jest.fn(() => null),
+      } as any;
+      terrainSync.setPassManager(mockPassManager);
+      // Verify by checking that updateTerrainGeometry can use it
+      const heightData = new Float32Array(64 * 64 * 4);
+      terrainSync.updateTerrainGeometry(heightData);
+      // getTerrainMesh is called internally to check for THREE.Terrain mesh
+      expect(mockPassManager.getTerrainMesh).toHaveBeenCalled();
+    });
+  });
+
+  describe('setControls', () => {
+    it('should set the controls', () => {
+      const mockControls = { TerrainScale: 2.0 };
+      terrainSync.setControls(mockControls);
+      // Controls are used internally, so we can't directly verify
+      // but we can ensure it doesn't throw
+      expect(() => terrainSync.setControls(mockControls)).not.toThrow();
+    });
+  });
+
+  describe('updateMaterialFromControls', () => {
+    it('should not throw if no terrain mesh exists', () => {
+      expect(() => {
+        terrainSync.updateMaterialFromControls({});
+      }).not.toThrow();
+    });
+
+    it('should not throw if controls is null', () => {
+      const simres = 64;
+      const heightData = new Float32Array(simres * simres * 4);
+      terrainSync.updateTerrainGeometry(heightData);
+      
+      expect(() => {
+        terrainSync.updateMaterialFromControls();
+      }).not.toThrow();
+    });
+
+    it('should update material when terrain mesh exists', () => {
+      const simres = 64;
+      const heightData = new Float32Array(simres * simres * 4);
+      terrainSync.updateTerrainGeometry(heightData);
+      
+      const controls = {
+        SnowRange: 0.5,
+        ForestRange: 0.3,
+        TerrainPlatte: 2,
+      };
+      
+      expect(() => {
+        terrainSync.updateMaterialFromControls(controls);
+      }).not.toThrow();
+    });
+  });
+
+  describe('dispose', () => {
+    it('should dispose resources without throwing', () => {
+      const simres = 64;
+      const heightData = new Float32Array(simres * simres * 4);
+      terrainSync.updateTerrainGeometry(heightData);
+      
+      expect(() => {
+        terrainSync.dispose();
+      }).not.toThrow();
+      
+      expect(terrainSync.getTerrainMesh()).toBeNull();
+      expect(terrainSync.getTerrainGeometry()).toBeNull();
+    });
+
+    it('should handle dispose when no resources exist', () => {
+      expect(() => {
+        terrainSync.dispose();
+      }).not.toThrow();
+    });
+  });
+
+  describe('updateTerrainGeometry error handling', () => {
+    it('should handle null controls gracefully', () => {
+      const terrainSyncWithNullControls = new TerrainSync(mockRuntime, 64, null, null);
+      const heightData = new Float32Array(64 * 64 * 4);
+      
+      // Should not throw, but may log error
+      expect(() => {
+        terrainSyncWithNullControls.updateTerrainGeometry(heightData);
+      }).not.toThrow();
+    });
+  });
 });

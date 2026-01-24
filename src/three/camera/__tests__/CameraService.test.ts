@@ -139,4 +139,24 @@ describe('CameraService', () => {
       }).not.toThrow();
     });
   });
+
+  describe('setControlsConfig edge cases', () => {
+    it('should handle null threeControls gracefully', () => {
+      // Mock Camera to return null threeControls
+      const mockCameraInstance = {
+        threeCamera: new THREE.PerspectiveCamera(),
+        threeControls: null, // Null controls
+        update: jest.fn(),
+      };
+      (Camera as jest.Mock).mockImplementation(() => mockCameraInstance);
+
+      const config: ControlsConfig = defaultControlsConfig;
+      
+      expect(() => {
+        cameraService.setControlsConfig(config, false);
+      }).not.toThrow();
+      
+      expect(mockRuntime.setCamera).toHaveBeenCalled();
+    });
+  });
 });

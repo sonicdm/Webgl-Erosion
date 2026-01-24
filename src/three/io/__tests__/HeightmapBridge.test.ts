@@ -189,4 +189,56 @@ describe('HeightmapBridge', () => {
       expect(heightmapBridge.isHeightMapInitialized()).toBe(true);
     });
   });
+
+  describe('setHeightMapInitialized', () => {
+    it('should set the initialized flag', () => {
+      expect(heightmapBridge.isHeightMapInitialized()).toBe(false);
+      heightmapBridge.setHeightMapInitialized(true);
+      expect(heightmapBridge.isHeightMapInitialized()).toBe(true);
+      heightmapBridge.setHeightMapInitialized(false);
+      expect(heightmapBridge.isHeightMapInitialized()).toBe(false);
+    });
+  });
+
+  describe('initializeTextures edge cases', () => {
+    it('should handle buffer size mismatch gracefully', async () => {
+      const mockControls = {};
+      // Create heightmap with wrong size
+      const mockInitialHeightmap = new Float32Array(mockSimres * mockSimres * 4 + 10);
+      heightmapBridge.setPassManager(mockPassManager);
+      
+      (mockPassManager as any).initializeTextures = jest.fn().mockResolvedValue(undefined);
+      (mockPassManager as any).getInitialHeightmap = jest.fn(() => mockInitialHeightmap);
+      
+      await heightmapBridge.initializeTextures(mockControls, 0, null);
+      
+      // Should not throw, but buffer should not be initialized
+      expect(heightmapBridge.isHeightMapInitialized()).toBe(false);
+    });
+
+    it('should handle empty initial heightmap', async () => {
+      const mockControls = {};
+      heightmapBridge.setPassManager(mockPassManager);
+      
+      (mockPassManager as any).initializeTextures = jest.fn().mockResolvedValue(undefined);
+      (mockPassManager as any).getInitialHeightmap = jest.fn(() => new Float32Array(0));
+      
+      await heightmapBridge.initializeTextures(mockControls, 0, null);
+      
+      expect(heightmapBridge.isHeightMapInitialized()).toBe(false);
+    });
+  });
+
+  describe('readCombinedHeight edge cases', () => {
+    it('should return zero buffer when passManager exists but initialHeightmap is null', () => {
+      (mockPassManager as any).getInitialHeightmap = jest.fn(() => null);
+      heightmapBridge.setPassManager(mockPassManager);
+      
+      const heightData = heightmapBridge.readCombinedHeight();
+      
+      expect(heightData).toBeInstanceOf(Float32Array);
+      expect(heightData.length).toBe(mockSimres * mockSimres * 4);
+      expect(heightData.every(val => val === 0)).toBe(true);
+    });
+  });
 });
