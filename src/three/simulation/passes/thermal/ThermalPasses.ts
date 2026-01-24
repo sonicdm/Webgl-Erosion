@@ -1,0 +1,72 @@
+import * as THREE from 'three';
+import { GpgpuPass } from '../../../gpgpu/GpgpuPass';
+import { PassRunner } from '../../../gpgpu/PassRunner';
+import { RenderTargets } from '../../targets/RenderTargets';
+import quadVert from '../../../../shaders/quad-vert.glsl?raw';
+import maxslippageheightFrag from '../../../../shaders/maxslippageheight-frag.glsl?raw';
+import thermalterrainfluxFrag from '../../../../shaders/thermalterrainflux-frag.glsl?raw';
+import thermalapplyFrag from '../../../../shaders/thermalapply-frag.glsl?raw';
+
+/**
+ * Thermal erosion simulation passes
+ * Handles max-slippage, thermal-flux, and thermal-apply passes
+ */
+export class ThermalPasses {
+  private maxslippagePass: GpgpuPass;
+  private thermalFluxPass: GpgpuPass;
+  private thermalApplyPass: GpgpuPass;
+
+  constructor(
+    private renderTargets: RenderTargets,
+    private passRunner: PassRunner,
+    private fullscreenQuad: THREE.BufferGeometry,
+    private simres: number
+  ) {
+    // Create all thermal passes
+    this.maxslippagePass = new GpgpuPass(quadVert, maxslippageheightFrag, fullscreenQuad);
+    this.thermalFluxPass = new GpgpuPass(quadVert, thermalterrainfluxFrag, fullscreenQuad);
+    this.thermalApplyPass = new GpgpuPass(quadVert, thermalapplyFrag, fullscreenQuad);
+  }
+
+  /**
+   * Executes the max slippage pass
+   */
+  public executeMaxSlippage(controls: any): void {
+    this.maxslippagePass.setInputTexture('readTerrain', this.renderTargets.terrainPP.getReadTexture());
+    this.maxslippagePass.setUniform('u_SimRes', this.simres);
+    this.maxslippagePass.setUniform('u_PipeLen', controls.pipelen);
+    this.maxslippagePass.setUniform('u_timestep', controls.timestep);
+    this.maxslippagePass.setUniform('u_PipeArea', controls.pipeAra);
+    this.maxslippagePass.setUniform('unif_TalusScale', controls.thermalTalusAngleScale || 1.0);
+    this.maxslippagePass.setUniform('unif_rainMode', controls.RainErosion ? 1 : 0);
+    this.passRunner.executePingPongPass(this.maxslippagePass, this.renderTargets.maxslippagePP);
+  }
+
+  /**
+   * Executes the thermal flux pass
+   */
+  public executeThermalFlux(controls: any): void {
+    this.thermalFluxPass.setInputTexture('readTerrain', this.renderTargets.terrainPP.getReadTexture());
+    this.thermalFluxPass.setInputTexture('readMaxSlippage', this.renderTargets.maxslippagePP.getReadTexture());
+    this.thermalFluxPass.setUniform('u_SimRes', this.simres);
+    this.thermalFluxPass.setUniform('u_PipeLen', controls.pipelen);
+    this.thermalFluxPass.setUniform('u_timestep', controls.timestep);
+    this.thermalFluxPass.setUniform('u_PipeArea', controls.pipeAra);
+    this.thermalFluxPass.setUniform('unif_thermalRate', controls.thermalRate || 0.5);
+    this.passRunner.executePingPongPass(this.thermalFluxPass, this.renderTargets.terrainFluxPP);
+  }
+
+  /**
+   * Executes the thermal apply pass
+   */
+  public executeThermalApply(controls: any): void {
+    this.thermalApplyPass.setInputTexture('readTerrainFlux', this.renderTargets.terrainFluxPP.getReadTexture());
+    this.thermalApplyPass.setInputTexture('readTerrain', this.renderTargets.terrainPP.getReadTexture());
+    this.thermalApplyPass.setUniform('u_SimRes', this.simres);
+    this.thermalApplyPass.setUniform('u_PipeLen', controls.pipelen);
+    this.thermalApplyPass.setUniform('u_timestep', controls.timestep);
+    this.thermalApplyPass.setUniform('u_PipeArea', controls.pipeAra);
+    this.thermalApplyPass.setUniform('unif_thermalErosionScale', controls.thermalErosionScale || 1.0);
+    this.passRunner.executePingPongPass(this.thermalApplyPass, this.renderTargets.terrainPP);
+  }
+}
