@@ -2,10 +2,7 @@ import * as THREE from 'three';
 import { GpgpuPass } from '../../../gpgpu/GpgpuPass';
 import { PassRunner } from '../../../gpgpu/PassRunner';
 import { RenderTargets } from '../../targets/RenderTargets';
-import quadVert from '../../../../shaders/quad-vert.glsl?raw';
-import maxslippageheightFrag from '../../../../shaders/maxslippageheight-frag.glsl?raw';
-import thermalterrainfluxFrag from '../../../../shaders/thermalterrainflux-frag.glsl?raw';
-import thermalapplyFrag from '../../../../shaders/thermalapply-frag.glsl?raw';
+import { shaderManifest } from '../../../../shaders/manifest';
 
 /**
  * Thermal erosion simulation passes
@@ -22,10 +19,14 @@ export class ThermalPasses {
     private fullscreenQuad: THREE.BufferGeometry,
     private simres: number
   ) {
-    // Create all thermal passes
-    this.maxslippagePass = new GpgpuPass(quadVert, maxslippageheightFrag, fullscreenQuad);
-    this.thermalFluxPass = new GpgpuPass(quadVert, thermalterrainfluxFrag, fullscreenQuad);
-    this.thermalApplyPass = new GpgpuPass(quadVert, thermalapplyFrag, fullscreenQuad);
+    // Create all thermal passes using ShaderManifest
+    const maxSlippageHeightShader = shaderManifest.getShaderSource('maxSlippageHeight');
+    const thermalFluxShader = shaderManifest.getShaderSource('thermalFlux');
+    const thermalApplyShader = shaderManifest.getShaderSource('thermalApply');
+    
+    this.maxslippagePass = new GpgpuPass(maxSlippageHeightShader.vert!, maxSlippageHeightShader.frag!, fullscreenQuad);
+    this.thermalFluxPass = new GpgpuPass(thermalFluxShader.vert!, thermalFluxShader.frag!, fullscreenQuad);
+    this.thermalApplyPass = new GpgpuPass(thermalApplyShader.vert!, thermalApplyShader.frag!, fullscreenQuad);
   }
 
   /**

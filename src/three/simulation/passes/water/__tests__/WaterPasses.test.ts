@@ -76,8 +76,8 @@ jest.mock('../WaterPasses', () => {
       // Create mock passes
       this.rainPass = new GpgpuPass('quadVert', 'rainFrag', fullscreenQuad);
       this.flowPass = new GpgpuPass('quadVert', 'flowFrag', fullscreenQuad);
-      this.waterHeightPass = new GpgpuPass('quadVert', 'alterwaterhightFrag', fullscreenQuad);
-      this.evaporationPass = new GpgpuPass('quadVert', 'evaFrag', fullscreenQuad);
+      this.waterHeightPass = new GpgpuPass('quadVert', 'waterHeightFrag', fullscreenQuad);
+      this.evaporationPass = new GpgpuPass('quadVert', 'evaporationFrag', fullscreenQuad);
     }
 
     executeRain(controls: any, timer: number, brushState?: any, waterSources?: any): void {

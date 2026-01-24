@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { BufferGeometry } from 'three';
-import waterVert from '../../shaders/water-vert.glsl?raw';
-import waterFrag from '../../shaders/water-frag.glsl?raw';
+import { shaderManifest } from '../../shaders/manifest';
 
 /**
  * Maps Three.js standard attributes to shader's expected attribute names.
@@ -85,14 +84,18 @@ export function createWaterScene(
   const geometry = new THREE.PlaneGeometry(1, 1, simres - 1, simres - 1);
   geometry.rotateX(-Math.PI / 2); // Lay flat on XZ plane (Y up)
 
+  // Get shader sources from ShaderManifest
+  const waterVertShader = shaderManifest.getShaderSource('waterVert');
+  const waterFragShader = shaderManifest.getShaderSource('waterFrag');
+  
   // Create custom shader material using water shaders
   // Map Three.js standard attributes (position, normal, uv) to shader attributes (vs_Pos, vs_Nor, vs_Col, vs_Uv)
-  const mappedVertexShader = mapShaderAttributes(waterVert);
+  const mappedVertexShader = mapShaderAttributes(waterVertShader.vert!);
   
   const material = new THREE.RawShaderMaterial({
     glslVersion: THREE.GLSL3,
     vertexShader: mappedVertexShader,
-    fragmentShader: waterFrag,
+    fragmentShader: waterFragShader.frag!,
     uniforms: {
       // Matrices
       u_Model: { value: new THREE.Matrix4() },

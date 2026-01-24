@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import quadVert from '../../shaders/quad-vert.glsl?raw';
+import { shaderManifest } from '../../shaders/manifest';
 
 /**
  * Base class for GPGPU pass materials.
@@ -11,9 +11,10 @@ export abstract class BasePassMaterial {
 
   constructor(fragmentShader: string) {
     this.fragmentShader = fragmentShader;
+    const quadVertShader = shaderManifest.getShaderSource('quadVert');
     this.material = new THREE.RawShaderMaterial({
       glslVersion: THREE.GLSL3,
-      vertexShader: quadVert,
+      vertexShader: quadVertShader.vert!,
       fragmentShader: fragmentShader,
       uniforms: {},
     });

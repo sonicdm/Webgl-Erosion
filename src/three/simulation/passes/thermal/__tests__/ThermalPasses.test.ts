@@ -51,9 +51,9 @@ jest.mock('../ThermalPasses', () => {
       this.fullscreenQuad = fullscreenQuad;
       this.simres = simres;
       
-      this.maxslippagePass = new GpgpuPass('quadVert', 'maxslippageheightFrag', fullscreenQuad);
-      this.thermalFluxPass = new GpgpuPass('quadVert', 'thermalterrainfluxFrag', fullscreenQuad);
-      this.thermalApplyPass = new GpgpuPass('quadVert', 'thermalapplyFrag', fullscreenQuad);
+      this.maxslippagePass = new GpgpuPass('quadVert', 'maxSlippageHeightFrag', fullscreenQuad);
+      this.thermalFluxPass = new GpgpuPass('quadVert', 'thermalFluxFrag', fullscreenQuad);
+      this.thermalApplyPass = new GpgpuPass('quadVert', 'thermalApplyFrag', fullscreenQuad);
     }
 
     executeMaxSlippage(controls: any): void {

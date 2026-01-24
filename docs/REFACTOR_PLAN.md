@@ -23,18 +23,19 @@
   - `three/terrain/` - Terrain sync and geometry management
   - `three/simulation/` - Step runner, pass manager, domain passes, render targets, terrain readback
   - `three/io/` - Heightmap bridge and terrain readback service
+  - `shaders/` - Domain-organized shader files (`water/`, `sediment/`, `thermal/`, `lava/`, `terrain/`, `common/`) with typed manifest
 - **Domain Passes**: Organized by domain (`water/`, `sediment/`, `thermal/`, `lava/`, `post/`) with comprehensive test coverage.
+- **Shader Organization**: All shaders organized into domain folders with typed `ShaderManifest` providing centralized access via `getShaderSource(id: ShaderId)`.
 
 ### Testing
-- **186 tests passing** (up from 115 at start of refactoring)
-- Comprehensive coverage for: services, domain passes, render targets, pass registry, terrain readback, DTOs, state holders
+- **250 tests passing** (up from 115 at start of refactoring)
+- Comprehensive coverage for: services, domain passes, render targets, pass registry, terrain readback, DTOs, state holders, shader manifest
 - All tests passing, build successful, no linter errors
 
 ### Remaining Work
-- **Shaders**: Still in flat folder structure; debug/brush visuals live inside `terrain-procedural-frag.glsl`. Need domain-based organization (Workstream E).
 - **Naming**: Typos present (`Hight*`, etc.); need standardization (Workstream F).
 - **Cleanup**: `temp_*` backup files remain (Workstream G).
-- **Heightmap/VTF**: Partially done (RAW contract, helper, tests, debug-gating). Pending: central contract helper, uploader abstraction, shader audit/manifest, debug gating in fragment shader, displacement regression test (Workstream H).
+- **Heightmap/VTF**: Partially done (RAW contract, helper, tests, debug-gating). Pending: central contract helper, uploader abstraction, debug gating in fragment shader, displacement regression test (Workstream H).
 
 
 
@@ -85,20 +86,37 @@
 3. ✅ Create a lightweight pass registry that maps names → shaders + uniforms; `StepRunner` consumes this registry instead of inline sections.
 4. ✅ Separate heightmap mesh generation/readback into `TerrainReadbackService`.
 
-## Workstream E — Shader Layout & Naming
-1. Rehome shaders into folders:
-   - `shaders/water`: `rain`, `flow`, `water-height`, `evaporation`, etc.
-   - `shaders/sediment`: `sediment`, `advect`, `maccormack`, `average`.
-   - `shaders/thermal`: `max-slippage-height`, `thermal-flux`, `thermal-apply`.
-   - `shaders/lava`: `lava-flow`, `lava-update`, `lava-terrain`.
-   - `shaders/terrain`: `initial`, `terrain-procedural`, `terrain-vert`, `shadowmap`, etc.
-2. Rename typos while moving (e.g., `alterwaterhight-frag.glsl` → `water-height-frag.glsl`; `maxslippageheight-frag.glsl` → `max-slippage-height-frag.glsl`).
-3. Add a `shaders/manifest.ts` exporting pass → path mapping to keep TS imports consistent post-move.
+## Workstream E — Shader Layout & Naming ✅ COMPLETE
+1. ✅ Rehomed shaders into domain folders:
+   - `shaders/water/`: `rain-frag.glsl`, `flow-frag.glsl`, `water-height-frag.glsl`, `evaporation-frag.glsl`, `water-vert.glsl`, `water-frag.glsl`
+   - `shaders/sediment/`: `sediment-frag.glsl`, `sediment-advect-frag.glsl`, `maccormack-frag.glsl`, `average-frag.glsl`
+   - `shaders/thermal/`: `max-slippage-height-frag.glsl`, `thermal-flux-frag.glsl`, `thermal-apply-frag.glsl`
+   - `shaders/lava/`: `lava-flow-frag.glsl`, `lava-update-frag.glsl`, `lava-terrain-frag.glsl`
+   - `shaders/terrain/`: `initial-frag.glsl`, `terrain-procedural-frag.glsl`, `terrain-procedural-vert.glsl`, `terrain-frag.glsl`, `terrain-vert.glsl`, `shadowmap-frag.glsl`, `shadowmap-vert.glsl`
+   - `shaders/common/`: `quad-vert.glsl`, `clean-frag.glsl`, `flat-frag.glsl`, `flat-vert.glsl`, `velocity-advect-frag.glsl`, `combine-frag.glsl`, `scene-depth-frag.glsl`, `bilateral-blur-frag.glsl`
+2. ✅ Renamed typos while moving:
+   - `alterwaterhight-frag.glsl` → `water-height-frag.glsl`
+   - `eva-frag.glsl` → `evaporation-frag.glsl`
+   - `sediadvect-frag.glsl` → `sediment-advect-frag.glsl`
+   - `maxslippageheight-frag.glsl` → `max-slippage-height-frag.glsl`
+   - `thermalterrainflux-frag.glsl` → `thermal-flux-frag.glsl`
+   - `thermalapply-frag.glsl` → `thermal-apply-frag.glsl`
+   - `veladvect-frag.glsl` → `velocity-advect-frag.glsl`
+   - `sceneDepth-frag.glsl` → `scene-depth-frag.glsl`
+   - `bilateralBlur-frag.glsl` → `bilateral-blur-frag.glsl`
+3. ✅ Created `shaders/manifest.ts` with typed `ShaderManifest` class:
+   - Typed `ShaderId` union type for compile-time validation
+   - `ShaderConfig` interface with vert/frag paths, uniforms, defines
+   - `getShaderSource(id: ShaderId)` typed accessor method
+   - Domain filtering and uniform validation methods
+   - All shader sources imported statically and mapped
+   - Domain pass classes updated to use `shaderManifest.getShaderSource()` instead of direct imports
 
 ## Workstream F — Naming & State Cleanup
 1. Standardize height/frame naming (`HeightMap*`, `simFrameCount`, `simRes`).
 2. Encapsulate mutable counters (heightmap read cadence, geometry update) behind small services to avoid cross-module mutations.
 3. Replace ad-hoc `any` controls with typed structs and enforce them at boundaries.
+4. Rename files and functions to JS/TS-preferred conventions (e.g., camelCase for functions/variables, PascalCase for classes, kebab-case for filenames where appropriate); align legacy names/typos to the new standards.
 
 ## Workstream G — Cleanup & Hygiene
 1. Move `temp_*` backups to `research/archives/` with a short README or delete if superseded.
@@ -171,11 +189,30 @@
 - **Test Coverage**: Added comprehensive unit tests for all new services (186 tests passing, up from 170). All domain pass classes, `RenderTargets`, `PassRegistry`, and `TerrainReadbackService` have full test coverage.
 - **Testing**: All tests passing, build successful, no linter errors.
 
-### ⏳ E (shader layout/naming) — Not started
-- Flat folder structure; debug logic inline.
-- Shaders need to be rehomed into domain folders (`shaders/water`, `shaders/sediment`, `shaders/thermal`, `shaders/lava`, `shaders/terrain`).
-- Typos need renaming (e.g., `alterwaterhight-frag.glsl` → `water-height-frag.glsl`).
-- Need to add `shaders/manifest.ts` for pass → path mapping.
+### ✅ E (shader layout/naming) — COMPLETE
+- **Domain Folder Structure**: Created 6 domain folders (`water/`, `sediment/`, `thermal/`, `lava/`, `terrain/`, `common/`) and moved all 31 shader files to appropriate domains.
+- **File Renaming**: Fixed 10 shader file typos and improved clarity:
+  - `alterwaterhight-frag.glsl` → `water-height-frag.glsl`
+  - `eva-frag.glsl` → `evaporation-frag.glsl`
+  - `sediadvect-frag.glsl` → `sediment-advect-frag.glsl`
+  - `maxslippageheight-frag.glsl` → `max-slippage-height-frag.glsl`
+  - `thermalterrainflux-frag.glsl` → `thermal-flux-frag.glsl`
+  - `thermalapply-frag.glsl` → `thermal-apply-frag.glsl`
+  - `veladvect-frag.glsl` → `velocity-advect-frag.glsl`
+  - `sceneDepth-frag.glsl` → `scene-depth-frag.glsl`
+  - `bilateralBlur-frag.glsl` → `bilateral-blur-frag.glsl`
+- **ShaderManifest**: Created typed shader manifest system with:
+  - `ShaderId` union type (31 shader IDs)
+  - `ShaderConfig` interface (vert/frag paths, uniforms, defines, domain)
+  - `ShaderManifest` class with `getShaderSource()`, `getShaderConfig()`, `getShadersByDomain()`, `validateUniforms()`
+  - All shader sources imported statically and mapped at module load time
+- **Domain Pass Integration**: Updated all domain pass classes (`WaterPasses`, `SedimentPasses`, `ThermalPasses`, `LavaPasses`, `PostPasses`) to use `shaderManifest.getShaderSource()` instead of direct imports.
+- **Other Files Updated**: Updated `terrain-procedural-material.ts`, `water-scene.ts`, `BasePassMaterial.ts` to use shaderManifest. Updated `shader-factory.ts` paths for legacy WebGL pipeline.
+- **Test Updates**: Updated all domain pass test mocks with new shader names. Created integration tests (`shader-imports.test.ts`) verifying all shader imports resolve correctly.
+- **Jest Configuration**: Updated `jest.config.js` to handle `?raw` imports via moduleNameMapper.
+- **File Naming Consistency**: All shader files use kebab-case; all import variables use camelCase.
+- **Test Coverage**: Added comprehensive tests for ShaderManifest (19 tests) and shader imports integration (7 tests). All 250 tests passing.
+- **Testing**: All tests passing, build successful, no linter errors.
 
 ### ⏳ F (naming/state cleanup) — Not started
 - Typos present (`Hight*`, etc.). State holders provide foundation for cleanup.

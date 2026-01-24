@@ -3,10 +3,7 @@ import { GpgpuPass } from '../../../gpgpu/GpgpuPass';
 import { PassRunner } from '../../../gpgpu/PassRunner';
 import { MRTRenderTarget } from '../../../gpgpu/MRTRenderTarget';
 import { RenderTargets } from '../../targets/RenderTargets';
-import quadVert from '../../../../shaders/quad-vert.glsl?raw';
-import lavaFlowFrag from '../../../../shaders/lava-flow-frag.glsl?raw';
-import lavaUpdateFrag from '../../../../shaders/lava-update-frag.glsl?raw';
-import lavaTerrainFrag from '../../../../shaders/lava-terrain-frag.glsl?raw';
+import { shaderManifest } from '../../../../shaders/manifest';
 
 /**
  * Lava simulation passes
@@ -24,10 +21,14 @@ export class LavaPasses {
     private simres: number,
     private renderer: THREE.WebGLRenderer
   ) {
-    // Create all lava passes
-    this.lavaFlowPass = new GpgpuPass(quadVert, lavaFlowFrag, fullscreenQuad);
-    this.lavaUpdatePass = new GpgpuPass(quadVert, lavaUpdateFrag, fullscreenQuad);
-    this.lavaTerrainPass = new GpgpuPass(quadVert, lavaTerrainFrag, fullscreenQuad);
+    // Create all lava passes using ShaderManifest
+    const lavaFlowShader = shaderManifest.getShaderSource('lavaFlow');
+    const lavaUpdateShader = shaderManifest.getShaderSource('lavaUpdate');
+    const lavaTerrainShader = shaderManifest.getShaderSource('lavaTerrain');
+    
+    this.lavaFlowPass = new GpgpuPass(lavaFlowShader.vert!, lavaFlowShader.frag!, fullscreenQuad);
+    this.lavaUpdatePass = new GpgpuPass(lavaUpdateShader.vert!, lavaUpdateShader.frag!, fullscreenQuad);
+    this.lavaTerrainPass = new GpgpuPass(lavaTerrainShader.vert!, lavaTerrainShader.frag!, fullscreenQuad);
   }
 
   /**

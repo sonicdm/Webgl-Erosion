@@ -10,10 +10,10 @@ import * as path from 'path';
 
 // Read shader files directly (simpler than trying to import with ?raw in Jest)
 const shaderDir = path.join(__dirname, '../../shaders');
-const terrainVert = fs.readFileSync(path.join(shaderDir, 'terrain-vert.glsl'), 'utf8');
-const terrainFrag = fs.readFileSync(path.join(shaderDir, 'terrain-frag.glsl'), 'utf8');
-const quadVert = fs.readFileSync(path.join(shaderDir, 'quad-vert.glsl'), 'utf8');
-const flowFrag = fs.readFileSync(path.join(shaderDir, 'flow-frag.glsl'), 'utf8');
+const terrainVert = fs.readFileSync(path.join(shaderDir, 'terrain/terrain-vert.glsl'), 'utf8');
+const terrainFrag = fs.readFileSync(path.join(shaderDir, 'terrain/terrain-frag.glsl'), 'utf8');
+const quadVert = fs.readFileSync(path.join(shaderDir, 'common/quad-vert.glsl'), 'utf8');
+const flowFrag = fs.readFileSync(path.join(shaderDir, 'water/flow-frag.glsl'), 'utf8');
 
 describe('Shader Source Validation', () => {
   function validateShaderSource(source: string, shaderName: string): { valid: boolean; errors: string[] } {

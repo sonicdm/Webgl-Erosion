@@ -1,35 +1,46 @@
 import ShaderProgram, { Shader } from './gl/ShaderProgram';
 
-// GLSL shader imports
-import terrainVert from '../shaders/terrain-vert.glsl?raw';
-import terrainFrag from '../shaders/terrain-frag.glsl?raw';
-import flatVert from '../shaders/flat-vert.glsl?raw';
-import flatFrag from '../shaders/flat-frag.glsl?raw';
-import quadVert from '../shaders/quad-vert.glsl?raw';
-import initialFrag from '../shaders/initial-frag.glsl?raw';
-import flowFrag from '../shaders/flow-frag.glsl?raw';
-import alterwaterhightFrag from '../shaders/alterwaterhight-frag.glsl?raw';
-import sedimentFrag from '../shaders/sediment-frag.glsl?raw';
-import sediadvectFrag from '../shaders/sediadvect-frag.glsl?raw';
-import maccormackFrag from '../shaders/maccormack-frag.glsl?raw';
-import rainFrag from '../shaders/rain-frag.glsl?raw';
-import evaFrag from '../shaders/eva-frag.glsl?raw';
-import averageFrag from '../shaders/average-frag.glsl?raw';
-import cleanFrag from '../shaders/clean-frag.glsl?raw';
-import waterVert from '../shaders/water-vert.glsl?raw';
-import waterFrag from '../shaders/water-frag.glsl?raw';
-import thermalterrainfluxFrag from '../shaders/thermalterrainflux-frag.glsl?raw';
-import thermalapplyFrag from '../shaders/thermalapply-frag.glsl?raw';
-import maxslippageheightFrag from '../shaders/maxslippageheight-frag.glsl?raw';
-import shadowmapVert from '../shaders/shadowmap-vert.glsl?raw';
-import shadowmapFrag from '../shaders/shadowmap-frag.glsl?raw';
-import sceneDepthFrag from '../shaders/sceneDepth-frag.glsl?raw';
-import combineFrag from '../shaders/combine-frag.glsl?raw';
-import bilateralBlurFrag from '../shaders/bilateralBlur-frag.glsl?raw';
-import veladvectFrag from '../shaders/veladvect-frag.glsl?raw';
-import lavaFlowFrag from '../shaders/lava-flow-frag.glsl?raw';
-import lavaUpdateFrag from '../shaders/lava-update-frag.glsl?raw';
-import lavaTerrainFrag from '../shaders/lava-terrain-frag.glsl?raw';
+// GLSL shader imports - updated to new domain folder structure
+// Terrain domain
+import terrainVert from '../shaders/terrain/terrain-vert.glsl?raw';
+import terrainFrag from '../shaders/terrain/terrain-frag.glsl?raw';
+import initialFrag from '../shaders/terrain/initial-frag.glsl?raw';
+import shadowmapVert from '../shaders/terrain/shadowmap-vert.glsl?raw';
+import shadowmapFrag from '../shaders/terrain/shadowmap-frag.glsl?raw';
+
+// Common domain
+import flatVert from '../shaders/common/flat-vert.glsl?raw';
+import flatFrag from '../shaders/common/flat-frag.glsl?raw';
+import quadVert from '../shaders/common/quad-vert.glsl?raw';
+import cleanFrag from '../shaders/common/clean-frag.glsl?raw';
+import sceneDepthFrag from '../shaders/common/scene-depth-frag.glsl?raw';
+import combineFrag from '../shaders/common/combine-frag.glsl?raw';
+import bilateralBlurFrag from '../shaders/common/bilateral-blur-frag.glsl?raw';
+import velocityAdvectFrag from '../shaders/common/velocity-advect-frag.glsl?raw';
+
+// Water domain
+import flowFrag from '../shaders/water/flow-frag.glsl?raw';
+import waterHeightFrag from '../shaders/water/water-height-frag.glsl?raw';
+import rainFrag from '../shaders/water/rain-frag.glsl?raw';
+import evaporationFrag from '../shaders/water/evaporation-frag.glsl?raw';
+import waterVert from '../shaders/water/water-vert.glsl?raw';
+import waterFrag from '../shaders/water/water-frag.glsl?raw';
+
+// Sediment domain
+import sedimentFrag from '../shaders/sediment/sediment-frag.glsl?raw';
+import sedimentAdvectFrag from '../shaders/sediment/sediment-advect-frag.glsl?raw';
+import maccormackFrag from '../shaders/sediment/maccormack-frag.glsl?raw';
+import averageFrag from '../shaders/sediment/average-frag.glsl?raw';
+
+// Thermal domain
+import thermalFluxFrag from '../shaders/thermal/thermal-flux-frag.glsl?raw';
+import thermalApplyFrag from '../shaders/thermal/thermal-apply-frag.glsl?raw';
+import maxSlippageHeightFrag from '../shaders/thermal/max-slippage-height-frag.glsl?raw';
+
+// Lava domain
+import lavaFlowFrag from '../shaders/lava/lava-flow-frag.glsl?raw';
+import lavaUpdateFrag from '../shaders/lava/lava-update-frag.glsl?raw';
+import lavaTerrainFrag from '../shaders/lava/lava-terrain-frag.glsl?raw';
 
 export interface Shaders {
     lambert: ShaderProgram;
@@ -81,7 +92,7 @@ export function createShaders(gl_context: any): Shaders {
 
     const waterhight = new ShaderProgram([
         new Shader(gl_context.VERTEX_SHADER, quadVert),
-        new Shader(gl_context.FRAGMENT_SHADER, alterwaterhightFrag),
+        new Shader(gl_context.FRAGMENT_SHADER, waterHeightFrag),
     ]);
 
     const sediment = new ShaderProgram([
@@ -91,7 +102,7 @@ export function createShaders(gl_context: any): Shaders {
 
     const sediadvect = new ShaderProgram([
         new Shader(gl_context.VERTEX_SHADER, quadVert),
-        new Shader(gl_context.FRAGMENT_SHADER, sediadvectFrag),
+        new Shader(gl_context.FRAGMENT_SHADER, sedimentAdvectFrag),
     ]);
 
     const macCormack = new ShaderProgram([
@@ -126,17 +137,17 @@ export function createShaders(gl_context: any): Shaders {
 
     const thermalterrainflux = new ShaderProgram([
         new Shader(gl_context.VERTEX_SHADER, quadVert),
-        new Shader(gl_context.FRAGMENT_SHADER, thermalterrainfluxFrag),
+        new Shader(gl_context.FRAGMENT_SHADER, thermalFluxFrag),
     ]);
 
     const thermalapply = new ShaderProgram([
         new Shader(gl_context.VERTEX_SHADER, quadVert),
-        new Shader(gl_context.FRAGMENT_SHADER, thermalapplyFrag),
+        new Shader(gl_context.FRAGMENT_SHADER, thermalApplyFrag),
     ]);
 
     const maxslippageheight = new ShaderProgram([
         new Shader(gl_context.VERTEX_SHADER, quadVert),
-        new Shader(gl_context.FRAGMENT_SHADER, maxslippageheightFrag),
+        new Shader(gl_context.FRAGMENT_SHADER, maxSlippageHeightFrag),
     ]);
 
     const shadowMapShader = new ShaderProgram([
@@ -161,7 +172,7 @@ export function createShaders(gl_context: any): Shaders {
 
     const veladvect = new ShaderProgram([
         new Shader(gl_context.VERTEX_SHADER, quadVert),
-        new Shader(gl_context.FRAGMENT_SHADER, veladvectFrag),
+        new Shader(gl_context.FRAGMENT_SHADER, velocityAdvectFrag),
     ]);
 
     const lavaFlow = new ShaderProgram([

@@ -10,25 +10,6 @@ import { ThermalPasses } from './passes/thermal/ThermalPasses';
 import { LavaPasses } from './passes/lava/LavaPasses';
 import { PostPasses } from './passes/post/PostPasses';
 import { TerrainReadbackService } from './io/TerrainReadbackService';
-import quadVert from '../../shaders/quad-vert.glsl?raw';
-
-// Import all shader sources
-import rainFrag from '../../shaders/rain-frag.glsl?raw';
-import flowFrag from '../../shaders/flow-frag.glsl?raw';
-import alterwaterhightFrag from '../../shaders/alterwaterhight-frag.glsl?raw';
-import sedimentFrag from '../../shaders/sediment-frag.glsl?raw';
-import sediadvectFrag from '../../shaders/sediadvect-frag.glsl?raw';
-import maccormackFrag from '../../shaders/maccormack-frag.glsl?raw';
-import maxslippageheightFrag from '../../shaders/maxslippageheight-frag.glsl?raw';
-import thermalterrainfluxFrag from '../../shaders/thermalterrainflux-frag.glsl?raw';
-import thermalapplyFrag from '../../shaders/thermalapply-frag.glsl?raw';
-import evaFrag from '../../shaders/eva-frag.glsl?raw';
-import averageFrag from '../../shaders/average-frag.glsl?raw';
-import lavaFlowFrag from '../../shaders/lava-flow-frag.glsl?raw';
-import lavaUpdateFrag from '../../shaders/lava-update-frag.glsl?raw';
-import lavaTerrainFrag from '../../shaders/lava-terrain-frag.glsl?raw';
-import initialFrag from '../../shaders/initial-frag.glsl?raw';
-import cleanFrag from '../../shaders/clean-frag.glsl?raw';
 
 /**
  * Manages all simulation passes and their execution order.

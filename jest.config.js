@@ -23,6 +23,7 @@ export default {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'glsl'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^(\\.{1,2}/.*)\\.glsl\\?raw$': '$1.glsl',
   },
   transformIgnorePatterns: [
     'node_modules/(?!(three|three-mesh-bvh)/)',

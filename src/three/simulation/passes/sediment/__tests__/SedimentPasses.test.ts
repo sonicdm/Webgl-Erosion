@@ -72,7 +72,7 @@ jest.mock('../SedimentPasses', () => {
       this.simres = simres;
       
       this.sedimentPass = new GpgpuPass('quadVert', 'sedimentFrag', fullscreenQuad);
-      this.advectPass = new GpgpuPass('quadVert', 'sediadvectFrag', fullscreenQuad);
+      this.advectPass = new GpgpuPass('quadVert', 'sedimentAdvectFrag', fullscreenQuad);
       this.macCormackPass = new GpgpuPass('quadVert', 'maccormackFrag', fullscreenQuad);
       this.averagePass = new GpgpuPass('quadVert', 'averageFrag', fullscreenQuad);
     }

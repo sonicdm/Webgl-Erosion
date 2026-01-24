@@ -3,11 +3,7 @@ import { GpgpuPass } from '../../../gpgpu/GpgpuPass';
 import { PassRunner } from '../../../gpgpu/PassRunner';
 import { MRTRenderTarget } from '../../../gpgpu/MRTRenderTarget';
 import { RenderTargets } from '../../targets/RenderTargets';
-import quadVert from '../../../../shaders/quad-vert.glsl?raw';
-import sedimentFrag from '../../../../shaders/sediment-frag.glsl?raw';
-import sediadvectFrag from '../../../../shaders/sediadvect-frag.glsl?raw';
-import maccormackFrag from '../../../../shaders/maccormack-frag.glsl?raw';
-import averageFrag from '../../../../shaders/average-frag.glsl?raw';
+import { shaderManifest } from '../../../../shaders/manifest';
 
 /**
  * Sediment simulation passes
@@ -25,11 +21,16 @@ export class SedimentPasses {
     private fullscreenQuad: THREE.BufferGeometry,
     private simres: number
   ) {
-    // Create all sediment passes
-    this.sedimentPass = new GpgpuPass(quadVert, sedimentFrag, fullscreenQuad);
-    this.advectPass = new GpgpuPass(quadVert, sediadvectFrag, fullscreenQuad);
-    this.macCormackPass = new GpgpuPass(quadVert, maccormackFrag, fullscreenQuad);
-    this.averagePass = new GpgpuPass(quadVert, averageFrag, fullscreenQuad);
+    // Create all sediment passes using ShaderManifest
+    const sedimentShader = shaderManifest.getShaderSource('sediment');
+    const sedimentAdvectShader = shaderManifest.getShaderSource('sedimentAdvect');
+    const maccormackShader = shaderManifest.getShaderSource('maccormack');
+    const averageShader = shaderManifest.getShaderSource('average');
+    
+    this.sedimentPass = new GpgpuPass(sedimentShader.vert!, sedimentShader.frag!, fullscreenQuad);
+    this.advectPass = new GpgpuPass(sedimentAdvectShader.vert!, sedimentAdvectShader.frag!, fullscreenQuad);
+    this.macCormackPass = new GpgpuPass(maccormackShader.vert!, maccormackShader.frag!, fullscreenQuad);
+    this.averagePass = new GpgpuPass(averageShader.vert!, averageShader.frag!, fullscreenQuad);
   }
 
   /**

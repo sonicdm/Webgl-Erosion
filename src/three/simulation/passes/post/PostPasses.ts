@@ -2,8 +2,7 @@ import * as THREE from 'three';
 import { GpgpuPass } from '../../../gpgpu/GpgpuPass';
 import { PassRunner } from '../../../gpgpu/PassRunner';
 import { RenderTargets } from '../../targets/RenderTargets';
-import quadVert from '../../../../shaders/quad-vert.glsl?raw';
-import cleanFrag from '../../../../shaders/clean-frag.glsl?raw';
+import { shaderManifest } from '../../../../shaders/manifest';
 
 /**
  * Post-processing passes
@@ -17,8 +16,9 @@ export class PostPasses {
     private passRunner: PassRunner,
     private fullscreenQuad: THREE.BufferGeometry
   ) {
-    // Create post passes
-    this.cleanPass = new GpgpuPass(quadVert, cleanFrag, fullscreenQuad);
+    // Create post passes using ShaderManifest
+    const cleanShader = shaderManifest.getShaderSource('clean');
+    this.cleanPass = new GpgpuPass(cleanShader.vert!, cleanShader.frag!, fullscreenQuad);
   }
 
   /**

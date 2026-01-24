@@ -3,11 +3,7 @@ import { GpgpuPass } from '../../../gpgpu/GpgpuPass';
 import { PassRunner } from '../../../gpgpu/PassRunner';
 import { MRTRenderTarget } from '../../../gpgpu/MRTRenderTarget';
 import { RenderTargets } from '../../targets/RenderTargets';
-import quadVert from '../../../../shaders/quad-vert.glsl?raw';
-import rainFrag from '../../../../shaders/rain-frag.glsl?raw';
-import flowFrag from '../../../../shaders/flow-frag.glsl?raw';
-import alterwaterhightFrag from '../../../../shaders/alterwaterhight-frag.glsl?raw';
-import evaFrag from '../../../../shaders/eva-frag.glsl?raw';
+import { shaderManifest } from '../../../../shaders/manifest';
 
 /**
  * Water simulation passes
@@ -26,11 +22,16 @@ export class WaterPasses {
     private simres: number,
     private renderer: THREE.WebGLRenderer
   ) {
-    // Create all water passes
-    this.rainPass = new GpgpuPass(quadVert, rainFrag, fullscreenQuad);
-    this.flowPass = new GpgpuPass(quadVert, flowFrag, fullscreenQuad);
-    this.waterHeightPass = new GpgpuPass(quadVert, alterwaterhightFrag, fullscreenQuad);
-    this.evaporationPass = new GpgpuPass(quadVert, evaFrag, fullscreenQuad);
+    // Create all water passes using ShaderManifest
+    const rainShader = shaderManifest.getShaderSource('rain');
+    const flowShader = shaderManifest.getShaderSource('flow');
+    const waterHeightShader = shaderManifest.getShaderSource('waterHeight');
+    const evaporationShader = shaderManifest.getShaderSource('evaporation');
+    
+    this.rainPass = new GpgpuPass(rainShader.vert!, rainShader.frag!, fullscreenQuad);
+    this.flowPass = new GpgpuPass(flowShader.vert!, flowShader.frag!, fullscreenQuad);
+    this.waterHeightPass = new GpgpuPass(waterHeightShader.vert!, waterHeightShader.frag!, fullscreenQuad);
+    this.evaporationPass = new GpgpuPass(evaporationShader.vert!, evaporationShader.frag!, fullscreenQuad);
   }
 
   /**

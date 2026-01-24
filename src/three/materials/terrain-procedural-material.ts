@@ -4,12 +4,11 @@
  */
 
 import * as THREE from 'three';
-import terrainProceduralVert from '../../shaders/terrain-procedural-vert.glsl?raw';
-import terrainProceduralFrag from '../../shaders/terrain-procedural-frag.glsl?raw';
+import { shaderManifest } from '../../shaders/manifest';
 
 // Shaders are now in dedicated GLSL files:
-// - src/shaders/terrain-procedural-vert.glsl
-// - src/shaders/terrain-procedural-frag.glsl
+// - src/shaders/terrain/terrain-procedural-vert.glsl
+// - src/shaders/terrain/terrain-procedural-frag.glsl
 
 export interface TerrainProceduralMaterialParams {
   minHeight?: number;
@@ -55,11 +54,15 @@ export function createTerrainProceduralMaterial(params: TerrainProceduralMateria
   );
   dummySediment.needsUpdate = true;
   
+  // Get shader sources from ShaderManifest
+  const terrainProceduralVertShader = shaderManifest.getShaderSource('terrainProceduralVert');
+  const terrainProceduralFragShader = shaderManifest.getShaderSource('terrainProceduralFrag');
+  
   // Trim shader sources to ensure no leading/trailing whitespace issues
   // Note: We don't include #version directive - Three.js adds it automatically when using
   // RawShaderMaterial with glslVersion: THREE.GLSL3
-  const vertexShaderSource = terrainProceduralVert.trim();
-  const fragmentShaderSource = terrainProceduralFrag.trim();
+  const vertexShaderSource = terrainProceduralVertShader.vert!.trim();
+  const fragmentShaderSource = terrainProceduralFragShader.frag!.trim();
   
   const material = new THREE.RawShaderMaterial({
     glslVersion: THREE.GLSL3,
