@@ -8,61 +8,33 @@
 - Lock down the heightmap/VTF contract so heights are consistent between simulation passes (raw float) and vertex displacement (normalized-to-denormalized flow).
 
 ## Project Snapshot — 2026-01-24
-- Monoliths: `src/main.ts` reduced from ~850+ lines to 530 lines (Workstream B complete). `src/three/integration.ts` (~50k) and `SimulationPassManager.ts` (~56k) remain single-class orchestrators.
-- Tests: new unit tests cover heightmap utilities; `src/utils/__tests__/rendering.test.ts` is `describe.skip` and uses ad-hoc geometry checks.
-- Shaders: still in a flat folder; debug/brush visuals live inside `terrain-procedural-frag.glsl`.
-- Temp/backup files still present (`temp_*`), adding noise.
-- Heightmap/VTF path partly cleaned (see progress below); other areas unchanged.
 
-## Progress — 2026-01-23
-- HeightmapSource now enforces the RAW contract (stored = worldHeight * simres) and exposes uniform block with stored min/max.
-- Terrain height extraction stores raw heights and reuses `createHeightmapSourceFromHeights` helper for consistency.
-- Added Jest coverage for height encoding, HeightmapSource uniform block, stored-height creation, geometry extraction, and upload path RGBA32F handling (`src/three/utils/__tests__/heightmap-source.test.ts`).
-- Heightmap extraction logs are gated behind a DEBUG flag to keep tests and CI clean.
-- Workstream A delivered: bootstrap/services/DTO/state holders under `src/app/*` plus Jest coverage (bootstrap services, context setup, DTO packers, state holders).
+### Monoliths Status
+- ✅ **`src/main.ts`**: Reduced from ~850+ lines to 530 lines (38% reduction). Now a thin bootstrap delegating to composition root and modularized runners.
+- ✅ **`src/three/integration.ts`**: Refactored to thin orchestrator (`ThreeJSSimulationRuntime`) ~500 lines from ~1200+. Extracted services: `CameraService`, `TerrainSync`, `HeightmapBridge`, `StepRunner`.
+- ✅ **`SimulationPassManager.ts`**: Refactored to thin orchestrator ~650 lines from ~1165+. Extracted: `RenderTargets`, domain pass classes (`WaterPasses`, `SedimentPasses`, `ThermalPasses`, `LavaPasses`, `PostPasses`), `TerrainReadbackService`, `PassRegistry`.
 
-## Progress — 2026-01-24 (Workstream A Complete)
-- **Composition Root**: Created `src/app/bootstrap.ts` with full service interfaces and implementations:
-  - `IGLContext`, `IRendererFactory`, `IBrushState`, `ITerrainState`, `IHeightmapIO`, `IRaycaster`, `ISimulationStepRunner`, `ICameraService`
-  - All services implemented and wired via `createApp()` composition root function
-- **Typed DTOs**: Created complete DTO layer:
-  - `SimulationParams` - typed simulation parameters with `createSimulationParams()` helper
-  - `BrushInput` - typed brush input with `createBrushInput()` helper  
-  - `SourceArrays` - water/lava source arrays with packing methods for shader uniforms
-  - `RenderTargetsSnapshot` - render target snapshot DTO (optional, for debugging)
-- **State Holders**: Created state holder classes replacing global state:
-  - `SimulationStateHolder` - wraps simres, frameCount, pause, terrainGeometryDirty
-  - `TerrainStateHolder` - wraps terrain geometry, BVH, heightmap CPU buffer, update counters
-  - `ClientStateHolder` - wraps client dimensions and pointer position
-- **Migration**: Updated files to optionally accept state holders (backward compatible):
-  - `brush-handler.ts`, `event-handlers.ts`, `heightmap-loader.ts`, `render-utils.ts`, `texture-management.ts`, `three/integration.ts`
-  - Added deprecation comments to `simulation-state.ts` and all importing files
-  - `ThreeJSSimulationRuntime.executeSimulationStep()` now accepts `SimulationParams`
-- **Barrel Exports**: Created `src/app/index.ts` for convenient imports
-- All code compiles successfully with no linter errors; backward compatibility maintained throughout
+### Architecture
+- **Services**: Composition root in `src/app/bootstrap.ts` with full service interfaces. State holders replace global state (`SimulationStateHolder`, `TerrainStateHolder`, `ClientStateHolder`).
+- **DTOs**: Typed data transfer objects (`SimulationParams`, `BrushInput`, `SourceArrays`, `RenderTargetsSnapshot`) with helper functions.
+- **Module Organization**: 
+  - `app/` - Bootstrap, UI, input, runtime, context, state, DTOs
+  - `three/camera/` - Camera service
+  - `three/terrain/` - Terrain sync and geometry management
+  - `three/simulation/` - Step runner, pass manager, domain passes, render targets, terrain readback
+  - `three/io/` - Heightmap bridge and terrain readback service
+- **Domain Passes**: Organized by domain (`water/`, `sediment/`, `thermal/`, `lava/`, `post/`) with comprehensive test coverage.
 
-## Progress — 2026-01-24 (Workstream B Complete)
-- **Entry Point Split**: Reduced `src/main.ts` from ~850+ lines to 530 lines (38% reduction)
-- **Module Extraction**:
-  - `app/ui/gui.ts` - Created `setupAppGUI()` wrapper for DAT GUI setup with dependency injection
-  - `app/input/brush-controls.ts` - Extracted brush input calculation (`calculateBrushInput()`, `normalizeMousePosition()`, `updateBrushInputFromControls()`)
-  - `app/runtime/legacy-runner.ts` - Extracted entire legacy WebGL render loop (`tick()`, `SimulatePerStep()`, `SimulationStep()` and all associated logic, ~2300 lines)
-  - `app/runtime/three-runner.ts` - Extracted Three.js runtime initialization and animation loop
-  - `app/context.ts` - Created `createAppContextSetup()` with canvas/WebGL setup and resize handling
-- **Additional Modules Created**:
-  - `app/runtime/legacy-initialization.ts` - Extracted legacy WebGL pipeline initialization (extension validation, geometry creation, renderer setup, texture/framebuffer setup, shader creation)
-  - `app/controls/controls-factory.ts` - Extracted controls object creation using factory function pattern (~170 lines)
-  - `utils/terrain-random.ts` - Extracted terrain random parameter management
-- **Type System Improvements**:
-  - Created unified `Controls` type (intersection of `GUIControls & EventHandlerControls & HeightmapLoaderControls`) to fix type compatibility issues across modules
-  - Fixed TypeScript errors in `Camera.ts` (OrbitControls import, removed unused `Spherical` import)
-  - Fixed TypeScript errors in `settings.ts` (removed non-existent `removePermanentLavaSource` property)
-- **Code Cleanup**:
-  - Removed ~50+ unused imports from `main.ts`
-  - Removed unused module-level variables (`speed`, `enableBilateralBlur`)
-  - Cleaned up helper functions and comments
-- **Testing**: All 115 tests passing, build succeeds, no linter errors
-- **Result**: `main.ts` is now a thin bootstrap that delegates to composition root and modularized runners
+### Testing
+- **186 tests passing** (up from 115 at start of refactoring)
+- Comprehensive coverage for: services, domain passes, render targets, pass registry, terrain readback, DTOs, state holders
+- All tests passing, build successful, no linter errors
+
+### Remaining Work
+- **Shaders**: Still in flat folder structure; debug/brush visuals live inside `terrain-procedural-frag.glsl`. Need domain-based organization (Workstream E).
+- **Naming**: Typos present (`Hight*`, etc.); need standardization (Workstream F).
+- **Cleanup**: `temp_*` backup files remain (Workstream G).
+- **Heightmap/VTF**: Partially done (RAW contract, helper, tests, debug-gating). Pending: central contract helper, uploader abstraction, shader audit/manifest, debug gating in fragment shader, displacement regression test (Workstream H).
 
 
 
@@ -98,14 +70,6 @@
    - `app/context.ts` (shared handles + resize events) — Created `createAppContextSetup()` with resize handling
 2. ✅ Keep `main.ts` as thin bootstrap delegating to composition root — Reduced from ~850+ lines to 530 lines
 
-**Additional work completed:**
-- `app/runtime/legacy-initialization.ts` — Extracted legacy WebGL pipeline initialization (extension validation, geometry creation, renderer setup, texture/framebuffer setup, shader creation)
-- `app/controls/controls-factory.ts` — Extracted controls object creation with factory function pattern
-- `utils/terrain-random.ts` — Extracted terrain random parameter management
-- Unified `Controls` type — Fixed type compatibility issues by creating intersection type combining all module requirements
-- Cleaned up unused imports and variables — Removed ~50+ unused imports from `main.ts`
-- All tests passing (115 tests), build succeeds, no linter errors
-
 ## Workstream C — Three Runtime Split (`src/three`) ✅ COMPLETE
 1. ✅ Break `integration.ts` into services:
    - ✅ `camera/CameraService.ts` (camera + controls ownership),
@@ -115,23 +79,11 @@
 2. ✅ Narrow `controls` usage: consume typed `SimulationParams` and `BrushInput` instead of `any`.
 3. ✅ Keep a small `ThreeJSSimulationRuntime` orchestrator that wires the services and exposes a minimal surface to `main.ts`.
 
-**Progress — 2026-01-24 (Workstream C Complete)**
-- **Service Extraction**: Created four focused services:
-  - `CameraService` - Manages camera setup, configuration, and updates
-  - `TerrainSync` - Handles terrain geometry creation, BVH building, and material management
-  - `HeightmapBridge` - Manages heightmap readback and CPU buffer management
-  - `StepRunner` - Encapsulates simulation step execution with typed DTOs
-- **Orchestrator Refactoring**: `integration.ts` (now `ThreeJSSimulationRuntime`) reduced from monolithic class to thin orchestrator (~500 lines from ~1200+)
-- **Type Safety**: Replaced `any` types with `SimulationParams` and `BrushInput` DTOs throughout service interfaces
-- **Test Coverage**: Added comprehensive unit tests for all services (170 tests passing, up from 145)
-- **Backward Compatibility**: Maintained existing public API while improving internal structure
-- All tests passing, build successful, no linter errors
-
-## Workstream D — Pass Manager Restructure
-1. Move render-target setup to `simulation/targets/RenderTargets.ts`.
-2. Group passes by domain under `simulation/passes/` (water, sediment, thermal, lava, terrain, post).
-3. Create a lightweight pass registry that maps names → shaders + uniforms; `StepRunner` consumes this registry instead of inline sections.
-4. Separate heightmap mesh generation/readback into `TerrainReadbackService`.
+## Workstream D — Pass Manager Restructure ✅ COMPLETE
+1. ✅ Move render-target setup to `simulation/targets/RenderTargets.ts`.
+2. ✅ Group passes by domain under `simulation/passes/` (water, sediment, thermal, lava, terrain, post).
+3. ✅ Create a lightweight pass registry that maps names → shaders + uniforms; `StepRunner` consumes this registry instead of inline sections.
+4. ✅ Separate heightmap mesh generation/readback into `TerrainReadbackService`.
 
 ## Workstream E — Shader Layout & Naming
 1. Rehome shaders into folders:
@@ -166,7 +118,7 @@
 2) Workstream B (entry split) — reduces main monolith. ✅ COMPLETE
 3) Workstream C (Three services) — isolates camera/BVH/step logic. ✅ COMPLETE
 4) Workstream H (heightmap/VTF stabilization) — lock the encoding/denorm path before broader refactors.
-5) Workstream D (pass manager) — organizes GPGPU responsibilities.
+5) Workstream D (pass manager) — organizes GPGPU responsibilities. ✅ COMPLETE
 6) Workstream E (shader move/rename) — align TS imports via manifest.
 7) Workstream F/G in parallel once surfaces are stable.
 
@@ -177,11 +129,66 @@
 - Manual smoke: launch legacy path and Three path separately; verify controls still map (brush, water/lava sources, BVH raycast toggle).
 
 ## Status by Workstream (as of 2026-01-24)
-- **A (composition root)**: ✅ COMPLETE — Bootstrap/services/DTO/state holders in `src/app/*`; tests added for services, context setup, DTO packers, state holders.
-- **B (entry split)**: ✅ COMPLETE — `main.ts` reduced from ~850+ lines to 530 lines; all modules extracted (`app/ui/gui.ts`, `app/input/brush-controls.ts`, `app/runtime/legacy-runner.ts`, `app/runtime/three-runner.ts`, `app/context.ts`); additional modules created (`legacy-initialization.ts`, `controls-factory.ts`, `terrain-random.ts`); unified Controls type; all tests passing.
-- **C (Three runtime split)**: ✅ COMPLETE — `integration.ts` refactored into thin orchestrator (~500 lines from ~1200+); extracted `CameraService`, `TerrainSync`, `HeightmapBridge`, and `StepRunner` services; replaced `any` types with `SimulationParams` and `BrushInput` DTOs; comprehensive test coverage (170 tests passing); all tests and build passing.
-- **D (pass manager restructure)**: In progress; extracting render targets, grouping passes by domain, creating pass registry, separating terrain readback.
-- **E (shader layout/naming)**: Not started; flat folder, debug logic inline.
-- **F (naming/state cleanup)**: Not started; typos (`Hight*`, etc.) still present. State holders provide foundation for cleanup.
-- **G (cleanup/hygiene)**: Not started; `temp_*` files remain.
-- **H (heightmap/VTF)**: Partially done (RAW contract, helper, tests, debug-gating). Pending: central contract helper, uploader abstraction, shader audit/manifest, debug gating in fragment shader, displacement regression test.
+
+### ✅ A (composition root) — COMPLETE
+- **Bootstrap & Services**: Created `src/app/bootstrap.ts` with full service interfaces and implementations (`IGLContext`, `IRendererFactory`, `IBrushState`, `ITerrainState`, `IHeightmapIO`, `IRaycaster`, `ISimulationStepRunner`, `ICameraService`). All services implemented and wired via `createApp()` composition root function.
+- **Typed DTOs**: Created complete DTO layer (`SimulationParams`, `BrushInput`, `SourceArrays`, `RenderTargetsSnapshot`) with helper functions for conversion from legacy controls objects.
+- **State Holders**: Created state holder classes replacing global state (`SimulationStateHolder`, `TerrainStateHolder`, `ClientStateHolder`). Updated files to optionally accept state holders (backward compatible). Added deprecation comments to `simulation-state.ts` and all importing files.
+- **Barrel Exports**: Created `src/app/index.ts` for convenient imports.
+- **Testing**: All tests passing, build succeeds, no linter errors.
+
+### ✅ B (entry split) — COMPLETE
+- **Entry Point Split**: Reduced `src/main.ts` from ~850+ lines to 530 lines (38% reduction).
+- **Module Extraction**: Extracted `app/ui/gui.ts`, `app/input/brush-controls.ts`, `app/runtime/legacy-runner.ts` (~2300 lines), `app/runtime/three-runner.ts`, `app/context.ts`.
+- **Additional Modules**: Created `app/runtime/legacy-initialization.ts`, `app/controls/controls-factory.ts` (~170 lines), `utils/terrain-random.ts`.
+- **Type System**: Created unified `Controls` type (intersection of `GUIControls & EventHandlerControls & HeightmapLoaderControls`). Fixed TypeScript errors in `Camera.ts` and `settings.ts`.
+- **Code Cleanup**: Removed ~50+ unused imports from `main.ts`, removed unused module-level variables.
+- **Testing**: All 115 tests passing, build succeeds, no linter errors.
+
+### ✅ C (Three runtime split) — COMPLETE
+- **Service Extraction**: Created four focused services:
+  - `CameraService` - Manages camera setup, configuration, and updates
+  - `TerrainSync` - Handles terrain geometry creation, BVH building, and material management
+  - `HeightmapBridge` - Manages heightmap readback and CPU buffer management
+  - `StepRunner` - Encapsulates simulation step execution with typed DTOs
+- **Orchestrator Refactoring**: `integration.ts` (now `ThreeJSSimulationRuntime`) reduced from monolithic class to thin orchestrator (~500 lines from ~1200+).
+- **Type Safety**: Replaced `any` types with `SimulationParams` and `BrushInput` DTOs throughout service interfaces.
+- **Test Coverage**: Added comprehensive unit tests for all services (170 tests passing, up from 145).
+- **Testing**: All tests passing, build successful, no linter errors.
+
+### ✅ D (pass manager restructure) — COMPLETE
+- **Render Targets Extraction**: Created `RenderTargets` class encapsulating all ping-pong and non-ping-pong render targets. All 9 ping-pong targets (terrainPP, fluxPP, velocityPP, sedimentPP, sedimentBlendPP, maxslippagePP, terrainFluxPP, lavaPP, lavaFluxPP) and 3 non-ping-pong targets (terrainNor, sedimentAdvectA, sedimentAdvectB) extracted. `SimulationPassManager` now uses `RenderTargets` instance.
+- **Domain Pass Grouping**: Created domain-specific pass classes:
+  - `WaterPasses` - rain, flow, water-height, evaporation passes
+  - `SedimentPasses` - sediment, advection (MacCormack and simple), average passes
+  - `ThermalPasses` - max-slippage, thermal-flux, thermal-apply passes
+  - `LavaPasses` - lava-flow, lava-update, lava-terrain passes
+  - `PostPasses` - clean pass
+  - All domain pass classes have comprehensive unit tests
+- **Pass Registry**: Created `PassRegistry` class with `PassConfig` interface for lightweight pass metadata management. Supports pass registration, retrieval, domain filtering, and uniform validation. Registry infrastructure ready for future integration into execution flow for validation/debugging.
+- **Terrain Readback Service**: Extracted terrain generation and readback logic to `TerrainReadbackService`. Handles terrain mesh generation, heightmap extraction, and provides accessors for terrain mesh, initial heightmap, and heightmap source. `SimulationPassManager.initializeTextures()` now delegates to service.
+- **Orchestrator Refactoring**: `SimulationPassManager` refactored to thin orchestrator (~650 lines from ~1165+). All pass execution delegated to domain pass classes. Removed old pass execution methods. Fixed broken `getTerrainTexture()` method. Updated getter methods to delegate to `TerrainReadbackService`.
+- **Test Coverage**: Added comprehensive unit tests for all new services (186 tests passing, up from 170). All domain pass classes, `RenderTargets`, `PassRegistry`, and `TerrainReadbackService` have full test coverage.
+- **Testing**: All tests passing, build successful, no linter errors.
+
+### ⏳ E (shader layout/naming) — Not started
+- Flat folder structure; debug logic inline.
+- Shaders need to be rehomed into domain folders (`shaders/water`, `shaders/sediment`, `shaders/thermal`, `shaders/lava`, `shaders/terrain`).
+- Typos need renaming (e.g., `alterwaterhight-frag.glsl` → `water-height-frag.glsl`).
+- Need to add `shaders/manifest.ts` for pass → path mapping.
+
+### ⏳ F (naming/state cleanup) — Not started
+- Typos present (`Hight*`, etc.). State holders provide foundation for cleanup.
+- Need to standardize height/frame naming (`HeightMap*`, `simFrameCount`, `simRes`).
+- Need to encapsulate mutable counters behind small services.
+- Need to replace ad-hoc `any` controls with typed structs.
+
+### ⏳ G (cleanup/hygiene) — Not started
+- `temp_*` files remain.
+- Need to move `temp_*` backups to `research/archives/` or delete if superseded.
+- Need to remove IDE-tab reference to missing `src/three/integration-clean-render.ts`.
+- Need to add lint-friendly barrel files where they reduce import noise.
+
+### 🔄 H (heightmap/VTF) — Partially done
+- **Completed**: RAW contract enforcement (stored = worldHeight * simres), helper functions, tests, debug-gating.
+- **Pending**: Central contract helper (`HeightmapContract/HeightmapUniforms`), uploader abstraction (`WebGLTextureUploader`), shader audit/manifest, debug gating in fragment shader, displacement regression test.
