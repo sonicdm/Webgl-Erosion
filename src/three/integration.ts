@@ -12,6 +12,7 @@ import Camera from '../Camera';
 import { ControlsConfig } from '../controls-config';
 import { CameraService } from './camera/CameraService';
 import { TerrainSync } from './terrain/TerrainSync';
+import { HeightmapBridge } from './io/HeightmapBridge';
 import { getWaterSourceCount, waterSources as waterSourcesList, MAX_WATER_SOURCES } from '../utils/water-sources';
 import { getLavaSourceCount, lavaSources as lavaSourcesList, MAX_LAVA_SOURCES } from '../utils/lava-sources';
 import { SimulationParams, createSimulationParams } from '../app/dto/SimulationParams';
@@ -31,21 +32,20 @@ export class ThreeJSSimulationRuntime {
   private runtime: ThreeJSRuntime;
   private passManager: SimulationPassManager | null = null;
   private simres: number;
-  private heightMapCpuBuffer: Float32Array;
   private renderDebugCounter = 0;
-  private heightMapInitialized: boolean = false;
   private controls: any = null; // Store controls for material updates (will be replaced with SimulationParams in Phase 6)
   private cameraService: CameraService; // Camera service for camera management
   private terrainSync: TerrainSync; // Terrain sync service for geometry and BVH management
+  private heightmapBridge: HeightmapBridge; // Heightmap bridge for readback and buffer management
   private controlsConfig: ControlsConfig | null = null; // Camera configuration (stored for reference)
   // terraformingActive flag removed - terraforming is now GPU-based (rain shader)
 
   constructor(canvas: HTMLCanvasElement, glContext: WebGL2RenderingContext, simres: number) {
     this.runtime = new ThreeJSRuntime(canvas, glContext);
     this.simres = simres;
-    this.heightMapCpuBuffer = new Float32Array(simres * simres * 4);
     this.cameraService = new CameraService(this.runtime);
     this.terrainSync = new TerrainSync(this.runtime, simres, null, null);
+    this.heightmapBridge = new HeightmapBridge(simres);
   }
   
   /**
@@ -89,8 +89,9 @@ export class ThreeJSSimulationRuntime {
       this.simres
     );
     
-    // Update terrain sync with pass manager
+    // Update services with pass manager
     this.terrainSync.setPassManager(this.passManager);
+    this.heightmapBridge.setPassManager(this.passManager);
   }
 
   /**
@@ -107,7 +108,7 @@ export class ThreeJSSimulationRuntime {
     }
     this.controls = controls; // Store controls for material updates
     this.terrainSync.setControls(controls); // Update terrain sync with controls
-    await this.passManager!.initializeTextures(controls, timer, heightmapSource, terrainRandom);
+    await this.heightmapBridge.initializeTextures(controls, timer, heightmapSource, terrainRandom);
   }
 
   /**
@@ -216,7 +217,7 @@ export class ThreeJSSimulationRuntime {
    * This buffer is kept in sync with GPU state via readCombinedHeight()
    */
   public getHeightMapCpuBuffer(): Float32Array {
-    return this.heightMapCpuBuffer;
+    return this.heightmapBridge.getHeightMapCpuBuffer();
   }
 
   /**
@@ -225,29 +226,7 @@ export class ThreeJSSimulationRuntime {
    * Updates heightMapCpuBuffer to keep it synchronized
    */
   public readCombinedHeight(): Float32Array {
-    if (!this.passManager) {
-      throw new Error('Simulation not initialized');
-    }
-
-    // CRITICAL PERFORMANCE: This function is extremely expensive (2+ seconds per call)
-    // GPU readback with FLOAT type is not working - returns normalized values
-    // For now, just return the initial heightmap immediately without attempting readback
-    // This avoids the 2+ second stall that's killing framerate
-    const initialHeightmap = this.passManager.getInitialHeightmap();
-    if (initialHeightmap) {
-      const size = this.simres * this.simres;
-      const buffer = new Float32Array(size * 4);
-      buffer.set(initialHeightmap);
-      this.heightMapCpuBuffer.set(buffer);
-      this.heightMapInitialized = true;
-      return buffer;
-    }
-    
-    // If no initial heightmap, return zeros (shouldn't happen)
-    const size = this.simres * this.simres;
-    const buffer = new Float32Array(size * 4);
-    this.heightMapCpuBuffer.set(buffer);
-    return buffer;
+    return this.heightmapBridge.readCombinedHeight();
   }
 
   /**
@@ -287,14 +266,15 @@ export class ThreeJSSimulationRuntime {
     }
     
     // Ensure heightmap buffer is initialized before raycasting
-    if (!this.heightMapInitialized && this.passManager) {
+    if (!this.heightmapBridge.isHeightMapInitialized() && this.passManager) {
       const initialHeightmap = this.passManager.getInitialHeightmap();
       if (initialHeightmap) {
+        this.heightmapBridge.setHeightMapInitialized(true);
+        const buffer = this.heightmapBridge.getHeightMapCpuBuffer();
         const size = this.simres * this.simres;
-        const buffer = new Float32Array(size * 4);
-        buffer.set(initialHeightmap);
-        this.heightMapCpuBuffer.set(buffer);
-        this.heightMapInitialized = true;
+        const tempBuffer = new Float32Array(size * 4);
+        tempBuffer.set(initialHeightmap);
+        buffer.set(tempBuffer);
         console.log('[Raycast] Heightmap buffer initialized, size:', size * 4);
       } else {
         console.warn('[Raycast] No initial heightmap available for raycasting');
@@ -302,8 +282,9 @@ export class ThreeJSSimulationRuntime {
     }
     
     // Verify buffer has data (not all zeros)
-    if (this.heightMapInitialized) {
-      const hasData = this.heightMapCpuBuffer.some(val => val !== 0);
+    if (this.heightmapBridge.isHeightMapInitialized()) {
+      const buffer = this.heightmapBridge.getHeightMapCpuBuffer();
+      const hasData = buffer.some(val => val !== 0);
       if (!hasData) {
         console.warn('[Raycast] Heightmap buffer appears to be all zeros');
       }
@@ -360,7 +341,7 @@ export class ThreeJSSimulationRuntime {
           rayOriginVec3,
           rayDirVec3,
           this.simres,
-          this.heightMapCpuBuffer,
+          this.heightmapBridge.getHeightMapCpuBuffer(),
           heightmapPos
         );
         brushPos[0] = heightmapPos[0];
