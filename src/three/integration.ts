@@ -13,10 +13,13 @@ import { ControlsConfig } from '../controls-config';
 import { CameraService } from './camera/CameraService';
 import { TerrainSync } from './terrain/TerrainSync';
 import { HeightmapBridge } from './io/HeightmapBridge';
-import { getWaterSourceCount, waterSources as waterSourcesList, MAX_WATER_SOURCES } from '../utils/water-sources';
-import { getLavaSourceCount, lavaSources as lavaSourcesList, MAX_LAVA_SOURCES } from '../utils/lava-sources';
+import { StepRunner } from './simulation/StepRunner';
+import { waterSources as waterSourcesList } from '../utils/water-sources';
+import { lavaSources as lavaSourcesList } from '../utils/lava-sources';
 import { SimulationParams, createSimulationParams } from '../app/dto/SimulationParams';
-import { BrushInput } from '../app/dto/BrushInput';
+import { BrushInput, createBrushInput } from '../app/dto/BrushInput';
+import { SourceArrays } from '../app/dto/SourceArrays';
+import { vec2, vec3, vec4 } from 'gl-matrix';
 import { createHeightmapTexture } from './utils/terrain-heightmap-converter';
 import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { setTerrainGeometry, setTerrainBVH, setTerrainBVHBuildInProgress, terrainBVHBuildInProgress, terrainBVH, terrainGeometry } from '../simulation/simulation-state';
@@ -92,6 +95,7 @@ export class ThreeJSSimulationRuntime {
     // Update services with pass manager
     this.terrainSync.setPassManager(this.passManager);
     this.heightmapBridge.setPassManager(this.passManager);
+    this.stepRunner.setPassManager(this.passManager);
   }
 
   /**
@@ -130,86 +134,46 @@ export class ThreeJSSimulationRuntime {
       this.initializeSimulation();
     }
     
-    // Removed debug logging - was causing performance issues
-    
     // Convert controls to SimulationParams if needed (backward compatibility)
     const simParams: SimulationParams = controls.simres !== undefined 
       ? controls as SimulationParams 
       : createSimulationParams(controls, this.simres);
     
-    // Build water source arrays
-    const waterSourceCount = getWaterSourceCount();
-    const waterSourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
-    const waterSourceSizes = new Float32Array(MAX_WATER_SOURCES);
-    const waterSourceStrengths = new Float32Array(MAX_WATER_SOURCES);
-    
-    for (let i = 0; i < MAX_WATER_SOURCES; i++) {
-      if (i < waterSourceCount) {
-        waterSourcePositions[i * 2] = waterSourcesList[i].position[0];
-        waterSourcePositions[i * 2 + 1] = waterSourcesList[i].position[1];
-        waterSourceSizes[i] = waterSourcesList[i].size;
-        waterSourceStrengths[i] = waterSourcesList[i].strength;
-      } else {
-        waterSourcePositions[i * 2] = 0.0;
-        waterSourcePositions[i * 2 + 1] = 0.0;
-        waterSourceSizes[i] = 0.0;
-        waterSourceStrengths[i] = 0.0;
+    // Convert brushState to BrushInput if provided
+    let brushInput: BrushInput | null = null;
+    if (brushState) {
+      brushInput = {
+        brushType: (controls as any).brushType ?? 2,
+        brushSize: (controls as any).brushSize ?? 4,
+        brushStrength: (controls as any).brushStrenth ?? (controls as any).brushStrength ?? 0.25,
+        brushOperation: (controls as any).brushOperation ?? 0,
+        brushPressed: (controls as any).brushPressed ?? 0,
+        flattenTargetHeight: (controls as any).flattenTargetHeight ?? 0.0,
+        slopeStartPos: (controls as any).slopeStartPos ? vec2.clone((controls as any).slopeStartPos) : vec2.fromValues(0.0, 0.0),
+        slopeEndPos: (controls as any).slopeEndPos ? vec2.clone((controls as any).slopeEndPos) : vec2.fromValues(0.0, 0.0),
+        slopeActive: (controls as any).slopeActive ?? 0,
+        posTemp: brushState.brushPos ? vec2.fromValues(brushState.brushPos[0], brushState.brushPos[1]) : vec2.fromValues(0.0, 0.0),
+        mouseWorldPos: brushState.mouseWorldPos ? vec4.fromValues(brushState.mouseWorldPos[0], brushState.mouseWorldPos[1], brushState.mouseWorldPos[2], brushState.mouseWorldPos[3]) : undefined,
+        mouseWorldDir: brushState.mouseWorldDir ? vec3.fromValues(brushState.mouseWorldDir[0], brushState.mouseWorldDir[1], brushState.mouseWorldDir[2]) : undefined,
+        brushPos: brushState.brushPos ? vec2.fromValues(brushState.brushPos[0], brushState.brushPos[1]) : undefined,
+      };
+    } else if ((controls as any).posTemp) {
+      // Fallback: create BrushInput from controls.posTemp
+      const posTemp = (controls as any).posTemp;
+      if (Array.isArray(posTemp) && posTemp.length >= 2) {
+        const [posTempX, posTempY] = posTemp;
+        if (posTempX >= 0 && posTempX <= 1 && posTempY >= 0 && posTempY <= 1) {
+          brushInput = createBrushInput(controls);
+          brushInput.brushPos = vec2.fromValues(posTempX, posTempY);
+        }
       }
     }
     
-    // Build lava source arrays
-    const lavaSourceCount = getLavaSourceCount();
-    const lavaSourcePositions = new Float32Array(MAX_LAVA_SOURCES * 2);
-    const lavaSourceSizes = new Float32Array(MAX_LAVA_SOURCES);
-    const lavaSourceStrengths = new Float32Array(MAX_LAVA_SOURCES);
+    // Create SourceArrays from globals (will be passed from caller in Phase 6)
+    const sourceArrays = new SourceArrays(waterSourcesList, lavaSourcesList);
     
-    for (let i = 0; i < MAX_LAVA_SOURCES; i++) {
-      if (i < lavaSourceCount) {
-        lavaSourcePositions[i * 2] = lavaSourcesList[i].position[0];
-        lavaSourcePositions[i * 2 + 1] = lavaSourcesList[i].position[1];
-        lavaSourceSizes[i] = lavaSourcesList[i].size;
-        lavaSourceStrengths[i] = lavaSourcesList[i].strength;
-      } else {
-        lavaSourcePositions[i * 2] = 0.0;
-        lavaSourcePositions[i * 2 + 1] = 0.0;
-        lavaSourceSizes[i] = 0.0;
-        lavaSourceStrengths[i] = 0.0;
-      }
-    }
-    
-    // Build brush state from controls if not provided
-    // Only use controls.posTemp if it's valid (not [-10, -10])
-    let finalBrushState = brushState;
-    if (!finalBrushState && controls.posTemp) {
-      const [posTempX, posTempY] = controls.posTemp;
-      if (posTempX >= 0 && posTempX <= 1 && posTempY >= 0 && posTempY <= 1) {
-        finalBrushState = {
-          brushPos: [posTempX, posTempY]
-        };
-      }
-    }
-    // If still no valid brushState, don't pass one (rain pass will handle invalid brushPos)
-    if (!finalBrushState) {
-      finalBrushState = undefined;
-    }
-    
-    this.passManager!.executeStep(
-      controls,
-      timer,
-      finalBrushState,
-      {
-        count: waterSourceCount,
-        positions: waterSourcePositions,
-        sizes: waterSourceSizes,
-        strengths: waterSourceStrengths
-      },
-      {
-        count: lavaSourceCount,
-        positions: lavaSourcePositions,
-        sizes: lavaSourceSizes,
-        strengths: lavaSourceStrengths
-      }
-    );
+    // Delegate to StepRunner
+    this.stepRunner.executeStep(simParams, brushInput, timer, sourceArrays);
   }
 
   /**
@@ -355,7 +319,7 @@ export class ThreeJSSimulationRuntime {
         rayOriginVec3,
         rayDirVec3,
         this.simres,
-        this.heightMapCpuBuffer,
+        this.heightmapBridge.getHeightMapCpuBuffer(),
         brushPos
       );
     }
