@@ -15,6 +15,23 @@ export class VoronoiTerrainType extends BaseTerrainType {
     return 'Voronoi';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 1, // Voronoi is cellular, steps don't apply - use 1
+      turbulent: false, // Voronoi cells are distinct, not turbulent
+      easing: 'Linear', // Cellular pattern doesn't need easing
+      smoothing: 'Gaussian 0.5,7', // Light Gaussian smoothing softens cell edges
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

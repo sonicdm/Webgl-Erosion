@@ -15,6 +15,23 @@ export class DomainWarpTerrainType extends BaseTerrainType {
     return 'Domain Warp';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 4, // Domain warp uses fewer octaves
+      turbulent: true, // Domain warp is inherently turbulent/warped
+      easing: 'EaseOut', // Warp effect benefits from easing
+      smoothing: 'None', // Warp should remain sharp
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

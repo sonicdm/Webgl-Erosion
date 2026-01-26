@@ -37,11 +37,73 @@ export function uploadFloatRGBAToTexture(
   const webglTexture = textureProperties.__webglTexture;
 
   gl.bindTexture(gl.TEXTURE_2D, webglTexture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, data);
+  
+  // Check for WebGL errors before upload
+  const preError = gl.getError();
+  if (preError !== gl.NO_ERROR) {
+    console.warn(`[WebGLTextureUploader] Pre-upload WebGL error: ${preError}`);
+    gl.getError(); // Clear the error
+  }
+  
+  // CRITICAL: Always use texImage2D to ensure the texture is created with RGBA32F format
+  // texSubImage2D requires the texture to already exist with the correct format,
+  // but Three.js may have created it with a different format (e.g., RGBA8)
+  // texImage2D will recreate the texture with the correct format
+  let uploadSuccess = false;
+  let uploadError: number | null = null;
+  
+  try {
+    // Use texImage2D to create/recreate texture with RGBA32F format
+    // This will work even if texture is attached to framebuffer (WebGL2 allows it)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, data);
+    uploadError = gl.getError();
+    if (uploadError === gl.NO_ERROR) {
+      uploadSuccess = true;
+      console.log(`[WebGLTextureUploader] Uploaded via texImage2D: ${width}x${height} RGBA32F texture data`);
+    } else {
+      console.error(`[WebGLTextureUploader] texImage2D failed with error ${uploadError} (${uploadError === gl.INVALID_OPERATION ? 'INVALID_OPERATION - texture may be attached to framebuffer' : 'OTHER'})`);
+      
+      // If texImage2D failed due to framebuffer attachment, try texSubImage2D as fallback
+      // (but this will only work if texture format matches)
+      if (uploadError === gl.INVALID_OPERATION) {
+        console.warn(`[WebGLTextureUploader] Attempting texSubImage2D fallback...`);
+        while (gl.getError() !== gl.NO_ERROR) {} // Clear errors
+        
+        try {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.FLOAT, data);
+          uploadError = gl.getError();
+          if (uploadError === gl.NO_ERROR) {
+            uploadSuccess = true;
+            console.log(`[WebGLTextureUploader] Uploaded via texSubImage2D fallback: ${width}x${height} float texture data`);
+          } else {
+            console.error(`[WebGLTextureUploader] texSubImage2D fallback also failed: ${uploadError}`);
+          }
+        } catch (e) {
+          console.error(`[WebGLTextureUploader] texSubImage2D fallback threw exception: ${e}`);
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`[WebGLTextureUploader] texImage2D threw exception: ${e}`);
+  }
+  
+  if (!uploadSuccess) {
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    return false;
+  }
+  
+  // Set texture parameters (must be done while texture is bound)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  
+  // Verify no errors after setting parameters
+  const paramError = gl.getError();
+  if (paramError !== gl.NO_ERROR) {
+    console.error(`[WebGLTextureUploader] Error setting texture parameters: ${paramError}`);
+  }
+  
   gl.bindTexture(gl.TEXTURE_2D, null);
 
   texture.needsUpdate = false;

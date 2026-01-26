@@ -15,6 +15,23 @@ export class BillowNoiseTerrainType extends BaseTerrainType {
     return 'Billow Noise';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 5, // Billow uses moderate octaves
+      turbulent: false, // Billow is puffy, not turbulent
+      easing: 'EaseOut', // Billow benefits from easing
+      smoothing: 'Mean 1', // Light mean smoothing enhances billow effect
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

@@ -1,6 +1,8 @@
 import * as DAT from 'dat-gui';
 import { updatePaletteSelection, initBrushPalette } from '../brush-palette';
 import { loadSettings, saveSettings } from '../settings';
+import { getMaskRegistry } from '../three/terrain/mask-registry';
+import { getTerrainTypeRegistry } from '../three/terrain/terrain-type-registry';
 
 export interface Controls {
     [key: string]: any;
@@ -21,6 +23,9 @@ export interface GUIControllers {
 
 export interface GUISetupOptions {
     threeRuntime?: any; // ThreeJSSimulationRuntime - injected dependency
+    heightmapIO?: {
+        importHeightmap: () => void;
+    }; // Heightmap IO service for auto-import
 }
 
 export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: DAT.GUI, controllers: GUIControllers } {
@@ -38,21 +43,65 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
     terrainParameters.add(controls, 'SimulationResolution', { 256: 256, 512: 512, 1024: 1024, 2048: 2048, 4096: 4096 });
     const terrainScaleController = terrainParameters.add(controls, 'TerrainScale', 0.1, 4.0);
     const terrainHeightController = terrainParameters.add(controls, 'TerrainHeight', 1.0, 5.0);
-    terrainParameters.add(controls, 'TerrainMask', { 
-        OFF: 0, 
-        Sphere: 1, 
-        Slope: 2, 
-        Square: 3, 
-        Ring: 4, 
-        RadialGradient: 5, 
-        Corner: 6, 
-        Diagonal: 7, 
-        Cross: 8,
-        Craters: 10,
-        Dunes: 11
-    });
-    // Add ALL THREE.Terrain methods from the demo (matching demo exactly)
-    const terrainBaseTypeController = terrainParameters.add(controls, 'TerrainBaseType', { 
+    
+    // TerrainScale and TerrainHeight changes are pending until Generate Terrain button is clicked
+    // No automatic regeneration - user must click Generate Terrain button
+    
+    terrainParameters.add(controls, 'Import Height Map');
+    terrainParameters.add(controls, 'Clear Height Map');
+    terrainParameters.add(controls, 'Export Height Map');
+    
+    // Apply defaults from the default terrain type (Ordinary FBM, ID 0)
+    // This ensures the GUI looks good by default
+    const defaultTerrainTypeId = controls.TerrainBaseType ?? 0;
+    const registry = getTerrainTypeRegistry();
+    const defaultTerrainType = registry.get(defaultTerrainTypeId);
+    if (defaultTerrainType) {
+        const defaults = defaultTerrainType.getDefaultParams();
+        // Apply defaults if not already set
+        if ((controls as any).TerrainEasing === undefined) (controls as any).TerrainEasing = defaults.easing ?? 'Linear';
+        if ((controls as any).TerrainSteps === undefined) (controls as any).TerrainSteps = defaults.steps ?? 1;
+        if ((controls as any).TerrainTurbulent === undefined) (controls as any).TerrainTurbulent = defaults.turbulent ?? false;
+        if ((controls as any).TerrainWidthLengthRatio === undefined) (controls as any).TerrainWidthLengthRatio = defaults.ratio ?? 1.0;
+        if ((controls as any).TerrainSegments === undefined) (controls as any).TerrainSegments = (controls.SimulationResolution || 1024) - 1;
+        if ((controls as any).TerrainSmoothing === undefined) (controls as any).TerrainSmoothing = defaults.smoothing ?? 'None';
+        if ((controls as any).TerrainEdgeType === undefined) (controls as any).TerrainEdgeType = defaults.edges?.type ?? 'Box';
+        if ((controls as any).TerrainEdgeDirection === undefined) (controls as any).TerrainEdgeDirection = defaults.edges?.direction ?? 'Normal';
+        if ((controls as any).TerrainEdgeCurve === undefined) (controls as any).TerrainEdgeCurve = defaults.edges?.curve ?? 'Linear';
+        if ((controls as any).TerrainEdgeDistance === undefined) (controls as any).TerrainEdgeDistance = defaults.edges?.distance ?? 256;
+    } else {
+        // Fallback defaults if registry lookup fails
+        if ((controls as any).TerrainEasing === undefined) (controls as any).TerrainEasing = 'Linear';
+        if ((controls as any).TerrainSteps === undefined) (controls as any).TerrainSteps = 1;
+        if ((controls as any).TerrainTurbulent === undefined) (controls as any).TerrainTurbulent = false;
+        if ((controls as any).TerrainWidthLengthRatio === undefined) (controls as any).TerrainWidthLengthRatio = 1.0;
+        if ((controls as any).TerrainSegments === undefined) (controls as any).TerrainSegments = (controls.SimulationResolution || 1024) - 1;
+        if ((controls as any).TerrainSmoothing === undefined) (controls as any).TerrainSmoothing = 'None';
+        if ((controls as any).TerrainEdgeType === undefined) (controls as any).TerrainEdgeType = 'Box';
+        if ((controls as any).TerrainEdgeDirection === undefined) (controls as any).TerrainEdgeDirection = 'Normal';
+        if ((controls as any).TerrainEdgeCurve === undefined) (controls as any).TerrainEdgeCurve = 'Linear';
+        if ((controls as any).TerrainEdgeDistance === undefined) (controls as any).TerrainEdgeDistance = 256;
+    }
+    
+    // TerrainSize is the same as SimulationResolution - sync them
+    if ((controls as any).TerrainSize === undefined) (controls as any).TerrainSize = controls.SimulationResolution || 1024;
+    (controls as any).TerrainSize = controls.SimulationResolution || (controls as any).TerrainSize || 1024;
+    
+    if ((controls as any).TerrainCustomLock === undefined) (controls as any).TerrainCustomLock = false;
+    
+    // Status line (read-only display) - create a custom display
+    // TerrainSegments is automatically computed as simres - 1
+    // TerrainSize is the same as SimulationResolution
+    const statusObj: any = { 
+      status: `simres=${controls.SimulationResolution || 1024} segments=${((controls.SimulationResolution || 1024) - 1)} ratio=${((controls as any).TerrainWidthLengthRatio || 1.0).toFixed(2)}` 
+    };
+    const statusLineController = terrainParameters.add(statusObj, 'status');
+    (statusLineController.domElement as HTMLElement).style.pointerEvents = 'none';
+    (statusLineController.domElement.querySelector('input') as HTMLInputElement).readOnly = true;
+    
+    // TerrainBaseType - ALL terrain types (THREE.Terrain and legacy shader-based)
+    const terrainBaseTypeController = terrainParameters.add(controls, 'TerrainBaseType', {
+        'Heightmap': 'heightmap',
         'Brownian': 'Brownian',
         'Cosine': 'Cosine',
         'CosineLayers': 'CosineLayers',
@@ -70,10 +119,10 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
         'Weierstrass': 'Weierstrass',
         'Worley': 'Worley',
         // Keep old numeric IDs for backward compatibility
-        'Ordinary FBM (Legacy)': 0, 
-        'Domain Warp (Legacy)': 1, 
-        'Terrace (Legacy)': 2, 
-        'Voroni (Legacy)': 3, 
+        'Ordinary FBM (Legacy)': 0,
+        'Domain Warp (Legacy)': 1,
+        'Terrace (Legacy)': 2,
+        'Voroni (Legacy)': 3,
         'Ridge Noise (Legacy)': 4,
         'Billow Noise (Legacy)': 5,
         'Turbulence (Legacy)': 6,
@@ -84,72 +133,192 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
         'Billowy Ridges (Legacy)': 11
     });
     
-    // Add onChange handler to regenerate terrain when type changes (dependency injection)
-    if (threeRuntime) {
-        console.log('[GUI] TerrainBaseType handler attached, threeRuntime available');
-        terrainBaseTypeController.onFinishChange((value: any) => {
-            console.log('[GUI] TerrainBaseType changed to:', value);
-            if (!threeRuntime) {
-                console.warn('[GUI] WARNING: threeRuntime not available when TerrainBaseType changed');
-                return;
+    // Get mask registry for TerrainMask select
+    const maskRegistry = getMaskRegistry();
+    const maskOptions: any = { 'OFF': 0 };
+    for (let i = 1; i <= 11; i++) {
+        if (i !== 9) { // Skip 9
+            const mask = maskRegistry.get(i);
+            if (mask) {
+                maskOptions[mask.getDisplayName()] = i;
             }
+        }
+    }
+    const terrainMaskController = terrainParameters.add(controls, 'TerrainMask', maskOptions);
+    
+    const terrainEasingController = terrainParameters.add(controls as any, 'TerrainEasing', {
+        'Linear': 'Linear',
+        'EaseIn': 'EaseIn',
+        'EaseOut': 'EaseOut',
+        'EaseInOut': 'EaseInOut',
+        'InEaseOut': 'InEaseOut'
+    });
+    
+    const terrainStepsController = terrainParameters.add(controls as any, 'TerrainSteps', 1, 8).step(1);
+    const terrainTurbulentController = terrainParameters.add(controls as any, 'TerrainTurbulent');
+    
+    // TerrainSize is the same as SimulationResolution - removed duplicate control
+    const terrainWidthLengthRatioController = terrainParameters.add(controls as any, 'TerrainWidthLengthRatio', 0.2, 2.0).step(0.05);
+    
+    // Advanced subfolder (collapsible, default closed)
+    const advancedFolder = terrainParameters.addFolder('Advanced');
+    advancedFolder.close(); // Default closed
+    
+    const terrainSmoothingController = advancedFolder.add(controls as any, 'TerrainSmoothing', {
+        'None': 'None',
+        'Conservative 0.5': 'Conservative 0.5',
+        'Conservative 1': 'Conservative 1',
+        'Conservative 10': 'Conservative 10',
+        'Gaussian 0.5,7': 'Gaussian 0.5,7',
+        'Gaussian 1.0,7': 'Gaussian 1.0,7',
+        'Gaussian 1.5,7': 'Gaussian 1.5,7',
+        'Gaussian 1.0,5': 'Gaussian 1.0,5',
+        'Gaussian 1.0,11': 'Gaussian 1.0,11',
+        'GaussianBox': 'GaussianBox',
+        'Mean 0': 'Mean 0',
+        'Mean 1': 'Mean 1',
+        'Mean 8': 'Mean 8',
+        'Median': 'Median'
+    });
+    
+    const terrainEdgeTypeController = advancedFolder.add(controls as any, 'TerrainEdgeType', { 'Box': 'Box', 'Radial': 'Radial' });
+    const terrainEdgeDirectionController = advancedFolder.add(controls as any, 'TerrainEdgeDirection', { 'Normal': 'Normal', 'Up': 'Up', 'Down': 'Down' });
+    const terrainEdgeCurveController = advancedFolder.add(controls as any, 'TerrainEdgeCurve', { 'Linear': 'Linear', 'EaseIn': 'EaseIn', 'EaseOut': 'EaseOut', 'EaseInOut': 'EaseInOut' });
+    const terrainEdgeDistanceController = advancedFolder.add(controls as any, 'TerrainEdgeDistance', 0, 512).step(32);
+    
+    // Generate Terrain button (replaces Reset Terrain)
+    const generateTerrainButton = terrainParameters.add({ generateTerrain: () => {
+        if (threeRuntime) {
             const terrainRandom = {
                 seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
                 duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
                 craterDensity: 0.8 + Math.random() * 0.7,
                 canyonDepth: 0.45 + Math.random() * 0.5
             };
-            threeRuntime.regenerateTerrain(controls, terrainRandom).catch((error) => {
+            threeRuntime.regenerateTerrain(controls, terrainRandom).catch((error: any) => {
                 console.error('[GUI] ERROR: Failed to regenerate terrain:', error);
             });
-        });
-    } else {
-        console.warn('[GUI] WARNING: threeRuntime not available, TerrainBaseType handler not attached');
-    }
+        }
+    }}, 'generateTerrain').name('Generate Terrain');
     
-    // Add onChange handlers for TerrainScale and TerrainHeight to regenerate terrain
-    if (threeRuntime) {
-        terrainScaleController.onFinishChange((value: number) => {
-            console.log('[GUI] TerrainScale changed to:', value);
-            if (!threeRuntime) {
-                console.warn('[GUI] WARNING: threeRuntime not available when TerrainScale changed');
-                return;
-            }
-            const terrainRandom = {
-                seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
-                duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
-                craterDensity: 0.8 + Math.random() * 0.7,
-                canyonDepth: 0.45 + Math.random() * 0.5
+    // Custom lock checkbox (prevents defaults from being applied)
+    const customLockController = terrainParameters.add(controls as any, 'TerrainCustomLock').name('Custom Lock (prevent defaults)');
+    
+    // Debounce utility function
+    const debounce = (func: Function, wait: number) => {
+        let timeout: NodeJS.Timeout | null = null;
+        return function executedFunction(...args: any[]) {
+            const later = () => {
+                timeout = null;
+                func(...args);
             };
-            threeRuntime.regenerateTerrain(controls, terrainRandom).catch((error) => {
-                console.error('[GUI] ERROR: Failed to regenerate terrain after TerrainScale change:', error);
-            });
-        });
+            if (timeout) clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    };
+    
+    // Debounced handlers for heavy controls (300-500ms)
+    const debouncedSimResChange = debounce(() => {
+        // TerrainSegments is automatically computed as simres - 1
+        // TerrainSize is the same as SimulationResolution - sync them
+        (controls as any).TerrainSize = controls.SimulationResolution;
+        (controls as any).TerrainSegments = controls.SimulationResolution - 1;
+        updateStatusLine();
+    }, 400);
+    
+    const debouncedRatioChange = debounce(() => {
+        updateStatusLine();
+    }, 400);
+    
+    // Status line update function
+    const updateStatusLine = () => {
+        const simres = controls.SimulationResolution || 1024;
+        const segments = simres - 1; // Automatically computed
+        const ratio = (controls as any).TerrainWidthLengthRatio || 1.0;
+        statusObj.status = `simres=${simres} segments=${segments} ratio=${ratio.toFixed(2)}`;
+        statusLineController.updateDisplay();
+    };
+    
+    // TerrainBaseType onChange: apply defaults and handle heightmap auto-import
+    terrainBaseTypeController.onChange((value: any) => {
+        console.log('[GUI] TerrainBaseType changed to:', value);
         
-        terrainHeightController.onFinishChange((value: number) => {
-            console.log('[GUI] TerrainHeight changed to:', value);
-            if (!threeRuntime) {
-                console.warn('[GUI] WARNING: threeRuntime not available when TerrainHeight changed');
-                return;
+        // Check for heightmap auto-import
+        if ((value === 'heightmap' || value === 'Heightmap') && threeRuntime && options?.heightmapIO) {
+            const heightmapSource = threeRuntime.passManager?.terrainReadbackService?.getHeightmapSource();
+            if (!heightmapSource) {
+                console.log('[GUI] Heightmap type selected but no heightmap loaded, triggering import...');
+                options.heightmapIO.importHeightmap();
             }
-            const terrainRandom = {
-                seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
-                duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
-                craterDensity: 0.8 + Math.random() * 0.7,
-                canyonDepth: 0.45 + Math.random() * 0.5
-            };
-            threeRuntime.regenerateTerrain(controls, terrainRandom).catch((error) => {
-                console.error('[GUI] ERROR: Failed to regenerate terrain after TerrainHeight change:', error);
-            });
+        }
+        
+        // Apply type-specific defaults unless custom lock is enabled
+        if (!(controls as any).TerrainCustomLock && threeRuntime) {
+            const registry = getTerrainTypeRegistry();
+            const terrainType = registry.get(value);
+            if (terrainType) {
+                const defaults = terrainType.getDefaultParams();
+                console.log('[GUI] Applying defaults for', terrainType.getDisplayName(), ':', defaults);
+                
+                if (defaults.easing !== undefined) (controls as any).TerrainEasing = defaults.easing;
+                if (defaults.steps !== undefined) (controls as any).TerrainSteps = defaults.steps;
+                if (defaults.turbulent !== undefined) (controls as any).TerrainTurbulent = defaults.turbulent;
+                if (defaults.size !== undefined) (controls as any).TerrainSize = defaults.size;
+                if (defaults.ratio !== undefined) (controls as any).TerrainWidthLengthRatio = defaults.ratio;
+                if (defaults.smoothing !== undefined) (controls as any).TerrainSmoothing = defaults.smoothing;
+                if (defaults.edges) {
+                    if (defaults.edges.type !== undefined) (controls as any).TerrainEdgeType = defaults.edges.type;
+                    if (defaults.edges.direction !== undefined) (controls as any).TerrainEdgeDirection = defaults.edges.direction;
+                    if (defaults.edges.curve !== undefined) (controls as any).TerrainEdgeCurve = defaults.edges.curve;
+                    if (defaults.edges.distance !== undefined) (controls as any).TerrainEdgeDistance = defaults.edges.distance;
+                }
+                
+                // Update GUI controllers to reflect new values
+                terrainEasingController.updateDisplay();
+                terrainStepsController.updateDisplay();
+                terrainTurbulentController.updateDisplay();
+                terrainWidthLengthRatioController.updateDisplay();
+                terrainSmoothingController.updateDisplay();
+                terrainEdgeTypeController.updateDisplay();
+                terrainEdgeDirectionController.updateDisplay();
+                terrainEdgeCurveController.updateDisplay();
+                terrainEdgeDistanceController.updateDisplay();
+                
+                updateStatusLine();
+            }
+        }
+    });
+    
+    // Monitor SimulationResolution changes - TerrainSegments is automatically computed as simres - 1
+    // TerrainSize is the same as SimulationResolution - sync them
+    const simResController = terrainParameters.__controllers.find((c: any) => c.property === 'SimulationResolution');
+    if (simResController) {
+        const originalOnChange = simResController.onChange;
+        simResController.onChange((value: number) => {
+            if (originalOnChange) originalOnChange(value);
+            // TerrainSegments is automatically computed as simres - 1
+            // TerrainSize is the same as SimulationResolution
+            (controls as any).TerrainSegments = value - 1;
+            (controls as any).TerrainSize = value;
+            debouncedSimResChange();
         });
-    } else {
-        console.warn('[GUI] WARNING: threeRuntime not available, TerrainScale/TerrainHeight handlers not attached');
     }
     
-    terrainParameters.add(controls, 'ResetTerrain');
-    terrainParameters.add(controls, 'Import Height Map');
-    terrainParameters.add(controls, 'Clear Height Map');
-    terrainParameters.add(controls, 'Export Height Map');
+    // All other controllers just mark pending (onChange only, no regeneration)
+    terrainEasingController.onChange(() => updateStatusLine());
+    terrainStepsController.onChange(() => updateStatusLine());
+    terrainTurbulentController.onChange(() => updateStatusLine());
+    terrainWidthLengthRatioController.onChange(() => {
+        updateStatusLine();
+        debouncedRatioChange();
+    });
+    terrainSmoothingController.onChange(() => updateStatusLine());
+    terrainEdgeTypeController.onChange(() => updateStatusLine());
+    terrainEdgeDirectionController.onChange(() => updateStatusLine());
+    terrainEdgeCurveController.onChange(() => updateStatusLine());
+    terrainEdgeDistanceController.onChange(() => updateStatusLine());
+    terrainMaskController.onChange(() => updateStatusLine());
+    
     terrainParameters.open();
     
     // Erosion Parameters

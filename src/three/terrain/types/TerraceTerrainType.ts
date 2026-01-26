@@ -15,6 +15,23 @@ export class TerraceTerrainType extends BaseTerrainType {
     return 'Terrace';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 6, // Maps to terrace levels - teR function creates stepped levels
+      turbulent: false, // Terraces are smooth steps
+      easing: 'Linear', // Terraces are uniform steps
+      smoothing: 'Conservative 0.5', // Light smoothing helps terrace edges
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

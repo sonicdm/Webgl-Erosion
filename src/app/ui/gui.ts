@@ -27,7 +27,11 @@ export function setupAppGUI(
 ): GUISetupResult {
   // Use existing setupGUI with dependency injection
   // The threeRuntime is passed through for terrain regeneration callbacks
-  const guiResult = setupGUI(controls, { threeRuntime });
+  // heightmapIO is passed for heightmap auto-import feature
+  const guiResult = setupGUI(controls, { 
+    threeRuntime,
+    heightmapIO: appContext.heightmapIO
+  });
 
   // Wire GUI controllers to update state holders (gradual migration)
   // For now, controllers update the controls object directly

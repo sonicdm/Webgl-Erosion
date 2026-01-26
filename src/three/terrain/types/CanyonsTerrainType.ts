@@ -20,6 +20,23 @@ export class CanyonsTerrainType extends BaseTerrainType {
     return 'Canyons';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 5, // Canyons use moderate octaves
+      turbulent: false, // Canyons are carved features
+      easing: 'EaseIn', // Canyons benefit from easing for depth transitions
+      smoothing: 'Conservative 1', // Conservative smoothing preserves canyon edges
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

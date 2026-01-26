@@ -15,6 +15,23 @@ export class RidgeNoiseTerrainType extends BaseTerrainType {
     return 'Ridge Noise';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 6, // Ridge noise benefits from multiple octaves
+      turbulent: false, // Ridges are directional, not turbulent
+      easing: 'EaseIn', // Ridges benefit from easing for smoother transitions
+      smoothing: 'None', // Keep ridges sharp
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

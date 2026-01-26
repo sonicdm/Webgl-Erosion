@@ -5,6 +5,10 @@ import { TerrainGenerationOptions } from './TerrainGenerationOptions';
  * Provides unified interface for shader-based terrain types (0-11) and THREE.Terrain method wrappers
  * 
  * CRITICAL: Shader-based terrain types (0-11) must match `src/shaders/terrain/initial-frag.glsl` exactly
+ * 
+ * IMPORTANT: Default parameter tables live in the terrain classes themselves (not in GUI code).
+ * This is the single source of truth for GUI defaults. GUI pulls defaults from registry,
+ * which queries each terrain type's getDefaultParams() method.
  */
 export abstract class BaseTerrainType {
   /**
@@ -16,6 +20,24 @@ export abstract class BaseTerrainType {
    * Human-readable display name for UI (e.g., "Ordinary FBM", "Diamond Square")
    */
   abstract getDisplayName(): string;
+  
+  /**
+   * Get default parameters for this terrain type
+   * These defaults are tuned to make each terrain type look its best
+   * GUI pulls defaults from registry and applies them when terrain type is selected
+   * 
+   * @returns Object containing recommended default values for terrain parameters
+   */
+  abstract getDefaultParams(): {
+    easing?: string;
+    steps?: number;
+    turbulent?: boolean;
+    size?: number;
+    ratio?: number;
+    smoothing?: string;
+    edges?: { type?: string; direction?: string; curve?: string; distance?: number };
+    frequency?: number;
+  };
   
   /**
    * Generate heightmap values into the provided array

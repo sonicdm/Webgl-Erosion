@@ -15,6 +15,23 @@ export class DunesTerrainType extends BaseTerrainType {
     return 'Dunes';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 3, // Dunes use fewer octaves for smooth waves
+      turbulent: false, // Dunes are smooth waves
+      easing: 'EaseOut', // Dunes benefit from easing for wave transitions
+      smoothing: 'Mean 1', // Light smoothing enhances dune flow
+      size: 1024,
+      ratio: 1.5, // Dunes often benefit from elongated ratio
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

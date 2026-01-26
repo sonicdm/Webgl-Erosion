@@ -25,6 +25,16 @@ export interface TerrainGenerationOptions {
   easing?: (t: number) => number; // Easing function for THREE.Terrain
   after?: (vertices: THREE.Vector3[], options: TerrainGenerationOptions) => void; // Post-processing callback
   
+  // THREE.Terrain advanced parameters
+  terrainEasing?: string; // Easing function name: 'Linear', 'EaseIn', 'EaseOut', 'EaseInOut', 'InEaseOut'
+  terrainSize?: number; // World-space terrain size (512-4096)
+  terrainWidthLengthRatio?: number; // Aspect ratio for non-square terrains (0.2-2.0)
+  terrainSmoothing?: string; // Post-process smoothing: 'None', 'Conservative', 'Gaussian', 'Mean', 'Median' variants
+  terrainEdgeType?: 'Box' | 'Radial'; // Edge falloff type
+  terrainEdgeDirection?: 'Normal' | 'Up' | 'Down'; // Edge falloff direction
+  terrainEdgeCurve?: 'Linear' | 'EaseIn' | 'EaseOut' | 'EaseInOut'; // Edge falloff curve
+  terrainEdgeDistance?: number; // Edge falloff distance (0-512)
+  
   // Random seed parameters (for custom terrain types)
   terrainRandom?: {
     seedOffset: [number, number];

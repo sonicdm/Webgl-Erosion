@@ -15,6 +15,23 @@ export class CratersTerrainType extends BaseTerrainType {
     return 'Craters';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 4, // Craters use moderate octaves for base
+      turbulent: false, // Craters are distinct features, not turbulent
+      easing: 'EaseIn', // Craters benefit from easing for rim transitions
+      smoothing: 'Gaussian 1.0,7', // Gaussian smoothing softens crater rims
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

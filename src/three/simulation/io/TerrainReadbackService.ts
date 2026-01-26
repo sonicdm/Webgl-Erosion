@@ -7,6 +7,8 @@ import { SimulationParams } from '../../../app/dto/SimulationParams';
 import { getTerrainTypeRegistry } from '../../terrain/terrain-type-registry';
 import { TerrainGenerationOptions } from '../../terrain/TerrainGenerationOptions';
 import { MaskApplicator } from '../../terrain/mask-applicator';
+import { HeightmapReadbackUtil } from '../../utils/heightmap-readback';
+import { ensureRenderTargetFloat } from '../../utils/textureFormatVTF';
 
 /**
  * Service responsible for terrain mesh generation and heightmap readback
@@ -16,6 +18,7 @@ export class TerrainReadbackService {
   private initialHeightmap: Float32Array | null = null;
   private terrainMesh: THREE.Mesh | null = null;
   private heightmapSource: HeightmapSource | null = null;
+  private cachedHeightmapImage: CanvasImageSource | null = null; // Cache for imported heightmaps
 
   constructor(
     private simres: number,
@@ -32,6 +35,94 @@ export class TerrainReadbackService {
     } catch (error) {
       console.warn('Failed to load THREE.Terrain, falling back to procedural generation:', error);
     }
+  }
+
+  /**
+   * Maps smoothing string to THREE.Terrain smoothing function
+   */
+  private getSmoothingFunction(smoothingName: string): ((vertices: THREE.Vector3[], options: any) => void) | null {
+    const globalTHREE = typeof window !== 'undefined' ? (window as any).THREE : null;
+    const Terrain = globalTHREE?.Terrain;
+    if (!Terrain) {
+      return null;
+    }
+
+    if (smoothingName === 'None') {
+      return null;
+    }
+
+    // Map smoothing names to THREE.Terrain functions
+    const smoothingMap: Record<string, string> = {
+      'Conservative 0.5': 'Conservative',
+      'Conservative 1': 'Conservative',
+      'Conservative 10': 'Conservative',
+      'Gaussian 0.5,7': 'Gaussian',
+      'Gaussian 1.0,7': 'Gaussian',
+      'Gaussian 1.5,7': 'Gaussian',
+      'Gaussian 1.0,5': 'Gaussian',
+      'Gaussian 1.0,11': 'Gaussian',
+      'GaussianBox': 'GaussianBox',
+      'Mean 0': 'Mean',
+      'Mean 1': 'Mean',
+      'Mean 8': 'Mean',
+      'Median': 'Median',
+    };
+
+    const methodName = smoothingMap[smoothingName];
+    if (!methodName || !Terrain[methodName]) {
+      console.warn(`[Terrain Generation] Unknown smoothing function: ${smoothingName}, skipping smoothing`);
+      return null;
+    }
+
+    return Terrain[methodName];
+  }
+
+  /**
+   * Creates edge application function based on edge parameters
+   */
+  private createEdgeFunction(
+    edgeType: 'Box' | 'Radial',
+    edgeDirection: 'Normal' | 'Up' | 'Down',
+    edgeCurve: 'Linear' | 'EaseIn' | 'EaseOut' | 'EaseInOut',
+    edgeDistance: number
+  ): ((vertices: THREE.Vector3[], options: any) => void) | null {
+    if (edgeDistance <= 0) {
+      return null; // No edge application
+    }
+
+    const globalTHREE = typeof window !== 'undefined' ? (window as any).THREE : null;
+    const Terrain = globalTHREE?.Terrain;
+    if (!Terrain) {
+      return null;
+    }
+
+    // Get edge easing function
+    const edgeEasing = getEasing(edgeCurve);
+    if (typeof edgeEasing !== 'function') {
+      console.warn(`[Terrain Generation] Invalid edge curve: ${edgeCurve}, using Linear`);
+      return null;
+    }
+
+    // THREE.Terrain.Edges and RadialEdges signatures:
+    // Edges(vertices, distance, direction, easing)
+    // RadialEdges(vertices, distance, direction, easing)
+    // direction: 'Normal' | 'Up' | 'Down'
+    if (edgeType === 'Radial') {
+      if (Terrain.RadialEdges) {
+        return (vertices: THREE.Vector3[], options: any) => {
+          Terrain.RadialEdges(vertices, edgeDistance, edgeDirection, edgeEasing);
+        };
+      }
+    } else {
+      if (Terrain.Edges) {
+        return (vertices: THREE.Vector3[], options: any) => {
+          Terrain.Edges(vertices, edgeDistance, edgeDirection, edgeEasing);
+        };
+      }
+    }
+
+    console.warn(`[Terrain Generation] Edge function not available for type: ${edgeType}`);
+    return null;
   }
 
   /**
@@ -123,6 +214,50 @@ export class TerrainReadbackService {
       const terrainHeight = controls.TerrainHeight || 2.0;
       const terrainMask = controls.TerrainMask || 0;
       
+      // Compute segments from controls or fallback to simres - 1
+      let segments = controls.TerrainSegments ?? (this.simres - 1);
+      // Validate segments/simres lock: segments + 1 must equal simres
+      if (segments + 1 !== this.simres) {
+        console.warn(`[Terrain Generation] Segments/simres mismatch: segments=${segments}, simres=${this.simres}. Setting segments = simres - 1`);
+        segments = this.simres - 1;
+      }
+      
+      // Get new THREE.Terrain parameters
+      const terrainSize = controls.TerrainSize ?? 1024;
+      const terrainWidthLengthRatio = controls.TerrainWidthLengthRatio ?? 1.0;
+      const terrainSteps = controls.TerrainSteps ?? 1;
+      const terrainTurbulent = controls.TerrainTurbulent ?? false;
+      const terrainEasingStr = controls.TerrainEasing ?? 'Linear';
+      const terrainSmoothing = controls.TerrainSmoothing ?? 'None';
+      const terrainEdgeType = controls.TerrainEdgeType ?? 'Box';
+      const terrainEdgeDirection = controls.TerrainEdgeDirection ?? 'Normal';
+      const terrainEdgeCurve = controls.TerrainEdgeCurve ?? 'Linear';
+      const terrainEdgeDistance = controls.TerrainEdgeDistance ?? 256;
+      
+      // Validate all parameters before proceeding
+      if (!Number.isFinite(segments) || segments < 1) {
+        throw new Error(`[Terrain Generation] Invalid segments: ${segments}. Must be finite and >= 1`);
+      }
+      if (!Number.isFinite(terrainSize) || terrainSize <= 0) {
+        throw new Error(`[Terrain Generation] Invalid terrainSize: ${terrainSize}. Must be finite and > 0`);
+      }
+      if (!Number.isFinite(terrainWidthLengthRatio) || terrainWidthLengthRatio <= 0) {
+        throw new Error(`[Terrain Generation] Invalid terrainWidthLengthRatio: ${terrainWidthLengthRatio}. Must be finite and > 0`);
+      }
+      if (!Number.isFinite(terrainSteps) || terrainSteps < 1) {
+        throw new Error(`[Terrain Generation] Invalid terrainSteps: ${terrainSteps}. Must be finite and >= 1`);
+      }
+      
+      // Calculate xSize and ySize from TerrainSize and ratio
+      const xSize = terrainSize;
+      const ySize = terrainSize * terrainWidthLengthRatio;
+      
+      // Get easing function
+      const easing = getEasing(terrainEasingStr);
+      if (typeof easing !== 'function') {
+        throw new Error(`[Terrain Generation] Invalid easing function for '${terrainEasingStr}'. getEasing returned: ${typeof easing}`);
+      }
+      
       // Match demo EXACTLY: maxHeight: that.maxHeight - 100, minHeight: -100
       // Demo uses maxHeight: 200 - 100 = 100, minHeight: -100, so terrain spans -100 to 100
       // We use terrainHeight * 120.0 as the base, then subtract 100 for maxHeight
@@ -130,26 +265,31 @@ export class TerrainReadbackService {
       const maxHeight = baseMaxHeight - 100; // Match demo: that.maxHeight - 100
       const minHeight = -100; // Match demo: -100
       
-      // Calculate terrain size and segments
-      const terrainSize = terrainScale * 320.0; // Match demo: scale 3.2 = 1024 units
-      const segments = this.simres - 1; // Creates exactly simres x simres vertices
-      
-      // Build standardized TerrainGenerationOptions
+      // Build standardized TerrainGenerationOptions with all new parameters
       const generationOptions: TerrainGenerationOptions = {
         xSegments: segments,
         ySegments: segments,
-        xSize: terrainSize,
-        ySize: terrainSize,
+        xSize: xSize,
+        ySize: ySize,
         terrainScale,
         terrainHeight,
         terrainMask,
-        terrainSteps: controls.TerrainSteps || 1,
-        terrainTurbulent: controls.TerrainTurbulent || false,
+        terrainSteps: terrainSteps,
+        terrainTurbulent: terrainTurbulent,
         timer,
         frequency: undefined, // TODO: Add UI control for frequency
-        easing: getEasing('Linear'),
-        after: undefined, // Optional post-processing callback
+        easing: easing,
+        after: undefined, // Optional post-processing callback (will be set for edges/smoothing)
         terrainRandom,
+        // New THREE.Terrain advanced parameters
+        terrainEasing: terrainEasingStr,
+        terrainSize: terrainSize,
+        terrainWidthLengthRatio: terrainWidthLengthRatio,
+        terrainSmoothing: terrainSmoothing,
+        terrainEdgeType: terrainEdgeType,
+        terrainEdgeDirection: terrainEdgeDirection,
+        terrainEdgeCurve: terrainEdgeCurve,
+        terrainEdgeDistance: terrainEdgeDistance,
       };
       
       // Get terrain type from registry
@@ -164,10 +304,19 @@ export class TerrainReadbackService {
         }
       }
       
-      // Handle heightmap source (for imported heightmaps) - use directly if provided
+      // Handle heightmap source (for imported heightmaps) - use cached or provided
       let finalHeightmap: any;
-      if (heightmapSource && typeof heightmapSource !== 'function') {
-        // CanvasImageSource - use directly, skip terrain type generation
+      const useCachedHeightmap = this.cachedHeightmapImage && (terrainBaseType === 'heightmap' || controls.TerrainBaseType === 'heightmap');
+      
+      if (useCachedHeightmap && this.cachedHeightmapImage) {
+        // Use cached heightmap
+        console.log('[Terrain Generation] Using cached heightmap image');
+        finalHeightmap = this.cachedHeightmapImage;
+      } else if (heightmapSource && typeof heightmapSource !== 'function') {
+        // CanvasImageSource - use directly, cache it, and force base type to 'heightmap'
+        console.log('[Terrain Generation] Using provided heightmap image, caching it');
+        this.cachedHeightmapImage = heightmapSource;
+        // Note: TerrainBaseType should be set to 'heightmap' by the caller (GUI or import handler)
         finalHeightmap = heightmapSource;
       } else {
         // Create heightmap function wrapper that uses terrain type
@@ -185,8 +334,98 @@ export class TerrainReadbackService {
         };
       }
       
-      const easing = generationOptions.easing || globalTHREE.Terrain.Linear || ((t: number) => t);
-      
+      // Build after callback for edges and smoothing
+      const edgeFunction = this.createEdgeFunction(terrainEdgeType, terrainEdgeDirection, terrainEdgeCurve, terrainEdgeDistance);
+      const smoothingFunction = terrainSmoothing !== 'None' ? this.getSmoothingFunction(terrainSmoothing) : null;
+
+      const afterCallback = (vertices: THREE.Vector3[], options: any) => {
+        // Apply edges first (if enabled)
+        if (edgeFunction) {
+          try {
+            edgeFunction(vertices, options);
+          } catch (error) {
+            console.error(`[Terrain Generation] Edge application failed:`, error);
+            throw new Error(`Edge application failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+
+        // Apply smoothing (if enabled)
+        if (smoothingFunction) {
+          try {
+            smoothingFunction(vertices, options);
+            // Validate smoothing didn't produce NaN/Inf
+            for (let i = 0; i < vertices.length; i++) {
+              if (!Number.isFinite(vertices[i].z)) {
+                throw new Error(`Smoothing '${terrainSmoothing}' produced NaN/Inf at vertex ${i}`);
+              }
+            }
+          } catch (error) {
+            console.error(`[Terrain Generation] Smoothing '${terrainSmoothing}' failed:`, error);
+            throw new Error(`Smoothing '${terrainSmoothing}' failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      };
+
+      // Log all parameters before THREE.Terrain call for debugging NaN issue
+      const threeTerrainParams = {
+        easing: easing,
+        heightmap: typeof finalHeightmap === 'function' ? '[function]' : finalHeightmap,
+        maxHeight: maxHeight,
+        minHeight: minHeight,
+        xSize: xSize,
+        ySize: ySize,
+        xSegments: segments,
+        ySegments: segments,
+        steps: terrainSteps,
+        turbulent: terrainTurbulent,
+        stretch: true,
+        frequency: generationOptions.frequency,
+        after: edgeFunction || smoothingFunction ? afterCallback : undefined,
+      };
+
+      console.log('[Terrain Generation] THREE.Terrain() parameters:', {
+        ...threeTerrainParams,
+        heightmap: typeof finalHeightmap === 'function' ? '[heightmap function]' : '[CanvasImageSource]',
+        easing: typeof easing === 'function' ? '[function]' : easing,
+        after: threeTerrainParams.after ? '[function]' : undefined,
+        // Validate parameter types
+        paramTypes: {
+          easing: typeof easing,
+          xSize: typeof xSize,
+          ySize: typeof ySize,
+          xSegments: typeof segments,
+          ySegments: typeof segments,
+          steps: typeof terrainSteps,
+          turbulent: typeof terrainTurbulent,
+          maxHeight: typeof maxHeight,
+          minHeight: typeof minHeight,
+        },
+        paramValues: {
+          xSize,
+          ySize,
+          segments,
+          terrainSteps,
+          terrainTurbulent,
+          maxHeight,
+          minHeight,
+        }
+      });
+
+      // Validate all parameters are finite before calling THREE.Terrain
+      const paramChecks = {
+        easing: typeof easing === 'function',
+        xSize: Number.isFinite(xSize) && xSize > 0,
+        ySize: Number.isFinite(ySize) && ySize > 0,
+        segments: Number.isFinite(segments) && segments > 0,
+        steps: Number.isFinite(terrainSteps) && terrainSteps >= 1,
+        maxHeight: Number.isFinite(maxHeight),
+        minHeight: Number.isFinite(minHeight),
+      };
+
+      const invalidParams = Object.entries(paramChecks).filter(([_, valid]) => !valid);
+      if (invalidParams.length > 0) {
+        throw new Error(`[Terrain Generation] Invalid parameters before THREE.Terrain call: ${invalidParams.map(([name]) => name).join(', ')}. Values: ${JSON.stringify(threeTerrainParams.paramValues)}`);
+      }
       
       // Log terrain generation start
       console.log('[Terrain Generation] Starting terrain generation:', {
@@ -197,7 +436,15 @@ export class TerrainReadbackService {
         terrainMask: terrainMask,
         segments: segments,
         simres: this.simres,
-        expectedVertices: (segments + 1) * (segments + 1)
+        expectedVertices: (segments + 1) * (segments + 1),
+        xSize,
+        ySize,
+        terrainSteps,
+        terrainTurbulent,
+        terrainEasing: terrainEasingStr,
+        terrainSmoothing,
+        terrainEdgeType,
+        terrainEdgeDistance,
       });
       
       const terrainScene = globalTHREE.Terrain({
@@ -205,22 +452,41 @@ export class TerrainReadbackService {
         heightmap: finalHeightmap,
         maxHeight: maxHeight,
         minHeight: minHeight,
-        xSize: terrainSize,
-        ySize: terrainSize,
+        xSize: xSize,
+        ySize: ySize,
         xSegments: segments,
         ySegments: segments,
         material: new THREE.MeshBasicMaterial({ color: 0x888888 }), // Will be replaced later
-        steps: generationOptions.terrainSteps,
-        turbulent: generationOptions.terrainTurbulent,
+        steps: terrainSteps,
+        turbulent: terrainTurbulent,
         stretch: true,
         frequency: generationOptions.frequency,
-        after: generationOptions.after,
+        after: edgeFunction || smoothingFunction ? afterCallback : undefined,
       });
       
       // Extract the mesh from the scene (THREE.Terrain returns Scene with mesh as first child)
       const terrainMesh = terrainScene.children[0] as THREE.Mesh;
       if (!terrainMesh || !terrainMesh.geometry) {
         throw new Error('THREE.Terrain did not generate a valid mesh');
+      }
+
+      // Validate geometry position attributes for NaN after THREE.Terrain call
+      const positions = terrainMesh.geometry.attributes.position.array as Float32Array;
+      let nanCount = 0;
+      let infCount = 0;
+      for (let i = 0; i < positions.length; i++) {
+        if (!Number.isFinite(positions[i])) {
+          if (Number.isNaN(positions[i])) {
+            nanCount++;
+          } else {
+            infCount++;
+          }
+        }
+      }
+      if (nanCount > 0 || infCount > 0) {
+        console.error(`[Terrain Generation] Geometry validation failed: ${nanCount} NaN values, ${infCount} Inf values in position attributes`);
+        console.error('[Terrain Generation] First 20 position values:', Array.from(positions.slice(0, 20)));
+        throw new Error(`[Terrain Generation] THREE.Terrain generated invalid geometry: ${nanCount} NaN, ${infCount} Inf values. baseType=${terrainBaseType}, type=${terrainType!.getName()}`);
       }
       
       // Apply mask as post-process if needed (for ALL terrain types, not just custom)
@@ -347,15 +613,135 @@ export class TerrainReadbackService {
       
       // Upload heightmap to terrainPP ping-pong target
       if (this.heightmapSource) {
-        uploadHeightmap(
-          this.renderer,
-          this.heightmapSource,
-          this.terrainPP.getWriteTarget()
-        );
+        const writeTarget = this.terrainPP.getWriteTarget();
+        
+        // Log source data for debugging
+        const sourceData = this.heightmapSource.textureData;
+        const sourceSampleIndices = [0, Math.floor(sourceData.length / 8), Math.floor(sourceData.length / 2), Math.floor(sourceData.length * 3 / 4), sourceData.length - 4];
+        const sourceSamples = sourceSampleIndices.map(idx => sourceData[idx]);
+        console.log('[Terrain Generation] Uploading heightmap - source samples (stored heights):', {
+          minHeight: this.heightmapSource.minHeight,
+          maxHeight: this.heightmapSource.maxHeight,
+          expectedStoredMin: this.heightmapSource.minHeight * this.simres,
+          expectedStoredMax: this.heightmapSource.maxHeight * this.simres,
+          sampleIndices: sourceSampleIndices,
+          sampleValues: sourceSamples
+        });
+        
+        // Ensure the render target texture is configured for float format
+        ensureRenderTargetFloat(writeTarget, this.renderer);
+        
+        // Force Three.js to initialize the texture in the renderer's properties
+        // by calling initTexture (which creates the WebGL texture without rendering)
+        const properties = (this.renderer as any).properties;
+        if (properties) {
+          const textureProperties = properties.get(writeTarget.texture);
+          if (!textureProperties?.__webglTexture) {
+            // Texture doesn't exist yet - initialize it by setting it as render target briefly
+            // This will create the texture in the renderer's properties
+            this.renderer.setRenderTarget(writeTarget);
+            // Don't render anything - just the act of setting the render target initializes the texture
+            this.renderer.setRenderTarget(null);
+            // Re-ensure format after initialization
+            ensureRenderTargetFloat(writeTarget, this.renderer);
+          }
+        }
+        
+        // Now upload the heightmap data (will throw if it fails)
+        try {
+          uploadHeightmap(
+            this.renderer,
+            this.heightmapSource,
+            writeTarget
+          );
+          
+          // Verify upload by checking texture properties
+          const properties = (this.renderer as any).properties;
+          const textureProperties = properties?.get(writeTarget.texture);
+          console.log('[Terrain Generation] Upload verification:', {
+            hasWebGLTexture: !!textureProperties?.__webglTexture,
+            textureInit: textureProperties?.__webglInit,
+            internalFormat: (textureProperties as any)?.__webglTextureInternalFormat,
+            width: writeTarget.width,
+            height: writeTarget.height,
+            sourceDataLength: this.heightmapSource.textureData.length
+          });
+        } catch (uploadError) {
+          throw new Error(`[Terrain Generation] Failed to upload heightmap: ${uploadError}`);
+        }
+        
+        console.log('[Terrain Generation] Heightmap uploaded to render target');
+        
+        // Wait for GPU to finish upload before reading back
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        
+        // CRITICAL: Verify upload by reading back immediately
+        // This will tell us if the data was actually written correctly
+        try {
+          const immediateReadback = await HeightmapReadbackUtil.readHeightmapMinMax(
+            this.renderer,
+            writeTarget,
+            this.simres,
+            8 // Read larger patch for better verification
+          );
+          
+          const { min, max, range, stats } = immediateReadback;
+          console.log('[Terrain Generation] Immediate post-upload readback:', {
+            min,
+            max,
+            range,
+            expectedMin: this.heightmapSource.minHeight,
+            expectedMax: this.heightmapSource.maxHeight,
+            expectedRange: this.heightmapSource.maxHeight - this.heightmapSource.minHeight,
+            stats
+          });
+          
+          // Check if readback matches expected range (within tolerance)
+          const expectedRange = this.heightmapSource.maxHeight - this.heightmapSource.minHeight;
+          if (range < expectedRange * 0.1) {
+            console.error(`[Terrain Generation] Upload verification FAILED: readback range (${range}) is much smaller than expected (${expectedRange})`);
+            console.error(`[Terrain Generation] This suggests the upload did not write the data correctly`);
+          } else {
+            console.log(`[Terrain Generation] Upload verification PASSED: readback range matches expected range`);
+          }
+        } catch (readbackError) {
+          console.error('[Terrain Generation] Immediate readback failed:', readbackError);
+        }
       }
       
       // Swap ping-pong so initial terrain is in read position
       this.terrainPP.swap();
+      
+      // Health check: read back a small patch and verify min/max are finite
+      // After swap, the uploaded terrain is now in the read target
+      try {
+        const readbackResult = await HeightmapReadbackUtil.readHeightmapMinMax(
+          this.renderer,
+          this.terrainPP.getReadTarget(),
+          this.simres,
+          4 // 4x4 patch
+        );
+        
+        const { min, max, range, stats } = readbackResult;
+        
+        console.log('[Terrain Generation] Health check readback stats:', stats);
+        
+        // Validate: min/max must be finite and range must be > threshold
+        if (!Number.isFinite(min) || !Number.isFinite(max)) {
+          throw new Error(`[Terrain Generation] Health check failed: min=${min}, max=${max} (non-finite)`);
+        }
+        
+        if (range < 1e-5) {
+          throw new Error(`[Terrain Generation] Health check failed: range too small (${range} < 1e-5) - terrain is flat`);
+        }
+        
+        console.log('[Terrain Generation] Health check passed:', { min, max, range });
+      } catch (readbackError) {
+        console.error('[Terrain Generation] Health check failed:', readbackError);
+        // Don't throw here - let the existing validation catch it
+        // But log the readback error for debugging
+      }
+      
       console.log('[Terrain Generation] Terrain generation complete');
     } catch (error) {
       console.error('Failed to generate terrain:', error);
@@ -402,5 +788,20 @@ export class TerrainReadbackService {
    */
   public setSimRes(simres: number): void {
     this.simres = simres;
+  }
+
+  /**
+   * Gets the cached heightmap image (if any)
+   */
+  public getCachedHeightmap(): CanvasImageSource | null {
+    return this.cachedHeightmapImage;
+  }
+
+  /**
+   * Clears the cached heightmap image
+   */
+  public clearHeightmapCache(): void {
+    this.cachedHeightmapImage = null;
+    console.log('[Terrain Generation] Heightmap cache cleared');
   }
 }

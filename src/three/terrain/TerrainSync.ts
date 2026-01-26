@@ -568,6 +568,66 @@ export class TerrainSync {
    * Rebuilds BVH when terrain geometry changes (for periodic updates during erosion)
    * Only rebuilds if geometry actually changed and BVH is not already building
    */
+  /**
+   * Updates simulation resolution and recreates geometry if needed
+   * Ensures plane geometry segments = simres - 1
+   */
+  public setSimRes(newSimres: number): void {
+    if (this.simres === newSimres) {
+      return; // No change needed
+    }
+
+    const oldSimres = this.simres;
+    this.simres = newSimres;
+
+    _terrainLog('[TerrainSync] Simres changed:', { oldSimres, newSimres });
+
+    // If terrain mesh exists, recreate geometry with new segments
+    if (this.terrainMesh && this.terrainMesh.geometry) {
+      const terrainScale = this.controls?.TerrainScale || 3.2;
+      const terrainSize = terrainScale * 320.0;
+      const newSegments = newSimres - 1; // Lock: segments = simres - 1
+
+      // Recreate plane geometry with new segments
+      const newGeometry = new THREE.PlaneGeometry(terrainSize, terrainSize, newSegments, newSegments);
+      newGeometry.rotateX(-Math.PI / 2); // Rotate to XZ plane (Y up)
+
+      // Flatten all Y positions to 0 (vertex shader will displace from texture)
+      const flatPositions = newGeometry.attributes.position.array as Float32Array;
+      for (let i = 1; i < flatPositions.length; i += 3) {
+        flatPositions[i] = 0.0; // Set Y to 0
+      }
+      newGeometry.attributes.position.needsUpdate = true;
+      newGeometry.computeVertexNormals();
+      newGeometry.computeBoundingBox();
+
+      // Replace geometry
+      const oldGeometry = this.terrainMesh.geometry;
+      this.terrainMesh.geometry = newGeometry;
+      oldGeometry.dispose();
+
+      // Update terrainStateHolder
+      this.terrainGeometry = newGeometry;
+      this.terrainStateHolder.terrainGeometry = newGeometry;
+
+      // Rebuild BVH with new geometry
+      this.buildBVHForRaycasting(newGeometry);
+
+      _terrainLog('[TerrainSync] Geometry recreated for new simres:', {
+        oldSimres,
+        newSimres,
+        oldSegments: oldSimres - 1,
+        newSegments,
+        vertexCount: newGeometry.attributes.position.count
+      });
+    }
+
+    // Update material uniforms with new simres (u_HeightDecodeScale = 1/simres)
+    if (this.terrainMesh && this.terrainMesh.material) {
+      this.updateMaterialUniforms(this.controls, this.passManager);
+    }
+  }
+
   public rebuildBVHIfNeeded(): void {
     if (!this.terrainGeometry) {
       return;
@@ -599,12 +659,15 @@ export class TerrainSync {
       }
       
       // Update textures from simulation or CPU heightmap (for real-time terraforming)
+      // CRITICAL: Always bind to current write textures from pass manager (freshest texture each frame)
       const useSimHeightmap = (controls as any)?.UseSimHeightmap;
-      const terrainTexture = passManager?.getTerrainTexture();
-      const sedimentTexture = passManager?.getSedimentTexture();
+      const terrainTexture = passManager?.getTerrainTexture(); // Returns current write target
+      const sedimentTexture = passManager?.getSedimentTexture(); // Returns current write target
       const targetHeightmap = useSimHeightmap ? terrainTexture : this.cpuHeightmapTexture;
 
+      // Rebind u_Heightmap every frame to ensure we're using the freshest texture
       if (targetHeightmap && material.uniforms.u_Heightmap) {
+        // Always rebind to ensure we're using the current write target (freshest texture)
         const currentTexture = material.uniforms.u_Heightmap.value as THREE.Texture;
         const currentWidth = (currentTexture as any)?.image?.width || (currentTexture as any)?.source?.data?.width || 0;
         const isDummy = currentWidth === 1;
@@ -617,11 +680,14 @@ export class TerrainSync {
           this.heightmapFreshness?.recordUpload();
         }
       } else if (useSimHeightmap && !terrainTexture) {
-        console.warn('[TerrainSync] WARNING: UseSimHeightmap is true but terrainTexture is null');
+        console.warn('[TerrainSync] WARNING: UseSimHeightmap is true but terrainTexture is null - do NOT fall back to CPU texture');
+        // Do NOT fall back to CPU texture when UseSimHeightmap=true and sim texture exists
       }
 
+      // Rebind u_Sediment every frame to ensure we're using the freshest texture
       if (sedimentTexture && material.uniforms.u_Sediment) {
         const currentSed = material.uniforms.u_Sediment.value as THREE.Texture;
+        // Always rebind to ensure we're using the current write target
         if (currentSed !== sedimentTexture) {
           this._configureAndAssertVTF(sedimentTexture);
           material.uniforms.u_Sediment.value = sedimentTexture;
@@ -642,11 +708,16 @@ export class TerrainSync {
         const dbgScale = (material.uniforms.u_MaxHeight.value || 0) - (material.uniforms.u_MinHeight.value || 0);
         material.uniforms.u_DebugScale.value = Math.max(dbgScale, 1.0);
       }
-      // RAW contract: u_HeightDecodeScale = 1/simres for both CPU and sim; single source from HeightmapSource when present.
+      // Decode Contract (explicit):
+      // - Stored height = worldHeight * simres (height is stored multiplied by simres)
+      // - Shader uses u_HeightDecodeScale = 1/simres to decode back to world height
+      // - This contract must be maintained when simres changes
+      // - Single source from HeightmapSource when present, otherwise use current simres
       if (material.uniforms.u_HeightDecodeScale) {
-        material.uniforms.u_HeightDecodeScale.value = this.heightmapSource
-          ? 1.0 / this.heightmapSource.simres
-          : 1.0 / this.simres;
+        const currentSimres = this.heightmapSource
+          ? this.heightmapSource.simres
+          : this.simres;
+        material.uniforms.u_HeightDecodeScale.value = 1.0 / currentSimres;
       }
       // Allow live debug mode override from controls.DebugMode (optional)
       if (controls && typeof (controls as any).DebugMode === 'number' && material.uniforms.u_DebugMode) {

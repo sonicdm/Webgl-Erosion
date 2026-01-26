@@ -15,6 +15,23 @@ export class TurbulenceTerrainType extends BaseTerrainType {
     return 'Turbulence';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 7, // Turbulence uses many octaves
+      turbulent: true, // Turbulence is inherently turbulent
+      easing: 'EaseInOut', // Turbulence benefits from complex easing
+      smoothing: 'None', // Keep turbulence sharp and chaotic
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

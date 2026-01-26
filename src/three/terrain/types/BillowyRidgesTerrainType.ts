@@ -15,6 +15,23 @@ export class BillowyRidgesTerrainType extends BaseTerrainType {
     return 'Billowy Ridges';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 6, // Billowy ridges use moderate octaves
+      turbulent: false, // Ridges are directional
+      easing: 'EaseOut', // Billowy ridges benefit from easing
+      smoothing: 'Mean 1', // Light smoothing enhances billow effect
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

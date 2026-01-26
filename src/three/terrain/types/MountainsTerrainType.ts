@@ -15,6 +15,23 @@ export class MountainsTerrainType extends BaseTerrainType {
     return 'Mountains';
   }
 
+  getDefaultParams() {
+    return {
+      steps: 8, // Mountains use many octaves for detail
+      turbulent: false, // Mountains are structured, not turbulent
+      easing: 'EaseInOut', // Mountains benefit from complex easing
+      smoothing: 'Gaussian 0.5,7', // Light Gaussian preserves peak sharpness
+      size: 1024,
+      ratio: 1.0,
+      edges: {
+        type: 'Box',
+        direction: 'Normal',
+        curve: 'Linear',
+        distance: 256
+      }
+    };
+  }
+
   generateHeightmap(zs: Float32Array | number[], options: TerrainGenerationOptions): void {
     const xSegments = options.xSegments;
     const ySegments = options.ySegments;

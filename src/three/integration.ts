@@ -577,12 +577,31 @@ export class ThreeJSSimulationRuntime {
 
   /**
    * Updates simulation resolution
+   * Recreates render targets, updates plane geometry segments, and updates u_HeightDecodeScale
    */
   public setSimRes(simres: number): void {
+    if (this.simres === simres) {
+      return; // No change needed
+    }
+
+    const oldSimres = this.simres;
     this.simres = simres;
+
+    console.log('[ThreeJSSimulationRuntime] Simres changed:', { oldSimres, newSimres: simres });
+
+    // Update pass manager (recreates render targets)
     if (this.passManager) {
       this.passManager.setSimRes(simres);
     }
+
+    // Update terrain sync (recreates plane geometry with new segments = simres - 1)
+    this.terrainSync.setSimRes(simres);
+
+    // Update heightmap bridge
+    this.heightmapBridge.setSimRes(simres);
+
+    // Material uniforms will be updated in next render() call via updateMaterialUniforms()
+    // which will set u_HeightDecodeScale = 1/simres
   }
 
 

@@ -44,6 +44,19 @@ export interface SimulationParams {
   SnowRange: number;
   ForestRange: number;
   
+  // THREE.Terrain parameters (will be overridden by type-specific defaults)
+  TerrainEasing: string; // 'Linear', 'EaseIn', 'EaseOut', 'EaseInOut', 'InEaseOut'
+  TerrainSteps: number; // Number of octaves/iterations (1-8)
+  TerrainTurbulent: boolean; // Enable turbulent/warped patterns
+  TerrainSize: number; // World-space terrain size (512-4096)
+  TerrainWidthLengthRatio: number; // Aspect ratio for non-square terrains (0.2-2.0)
+  TerrainSegments: number; // Geometry segments (7-127), computed as simres - 1 in factory
+  TerrainSmoothing: string; // Post-process smoothing: 'None', 'Conservative', 'Gaussian', 'Mean', 'Median' variants
+  TerrainEdgeType: 'Box' | 'Radial'; // Edge falloff type
+  TerrainEdgeDirection: 'Normal' | 'Up' | 'Down'; // Edge falloff direction
+  TerrainEdgeCurve: 'Linear' | 'EaseIn' | 'EaseOut' | 'EaseInOut'; // Edge falloff curve
+  TerrainEdgeDistance: number; // Edge falloff distance (0-512)
+  
   // Water/sediment visualization
   WaterTransparency: number;
   SedimentTrace: boolean;
@@ -142,6 +155,19 @@ export function createSimulationParams(controls: any, simres: number): Simulatio
     TerrainPlatte: controls.TerrainPlatte ?? 1,
     SnowRange: controls.SnowRange ?? 0,
     ForestRange: controls.ForestRange ?? 0,
+    
+    // THREE.Terrain parameters (fallback defaults; actual defaults come from getDefaultParams() per terrain type)
+    TerrainEasing: controls.TerrainEasing ?? 'Linear',
+    TerrainSteps: controls.TerrainSteps ?? 1,
+    TerrainTurbulent: controls.TerrainTurbulent ?? false,
+    TerrainSize: controls.TerrainSize ?? 1024,
+    TerrainWidthLengthRatio: controls.TerrainWidthLengthRatio ?? 1.0,
+    TerrainSegments: controls.TerrainSegments ?? (controls.SimulationResolution ? controls.SimulationResolution - 1 : simres - 1),
+    TerrainSmoothing: controls.TerrainSmoothing ?? 'None',
+    TerrainEdgeType: (controls.TerrainEdgeType as 'Box' | 'Radial') ?? 'Box',
+    TerrainEdgeDirection: (controls.TerrainEdgeDirection as 'Normal' | 'Up' | 'Down') ?? 'Normal',
+    TerrainEdgeCurve: (controls.TerrainEdgeCurve as 'Linear' | 'EaseIn' | 'EaseOut' | 'EaseInOut') ?? 'Linear',
+    TerrainEdgeDistance: controls.TerrainEdgeDistance ?? 256,
     
     WaterTransparency: controls.WaterTransparency ?? 0.50,
     SedimentTrace: controls.SedimentTrace ?? true,

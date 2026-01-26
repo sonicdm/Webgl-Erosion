@@ -23,10 +23,12 @@ import { BillowyRidgesTerrainType } from './types/BillowyRidgesTerrainType';
 export class TerrainTypeRegistry {
   private shaderTypes: Map<number, BaseTerrainType> = new Map();
   private threeTerrainTypes: Map<string, BaseTerrainType> = new Map();
+  private threeTerrainTypesRegistered: boolean = false;
 
   constructor() {
     this.registerShaderTypes();
-    this.registerThreeTerrainTypes();
+    // THREE.Terrain types are registered lazily (when first accessed)
+    // because ensureTerrainLibrary() must be called first (async)
   }
 
   /**
@@ -49,8 +51,11 @@ export class TerrainTypeRegistry {
 
   /**
    * Register all 17 THREE.Terrain methods (SECONDARY)
+   * Called lazily when first THREE.Terrain type is accessed
    */
   private registerThreeTerrainTypes(): void {
+    if (this.threeTerrainTypesRegistered) return;
+    
     const threeTerrainMethods = [
       'DiamondSquare',
       'Perlin',
@@ -80,9 +85,12 @@ export class TerrainTypeRegistry {
           console.warn(`[TerrainTypeRegistry] THREE.Terrain method '${methodName}' not available`);
         }
       } catch (error) {
-        console.warn(`[TerrainTypeRegistry] Failed to register THREE.Terrain method '${methodName}':`, error);
+        // Silently fail - THREE.Terrain library may not be loaded yet
+        // Will be registered when ensureTerrainLibrary() is called
       }
     }
+    
+    this.threeTerrainTypesRegistered = true;
   }
 
   /**
@@ -96,6 +104,10 @@ export class TerrainTypeRegistry {
    * Get terrain type by string name (for THREE.Terrain methods)
    */
   getByName(name: string): BaseTerrainType | null {
+    // Try lazy registration if not already done
+    if (!this.threeTerrainTypesRegistered) {
+      this.registerThreeTerrainTypes();
+    }
     return this.threeTerrainTypes.get(name) || null;
   }
 

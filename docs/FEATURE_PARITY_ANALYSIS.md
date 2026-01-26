@@ -351,46 +351,9 @@ The master branch has a complete WebGL renderer with:
 
 ## Implementation Priority
 
-### Phase 1: Core Functionality (Must Have) - Exit Criteria Required
+### Phase 1: Core Functionality — Completed (per Cursor)
 
-**Goal**: Functional simulation and basic rendering matching master behavior.
-
-1. **Complete simulation pass uniforms (water + lava)**
-   - *Owner*: `SimulationPassManager.ts`
-   - *DoD*: All uniforms set, GPU readback validation passes, visual match
-   - *Checkpoint*: Water simulation produces stable output matching master
-
-2. **Basic terrain rendering with materials**
-   - *Owner*: `TerrainSync.ts`, `terrain-scene.ts`
-   - *DoD*: Standard materials functional, biome texturing works, basic lighting, visual match
-   - *Checkpoint*: Terrain renders with materials matching master quality (normal/roughness maps deferred to Phase 2)
-
-3. **Basic water rendering**
-   - *Owner*: `water-scene.ts`
-   - *DoD*: Water mesh functional, transparency works, visual match
-   - *Checkpoint*: Water visible and updates from simulation
-
-4. **Basic lava rendering**
-   - *Owner*: `lava-scene.ts`
-   - *DoD*: Lava mesh functional, temperature colors correct, visual match
-   - *Checkpoint*: Lava visible and updates from simulation
-
-5. **Brush system integration**
-   - *Owner*: `brush-controls.ts`, `integration.ts`
-   - *DoD*: All brush types functional, input handling works, visual match
-   - *Checkpoint*: Brush modifications visible in real-time
-
-6. **Raycast integration**
-   - *Owner*: `bvh-raycast.ts`, `integration.ts`
-   - *DoD*: BVH raycast functional, fallback works, accuracy validated
-   - *Checkpoint*: Brush positioning accurate
-
-7. **Validation Suite** (Exit Criteria)
-    - *Owner*: `__tests__/validation/`
-    - *DoD*: All validation tests pass (`npm run validate:all`), visual comparison tool functional, GPU readback within 1% tolerance
-    - *Checkpoint*: Phase 1 features validated against master baselines
-
-**Phase 1 Complete When**: All 7 items above have DoD met and validation suite passes, and any new terrain GUI/heightmap changes are validated but not tracked as Phase 1 scope.
+Phase 1 goals (simulation pass uniforms, basic terrain/water/lava rendering, brush + raycast integration, validation suite) are reported as complete in the current branch. No further Phase 1 work is tracked here; any regressions should be handled via validation/bugfix, not scope expansion.
 
 ### Phase 2: Visual Polish (Should Have)
 
@@ -489,30 +452,21 @@ The master branch has a complete WebGL renderer with:
 
 ## Next Steps
 
-1. **Audit Simulation Passes**: Review each pass in `SimulationPassManager.ts` and identify missing uniforms
-   - Compare with master shader uniform usage
-   - Document all required uniforms per pass
-   - Create uniform setting checklist
+1. **Phase 2 focus (Visual Polish)**:
+   - Post-processing: shadows, scattering, blur, combine (EffectComposer)
+   - Advanced materials: terrain normal/roughness generation
+   - Water effects: reflection/refraction
+   - Lava effects: emission/glow
+   - GUI visual feedback overlays
 
-2. **Review Master Shaders**: Compare master shader uniform usage with current pass implementations
-   - Extract uniform list from each shader
-   - Map to pass implementations
-   - Identify gaps
+2. **Phase 3 (Enhancements)**:
+   - Steam particle system
+   - Advanced post-processing
+   - Performance optimization/benchmarking
+   - Validation suite expansion
 
-3. **Implement Rendering Scenes**: Complete terrain/water/lava scene creation
-   - Start with terrain (basic materials)
-   - Add water (transparency, normal maps)
-   - Add lava (emission, temperature colors)
-
-4. **Wire Interaction Tools**: Integrate brush and raycast systems
-   - Complete brush uniform wiring
-   - Integrate BVH raycast
-   - Test brush accuracy
-
-5. **Test Incrementally**: Validate each feature as it's implemented
-   - GPU readback validation per pass
-   - Visual comparison screenshots
-   - Performance profiling
+3. **Regression guard**:
+   - Keep validation suite running (`npm run validate:all`) to prevent Phase 1 regressions while working on Phase 2+
 
 ## Open Questions / Assumptions
 

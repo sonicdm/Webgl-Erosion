@@ -184,9 +184,17 @@ export class SimulationPassManager {
   
   /**
    * Gets texture accessors for external use (e.g., rendering, readback)
+   * Returns the current WRITE target (freshest texture) so materials bind to the most up-to-date terrain
    */
   public getTerrainTexture(): THREE.Texture {
-    return this.renderTargets.terrainPP.getReadTexture();
+    return this.renderTargets.terrainPP.getWriteTexture();
+  }
+
+  /**
+   * Gets the current write target for sediment texture (freshest texture)
+   */
+  public getSedimentTexture(): THREE.Texture {
+    return this.renderTargets.sedimentPP.getWriteTexture();
   }
 
   private executeFlowPass(controls: SimulationParams): void {
@@ -584,10 +592,6 @@ export class SimulationPassManager {
   
   public getStoredHeightRange(): { min: number; max: number } {
     return this.terrainReadbackService.getStoredHeightRange();
-  }
-
-  public getSedimentTexture(): THREE.Texture {
-    return this.renderTargets.sedimentPP.getReadTexture();
   }
 
   public getTerrainNormalTexture(): THREE.Texture {
