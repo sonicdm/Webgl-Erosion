@@ -406,6 +406,14 @@ export class ThreeJSSimulationRuntime {
    */
   public async regenerateTerrain(controls: SimulationParams | any, terrainRandom?: any): Promise<void> {
     console.log('[RegenerateTerrain] ===== START REGENERATE ====');
+    console.log('[RegenerateTerrain] Parameters:', {
+      terrainBaseType: controls.TerrainBaseType,
+      terrainScale: controls.TerrainScale,
+      terrainHeight: controls.TerrainHeight,
+      terrainMask: controls.TerrainMask,
+      terrainRandom: terrainRandom ? 'provided' : 'default'
+    });
+    
     if (!this.passManager) {
       console.error('[RegenerateTerrain] ERROR: Simulation not initialized');
       return;
@@ -432,6 +440,7 @@ export class ThreeJSSimulationRuntime {
       this.terrainSync.updateTerrainGeometry(heightData);
 
       console.log('[RegenerateTerrain] Terrain regenerated successfully');
+      console.log('[RegenerateTerrain] VTF setup complete - mesh ready for GPU displacement');
     } catch (error) {
       console.error('[RegenerateTerrain] ERROR: Failed to regenerate terrain:', error);
       throw error;

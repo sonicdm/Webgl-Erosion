@@ -208,9 +208,10 @@ export class TerrainSync {
             // Configure texture properties for VTF (set once, not every frame)
             this.configureTextureForVTF(terrainTexture);
             newMaterial.uniforms.u_Heightmap.value = terrainTexture;
-            // Simulation textures store world units directly -> decode scale = 1
+            // Both CPU and simulation textures use RAW encoding (worldHeight * simres)
+            // Both need 1/simres to decode from RAW to world units
             if (newMaterial.uniforms.u_HeightDecodeScale) {
-              newMaterial.uniforms.u_HeightDecodeScale.value = 1.0;
+              newMaterial.uniforms.u_HeightDecodeScale.value = 1.0 / this.simres;
             }
             
             // Debug: Log texture info
@@ -594,11 +595,31 @@ export class TerrainSync {
         const isDummy = currentWidth === 1;
         const referenceChanged = currentTexture !== targetHeightmap;
         if (referenceChanged || isDummy) {
+          // Validate texture before binding
+          if (!targetHeightmap) {
+            console.error('[TerrainSync] ERROR: targetHeightmap is null when UseSimHeightmap is', useSimHeightmap);
+            return;
+          }
+          
+          // Configure texture for VTF
           this.configureTextureForVTF(targetHeightmap);
           material.uniforms.u_Heightmap.value = targetHeightmap;
           targetHeightmap.needsUpdate = true;
           material.needsUpdate = true;
+          
+          // Log texture switch for debugging
+          const texAny = targetHeightmap as any;
+          console.log('[TerrainSync] Texture switched:', {
+            useSimHeightmap,
+            textureType: targetHeightmap.type,
+            textureFormat: targetHeightmap.format,
+            width: texAny?.image?.width || texAny?.source?.data?.width || 'N/A',
+            height: texAny?.image?.height || texAny?.source?.data?.height || 'N/A',
+            decodeScale: material.uniforms.u_HeightDecodeScale?.value || 'N/A'
+          });
         }
+      } else if (useSimHeightmap && !terrainTexture) {
+        console.warn('[TerrainSync] WARNING: UseSimHeightmap is true but terrainTexture is null');
       }
 
       if (sedimentTexture && material.uniforms.u_Sediment) {
@@ -622,19 +643,24 @@ export class TerrainSync {
         const dbgScale = (material.uniforms.u_MaxHeight.value || 0) - (material.uniforms.u_MinHeight.value || 0);
         material.uniforms.u_DebugScale.value = Math.max(dbgScale, 1.0);
       }
-      // Height decode scale: CPU heightmap is RAW (worldHeight * simres), sim heightmap is world units
+      // Height decode scale: Both CPU and simulation textures use RAW encoding (worldHeight * simres)
+      // Both need 1/simres to decode from RAW to world units
       if (material.uniforms.u_HeightDecodeScale) {
-        material.uniforms.u_HeightDecodeScale.value = useSimHeightmap ? 1.0 : 1.0 / this.simres;
+        material.uniforms.u_HeightDecodeScale.value = 1.0 / this.simres;
       }
       // Allow live debug mode override from controls.DebugMode (optional)
       if (controls && typeof (controls as any).DebugMode === 'number' && material.uniforms.u_DebugMode) {
         material.uniforms.u_DebugMode.value = (controls as any).DebugMode;
       }
       
-      // Update brush uniforms for visualization
+      // Update brush uniforms for visualization and terraforming
       if (controls) {
+        const brushPressed = controls.brushPressed || 0;
+        const brushType = controls.brushType || 0;
+        const brushOperation = controls.brushOperation || 0;
+        
         if (material.uniforms.u_BrushType) {
-          material.uniforms.u_BrushType.value = controls.brushType || 0;
+          material.uniforms.u_BrushType.value = brushType;
         }
         if (material.uniforms.u_BrushSize) {
           material.uniforms.u_BrushSize.value = controls.brushSize || 0.0;
@@ -644,6 +670,34 @@ export class TerrainSync {
             controls.posTemp[0],
             controls.posTemp[1]
           );
+        }
+        if (material.uniforms.u_BrushPressed) {
+          material.uniforms.u_BrushPressed.value = brushPressed;
+        }
+        if (material.uniforms.u_BrushOperation) {
+          material.uniforms.u_BrushOperation.value = brushOperation;
+        }
+        
+        // Debug logging for terraforming state (throttled)
+        if (brushPressed && (this as any).terraformDebugCounter === undefined) {
+          (this as any).terraformDebugCounter = 0;
+        }
+        if ((this as any).terraformDebugCounter !== undefined) {
+          (this as any).terraformDebugCounter++;
+          if ((this as any).terraformDebugCounter % 60 === 0 && brushPressed) {
+            console.log('[TerrainSync] Terraforming active:', {
+              brushType,
+              brushOperation,
+              brushPressed,
+              brushSize: controls.brushSize || 0,
+              brushStrength: controls.brushStrenth || 0,
+              useSimHeightmap,
+              textureBound: !!targetHeightmap
+            });
+          }
+          if (!brushPressed && (this as any).terraformDebugCounter > 0) {
+            (this as any).terraformDebugCounter = 0;
+          }
         }
       }
     }

@@ -36,8 +36,8 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
     // Terrain Parameters
     var terrainParameters = gui.addFolder('Terrain Parameters');
     terrainParameters.add(controls, 'SimulationResolution', { 256: 256, 512: 512, 1024: 1024, 2048: 2048, 4096: 4096 });
-    terrainParameters.add(controls, 'TerrainScale', 0.1, 4.0);
-    terrainParameters.add(controls, 'TerrainHeight', 1.0, 5.0);
+    const terrainScaleController = terrainParameters.add(controls, 'TerrainScale', 0.1, 4.0);
+    const terrainHeightController = terrainParameters.add(controls, 'TerrainHeight', 1.0, 5.0);
     terrainParameters.add(controls, 'TerrainMask', { 
         OFF: 0, 
         Sphere: 1, 
@@ -106,6 +106,46 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
     } else {
         console.warn('[GUI] WARNING: threeRuntime not available, TerrainBaseType handler not attached');
     }
+    
+    // Add onChange handlers for TerrainScale and TerrainHeight to regenerate terrain
+    if (threeRuntime) {
+        terrainScaleController.onFinishChange((value: number) => {
+            console.log('[GUI] TerrainScale changed to:', value);
+            if (!threeRuntime) {
+                console.warn('[GUI] WARNING: threeRuntime not available when TerrainScale changed');
+                return;
+            }
+            const terrainRandom = {
+                seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
+                duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
+                craterDensity: 0.8 + Math.random() * 0.7,
+                canyonDepth: 0.45 + Math.random() * 0.5
+            };
+            threeRuntime.regenerateTerrain(controls, terrainRandom).catch((error) => {
+                console.error('[GUI] ERROR: Failed to regenerate terrain after TerrainScale change:', error);
+            });
+        });
+        
+        terrainHeightController.onFinishChange((value: number) => {
+            console.log('[GUI] TerrainHeight changed to:', value);
+            if (!threeRuntime) {
+                console.warn('[GUI] WARNING: threeRuntime not available when TerrainHeight changed');
+                return;
+            }
+            const terrainRandom = {
+                seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
+                duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
+                craterDensity: 0.8 + Math.random() * 0.7,
+                canyonDepth: 0.45 + Math.random() * 0.5
+            };
+            threeRuntime.regenerateTerrain(controls, terrainRandom).catch((error) => {
+                console.error('[GUI] ERROR: Failed to regenerate terrain after TerrainHeight change:', error);
+            });
+        });
+    } else {
+        console.warn('[GUI] WARNING: threeRuntime not available, TerrainScale/TerrainHeight handlers not attached');
+    }
+    
     terrainParameters.add(controls, 'ResetTerrain');
     terrainParameters.add(controls, 'Import Height Map');
     terrainParameters.add(controls, 'Clear Height Map');

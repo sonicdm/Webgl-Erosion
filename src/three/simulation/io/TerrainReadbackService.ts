@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { extractHeightmapFromGeometry, uploadHeightmap } from '../../utils/terrain-heightmap-converter';
 import { HeightmapSource } from '../../utils/HeightmapSource';
-import { ensureTerrainLibrary } from '../../terrain/THREE.Terrain';
-import { createCustomTerrainHeightmap } from '../../terrain/custom-terrain-algorithms';
+import { ensureTerrainLibrary, getEasing } from '../../terrain/THREE.Terrain';
 import { PingPongTarget } from '../../gpgpu/PingPongTarget';
 import { SimulationParams } from '../../../app/dto/SimulationParams';
+import { getTerrainTypeRegistry } from '../../terrain/terrain-type-registry';
+import { TerrainGenerationOptions } from '../../terrain/TerrainGenerationOptions';
+import { MaskApplicator } from '../../terrain/mask-applicator';
 
 /**
  * Service responsible for terrain mesh generation and heightmap readback
@@ -95,6 +97,7 @@ export class TerrainReadbackService {
 
   /**
    * Generates terrain mesh and initializes heightmap
+   * Uses new BaseTerrainType architecture with standardized options
    */
   public async generateTerrain(
     controls: SimulationParams | any,
@@ -105,7 +108,7 @@ export class TerrainReadbackService {
     await this.ensureTerrainAvailable();
 
     try {
-      console.log('Generating initial terrain with THREE.Terrain...');
+      console.log('[Terrain Generation] Starting terrain generation with new architecture...');
       await this.ensureTerrainAvailable();
       
       const globalTHREE = typeof window !== 'undefined' ? (window as any).THREE : null;
@@ -113,11 +116,12 @@ export class TerrainReadbackService {
         throw new Error('THREE.Terrain not available');
       }
       
-      // Handle both string method names (new) and numeric IDs (legacy)
+      // Handle both string method names (THREE.Terrain methods) and numeric IDs (shader types 0-11)
       const terrainBaseType = controls.TerrainBaseType;
       
       const terrainScale = controls.TerrainScale || 3.2;
       const terrainHeight = controls.TerrainHeight || 2.0;
+      const terrainMask = controls.TerrainMask || 0;
       
       // Match demo EXACTLY: maxHeight: that.maxHeight - 100, minHeight: -100
       // Demo uses maxHeight: 200 - 100 = 100, minHeight: -100, so terrain spans -100 to 100
@@ -126,33 +130,71 @@ export class TerrainReadbackService {
       const maxHeight = baseMaxHeight - 100; // Match demo: that.maxHeight - 100
       const minHeight = -100; // Match demo: -100
       
-      // Get terrain generation method
-      // For custom terrain types (0-11), use createCustomTerrainHeightmap to match initial-frag.glsl exactly
-      // For other types, use THREE.Terrain methods
-      let heightmap: any;
-      if (typeof terrainBaseType === 'number' && terrainBaseType >= 0 && terrainBaseType <= 11) {
-        // Use custom terrain heightmap function to match initial-frag.glsl exactly
-        heightmap = createCustomTerrainHeightmap(terrainBaseType, terrainRandom);
-      } else {
-        // Use THREE.Terrain methods for other types
-        heightmap = heightmapSource || this.getTerrainGenerationMethod(terrainBaseType);
-      }
-      const easing = globalTHREE.Terrain.Linear || ((t: number) => t);
-      
-      // Generate terrain using THREE.Terrain (returns a Scene with mesh)
-      // CONTRACT: THREE.Terrain creates (segments + 1) x (segments + 1) vertices
-      // For a simres x simres heightmap, we need exactly simres x simres height values
-      // To avoid edge artifacts, we should create exactly simres x simres vertices
-      // So: segments + 1 = simres, therefore segments = simres - 1
-      // This ensures: (segments + 1) * (segments + 1) = simres * simres vertices
+      // Calculate terrain size and segments
       const terrainSize = terrainScale * 320.0; // Match demo: scale 3.2 = 1024 units
-      const segments = this.simres - 1; // Creates exactly simres x simres vertices (no extra edge row/column)
+      const segments = this.simres - 1; // Creates exactly simres x simres vertices
       
-      // Log terrain generation start (reduced verbosity)
+      // Build standardized TerrainGenerationOptions
+      const generationOptions: TerrainGenerationOptions = {
+        xSegments: segments,
+        ySegments: segments,
+        xSize: terrainSize,
+        ySize: terrainSize,
+        terrainScale,
+        terrainHeight,
+        terrainMask,
+        terrainSteps: controls.TerrainSteps || 1,
+        terrainTurbulent: controls.TerrainTurbulent || false,
+        timer,
+        frequency: undefined, // TODO: Add UI control for frequency
+        easing: getEasing('Linear'),
+        after: undefined, // Optional post-processing callback
+        terrainRandom,
+      };
+      
+      // Get terrain type from registry
+      const registry = getTerrainTypeRegistry();
+      let terrainType = registry.get(terrainBaseType);
+      
+      if (!terrainType) {
+        console.warn(`[Terrain Generation] Terrain type '${terrainBaseType}' not found, using default (OrdinaryFBM)`);
+        terrainType = registry.getById(0);
+        if (!terrainType) {
+          throw new Error('Default terrain type (OrdinaryFBM) not available');
+        }
+      }
+      
+      // Handle heightmap source (for imported heightmaps) - use directly if provided
+      let finalHeightmap: any;
+      if (heightmapSource && typeof heightmapSource !== 'function') {
+        // CanvasImageSource - use directly, skip terrain type generation
+        finalHeightmap = heightmapSource;
+      } else {
+        // Create heightmap function wrapper that uses terrain type
+        finalHeightmap = (zs: Float32Array | number[], options: any) => {
+          // Map THREE.Terrain options to our standardized options
+          const standardizedOptions: TerrainGenerationOptions = {
+            ...generationOptions,
+            xSegments: options.xSegments || segments,
+            ySegments: options.ySegments || segments,
+            xSize: options.xSize || terrainSize,
+            ySize: options.ySize || terrainSize,
+          };
+          // Generate base terrain (no masks - masks applied in post-process)
+          terrainType!.generateHeightmap(zs, standardizedOptions);
+        };
+      }
+      
+      const easing = generationOptions.easing || globalTHREE.Terrain.Linear || ((t: number) => t);
+      
+      
+      // Log terrain generation start
       console.log('[Terrain Generation] Starting terrain generation:', {
         terrainBaseType: terrainBaseType,
+        terrainType: terrainType!.getName(),
         terrainScale: terrainScale,
         terrainHeight: terrainHeight,
+        terrainMask: terrainMask,
         segments: segments,
         simres: this.simres,
         expectedVertices: (segments + 1) * (segments + 1)
@@ -160,28 +202,47 @@ export class TerrainReadbackService {
       
       const terrainScene = globalTHREE.Terrain({
         easing: easing,
-        heightmap: heightmap,
-        maxHeight: maxHeight - 100, // Match demo: that.maxHeight - 100
-        minHeight: -100, // Match demo: -100
+        heightmap: finalHeightmap,
+        maxHeight: maxHeight,
+        minHeight: minHeight,
         xSize: terrainSize,
         ySize: terrainSize,
         xSegments: segments,
         ySegments: segments,
         material: new THREE.MeshBasicMaterial({ color: 0x888888 }), // Will be replaced later
-        steps: controls.TerrainSteps || 1,
-        turbulent: controls.TerrainTurbulent || false,
+        steps: generationOptions.terrainSteps,
+        turbulent: generationOptions.terrainTurbulent,
         stretch: true,
-        // Pass additional options for custom terrain heightmap function
-        terrainScale: terrainScale,
-        terrainHeight: terrainHeight,
-        terrainMask: controls.TerrainMask || 0,
-        timer: timer, // Pass timer for cpos calculation (matching initial-frag.glsl u_Time)
+        frequency: generationOptions.frequency,
+        after: generationOptions.after,
       });
       
       // Extract the mesh from the scene (THREE.Terrain returns Scene with mesh as first child)
       const terrainMesh = terrainScene.children[0] as THREE.Mesh;
       if (!terrainMesh || !terrainMesh.geometry) {
         throw new Error('THREE.Terrain did not generate a valid mesh');
+      }
+      
+      // Apply mask as post-process if needed (for ALL terrain types, not just custom)
+      if (terrainMask > 0) {
+        console.log('[Terrain Generation] Applying mask', terrainMask, 'as post-process');
+        // Extract height values from geometry (before rotation)
+        // THREE.Terrain creates terrain in XY plane, so Z is height
+        const positions = terrainMesh.geometry.attributes.position.array as Float32Array;
+        const heightmapArray = new Float32Array((segments + 1) * (segments + 1));
+        for (let i = 2; i < positions.length; i += 3) {
+          // Z is height before rotation (THREE.Terrain creates in XY plane)
+          heightmapArray[(i - 2) / 3] = positions[i];
+        }
+        // Apply mask
+        MaskApplicator.applyMask(heightmapArray, terrainMask, generationOptions);
+        // Update geometry with masked heights
+        for (let i = 2; i < positions.length; i += 3) {
+          positions[i] = heightmapArray[(i - 2) / 3];
+        }
+        terrainMesh.geometry.attributes.position.needsUpdate = true;
+        terrainMesh.geometry.computeVertexNormals();
+        console.log('[Terrain Generation] Mask applied successfully');
       }
       
       // Verify UVs match terrain-geometry-builder.ts: u = x / (width - 1) where width = simres

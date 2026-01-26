@@ -1,4 +1,4 @@
-﻿## Terrain erosion sandbox in WebGL
+## Terrain erosion sandbox in WebGL
 
 ![](screenshot/tt.PNG)
 ![](screenshot/mtnn.PNG)
@@ -162,30 +162,52 @@
 - **TerrainScale** (0.1-4.0): Controls the scale/frequency of procedural noise. Higher = more detail, smaller features. Lower = larger, smoother features.
 - **TerrainHeight** (1.0-5.0): Controls the overall height multiplier of the terrain. Higher = taller mountains.
 - **TerrainBaseType**: Procedural generation algorithm
-  - **ordinaryFBM (0)**: Standard Fractal Brownian Motion - smooth, natural-looking terrain
-  - **domainWarp (1)**: Domain warping - creates more complex, twisted patterns
-  - **terrace (2)**: Terrace/step-like terrain - creates flat plateaus with steep edges
-  - **Voronoi (3)**: Voronoi cells - creates cellular/polygonal patterns
-  - **ridgeNoise (4)**: Ridge noise - creates sharp ridges and valleys
-  - **billowNoise (5)**: Puffy, cloud-like terrain with rounded peaks
-  - **turbulence (6)**: Chaotic, turbulent patterns
-  - **craters (7)**: Cratered terrain with impact basins
-  - **dunes (8)**: Sand dune patterns with wave-like ridges
-  - **canyons (9)**: Deep valley/canyon formations
-  - **mountains (10)**: Dramatic peaks with sharper features
-  - **billowyRidges (11)**: Hybrid of billow and ridge noise
-- **TerrainMask**: Applies a mask to shape the terrain
-  - **OFF (0)**: No mask applied
-  - **Sphere (1)**: Circular gradient from center - creates dome/island shape
-  - **Slope (2)**: Diagonal gradient - creates a slope from one corner to another
-  - **Square (3)**: Square gradient from center - creates a square plateau
-  - **Ring (4)**: Donut/ring shape - creates a circular ridge
-  - **RadialGradient (5)**: Smooth radial falloff from center
-  - **Corner (6)**: Highest in bottom-left corner, fades to other corners
-  - **Diagonal (7)**: Diagonal stripe pattern
-  - **Cross (8)**: Cross pattern from center
-  - **Craters (10)**: Adds impact crater basins
-  - **Dunes (11)**: Adds wind-aligned dune ridges
+
+  **Shader-Based Terrain Types** (Primary - match `initial-frag.glsl` exactly):
+  - **Ordinary FBM (0)**: Standard Fractal Brownian Motion - smooth, natural-looking terrain using `pow(fbm(cpos * 2.0) * 1.1, 3.0)`
+  - **Domain Warp (1)**: Domain warping - creates more complex, twisted patterns using recursive FBM
+  - **Terrace (2)**: Terrace/step-like terrain - creates flat plateaus with steep edges using terrace function
+  - **Voronoi (3)**: Voronoi cells - creates cellular/polygonal patterns using IQ noise
+  - **Ridge Noise (4)**: Ridge noise - creates sharp ridges and valleys using ridged noise function
+  - **Billow Noise (5)**: Puffy, cloud-like terrain with rounded peaks using absolute value noise
+  - **Turbulence (6)**: Chaotic, turbulent patterns using absolute value noise with domain warping
+  - **Craters (7)**: Cratered terrain with impact basins - combines FBM with crater mask
+  - **Dunes (8)**: Sand dune patterns with wave-like ridges - combines FBM with dune mask
+  - **Canyons (9)**: Deep valley/canyon formations - complex algorithm combining plateau, ridge, and canyon mask
+  - **Mountains (10)**: Dramatic peaks with sharper features using ridged multifractal noise
+  - **Billowy Ridges (11)**: Hybrid of billow and ridge noise - combines both for varied terrain
+
+  **THREE.Terrain Methods** (Secondary - from THREE.Terrain library):
+  - **DiamondSquare**: Classic diamond-square algorithm for natural terrain
+  - **Perlin**: Perlin noise-based terrain generation
+  - **Simplex**: Simplex noise-based terrain (faster than Perlin)
+  - **Worley**: Worley noise for cellular patterns
+  - **Cosine**: Cosine-based noise patterns
+  - **Fault**: Fault-based terrain generation
+  - **Feature**: Feature-based terrain generation
+  - **ParticleDeposition**: Particle deposition algorithm
+  - **Value**: Value noise-based terrain
+  - **Weierstrass**: Weierstrass function-based terrain
+  - **Brownian**: Brownian motion-based terrain
+  - **CosineLayers**: Multi-octave cosine noise layers
+  - **PerlinDiamond**: Hybrid Perlin and diamond-square
+  - **PerlinLayers**: Multi-octave Perlin noise layers
+  - **SimplexLayers**: Multi-octave Simplex noise layers
+  - **Hill**: Hill-based terrain generation
+  - **HillIsland**: Island-style hill generation
+- **TerrainMask**: Applies a mask to shape the terrain (matches `initial-frag.glsl` shader exactly)
+  - **OFF (0)**: No mask applied - terrain height unchanged
+  - **Sphere (1)**: Circular gradient from center - creates dome/island shape using `2.0 * pow(c_mask, 1.0)` where `c_mask = max(0.5 - distance(uv, 0.5), 0.0)`
+  - **Slope (2)**: Diagonal gradient - creates a slope from one corner to another using `(uv.x + uv.y) * 1.0`
+  - **Square (3)**: Square gradient from center - creates a square plateau using `2.0 * pow(square_mask(uv), 1.0)`
+  - **Ring (4)**: Donut/ring shape - creates a circular ridge using `2.0 * ring_mask(uv)`
+  - **RadialGradient (5)**: Smooth radial falloff from center using `2.0 * radial_gradient_mask(uv)`
+  - **Corner (6)**: Highest in bottom-left corner, fades to other corners using `2.0 * (1.0 - uv.x) * (1.0 - uv.y)`
+  - **Diagonal (7)**: Diagonal stripe pattern using `1.0 + abs(uv.x - uv.y) * 0.5`
+  - **Cross (8)**: Cross pattern from center using `1.0 + cross_mask(uv) * 0.5`
+  - **ID 9**: Not used (reserved)
+  - **Craters (10)**: Adds impact crater basins using `crater_mask(cpos * 1.1 * crater_density)` - requires crater density parameter
+  - **Dunes (11)**: Adds wind-aligned dune ridges using `dune_mask(cpos * 1.2)` - requires dune direction parameter
 - **TerrainPlatte**: Color scheme/biome
   - **Normal Alpine Mountain (0)**: Standard mountain colors
   - **Desert (1)**: Desert color palette
@@ -218,16 +240,20 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 
 ## update 01/2025 (Latest):
 - **Terrain Mask System**
-  - Added 6 new terrain masks: Square, Ring, RadialGradient, Corner, Diagonal, Cross
-  - Total of 9 terrain mask options now available (OFF, Sphere, Slope, Square, Ring, RadialGradient, Corner, Diagonal, Cross)
+  - Complete terrain mask system with 11 mask types (0-11, excluding 9)
+  - Masks: OFF, Sphere, Slope, Square, Ring, RadialGradient, Corner, Diagonal, Cross, Craters, Dunes
   - Each mask applies different height gradients to shape terrain generation
+  - All masks match shader implementation exactly (`initial-frag.glsl`)
+  - Special masks (Craters, Dunes) use noise-based patterns with configurable parameters
 
 - **Documentation Improvements**
   - Added comprehensive parameter documentation for all erosion parameters (ErosionMode, VelocityAdvectionMag, AdvectionMethod, VelocityMultiplier, EvaporationConstant, SimulationSpeed, SimulationResolution)
   - Documented Rain Erosion system (RainErosion, RainErosionStrength, RainErosionDropSize)
   - Documented Thermal Erosion system (thermalTalusAngleScale, thermalErosionScale)
   - Documented Rock Material System (rockErosionResistance)
-  - Added detailed explanations for all Terrain Generation parameters including all mask types
+  - Added detailed explanations for all Terrain Generation parameters including all terrain types and mask types
+  - Documented all 12 shader-based terrain types (0-11) and all 17 THREE.Terrain methods
+  - Complete documentation of all 11 terrain masks (0-11, excluding 9) with shader formula references
   - Documented all Debug Views and visualization modes
   - Improved user guidance with parameter ranges, formulas, and usage tips
 
