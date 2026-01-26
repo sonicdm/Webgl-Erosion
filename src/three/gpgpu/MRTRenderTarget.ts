@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ensureTextureFloat } from '../utils/textureFormatVTF';
 
 /**
  * Manages Multiple Render Targets (MRT) for passes that output 2-4 textures.
@@ -37,18 +38,8 @@ export class MRTRenderTarget {
     } catch (e) {
       // Fallback for older Three.js versions - create and configure manually
       this.targets = new THREE.WebGLMultipleRenderTargets(width, height, count);
-      
-      // Configure each texture for float format
       for (let i = 0; i < count; i++) {
-        const texture = this.targets.texture[i];
-        // Set properties that Three.js will use when creating the WebGL texture
-        (texture as any).type = THREE.FloatType;
-        (texture as any).format = THREE.RGBAFormat;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.wrapS = THREE.ClampToEdgeWrapping;
-        texture.wrapT = THREE.ClampToEdgeWrapping;
-        texture.generateMipmaps = false;
+        ensureTextureFloat(this.targets.texture[i]);
       }
     }
   }

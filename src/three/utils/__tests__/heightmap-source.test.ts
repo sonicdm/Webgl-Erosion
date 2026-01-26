@@ -3,6 +3,14 @@ import { createHeightmapSourceFromHeights, extractHeightmapFromGeometry, uploadH
 import { encodeRaw, decodeRaw } from '../heightEncoding';
 import { HeightmapSource } from '../HeightmapSource';
 import * as THREE from 'three';
+import {
+  createHeightmapSource4x4,
+  HEIGHTMAP_4X4_EXPECTED_MAX,
+  HEIGHTMAP_4X4_EXPECTED_MIN,
+  HEIGHTMAP_4X4_SIMRES,
+  HEIGHTMAP_4X4_STORED,
+} from '../__fixtures__/heightmap-4x4';
+import { buildHeightmapUniforms } from '../HeightmapUniforms';
 
 function makeGridGeometry(heights: number[][]): { geometry: BufferGeometry; simres: number } {
   const simres = heights.length;
@@ -20,6 +28,45 @@ function makeGridGeometry(heights: number[][]): { geometry: BufferGeometry; simr
   return { geometry, simres };
 }
 
+describe('heightmap 4x4 fixture', () => {
+  it('createHeightmapSource4x4 returns source with expected min/max and simres', () => {
+    const src = createHeightmapSource4x4();
+    expect(src.minHeight).toBe(HEIGHTMAP_4X4_EXPECTED_MIN);
+    expect(src.maxHeight).toBe(HEIGHTMAP_4X4_EXPECTED_MAX);
+    expect(src.simres).toBe(HEIGHTMAP_4X4_SIMRES);
+    expect(src.textureData.length).toBe(HEIGHTMAP_4X4_SIMRES * HEIGHTMAP_4X4_SIMRES * 4);
+  });
+
+  it('decode/encode round-trip on fixture stored values', () => {
+    for (let i = 0; i < HEIGHTMAP_4X4_STORED.length; i++) {
+      const stored = HEIGHTMAP_4X4_STORED[i];
+      const world = decodeRaw(stored, HEIGHTMAP_4X4_SIMRES);
+      const back = encodeRaw(world, HEIGHTMAP_4X4_SIMRES);
+      expect(back).toBeCloseTo(stored);
+    }
+  });
+});
+
+describe('buildHeightmapUniforms', () => {
+  it('builds block from HeightmapSource with expected u_SimRes, u_StoredHeightMin/Max, u_HeightDecodeScale', () => {
+    const src = createHeightmapSource4x4();
+    const block = buildHeightmapUniforms(src);
+    expect(block.u_SimRes.value).toBe(HEIGHTMAP_4X4_SIMRES);
+    expect(block.u_StoredHeightMin.value).toBeCloseTo(HEIGHTMAP_4X4_EXPECTED_MIN * HEIGHTMAP_4X4_SIMRES);
+    expect(block.u_StoredHeightMax.value).toBeCloseTo(HEIGHTMAP_4X4_EXPECTED_MAX * HEIGHTMAP_4X4_SIMRES);
+    expect(block.u_HeightDecodeScale.value).toBeCloseTo(1.0 / HEIGHTMAP_4X4_SIMRES);
+  });
+
+  it('includes u_TerrainSize and displacementScale/Bias when terrainSize option provided', () => {
+    const src = createHeightmapSource4x4();
+    const block = buildHeightmapUniforms(src, { terrainSize: 1024 });
+    expect(block.u_TerrainSize).toBeDefined();
+    expect(block.u_TerrainSize!.value).toBe(1024);
+    expect(block.displacementScale).toBe(HEIGHTMAP_4X4_EXPECTED_MAX - HEIGHTMAP_4X4_EXPECTED_MIN);
+    expect(block.displacementBias).toBe(HEIGHTMAP_4X4_EXPECTED_MIN);
+  });
+});
+
 describe('heightEncoding helpers', () => {
   it('encodes and decodes raw heights symmetrically', () => {
     const simres = 1024;
@@ -28,6 +75,29 @@ describe('heightEncoding helpers', () => {
     const decoded = decodeRaw(stored, simres);
     expect(stored).toBeCloseTo(worldHeight * simres);
     expect(decoded).toBeCloseTo(worldHeight);
+  });
+});
+
+describe('decode contract (4x4 fixture)', () => {
+  it('CPU decode worldHeight = stored/simres matches HeightmapSource min/max', () => {
+    const src = createHeightmapSource4x4();
+    const simres = src.simres;
+    const block = buildHeightmapUniforms(src);
+    const scale = block.u_HeightDecodeScale.value;
+    expect(scale).toBeCloseTo(1.0 / simres);
+
+    let decodedMin = Infinity;
+    let decodedMax = -Infinity;
+    const n = (src.width * src.height);
+    for (let i = 0; i < n; i++) {
+      const stored = src.textureData[i * 4];
+      const world = decodeRaw(stored, simres);
+      if (world < decodedMin) decodedMin = world;
+      if (world > decodedMax) decodedMax = world;
+      expect(stored * scale).toBeCloseTo(world);
+    }
+    expect(decodedMin).toBeCloseTo(src.minHeight);
+    expect(decodedMax).toBeCloseTo(src.maxHeight);
   });
 });
 
@@ -125,5 +195,21 @@ describe('heightmap extraction', () => {
     expect(textureProps.__webglTextureType).toBe(gl.FLOAT);
     expect(textureProps.__webglTextureFormat).toBe(gl.RGBA);
     expect(textureProps.__webglTextureInternalFormat).toBe(gl.RGBA32F);
+  });
+
+  it('throws when __webglTexture is missing (hard-fail)', () => {
+    const src = createHeightmapSource4x4();
+    const renderer = {
+      getContext: () => ({}),
+      properties: { get: () => ({}) },
+    } as unknown as THREE.WebGLRenderer;
+    const target = {
+      width: HEIGHTMAP_4X4_SIMRES,
+      height: HEIGHTMAP_4X4_SIMRES,
+      texture: { type: null as any, format: null as any, needsUpdate: true },
+    } as unknown as THREE.WebGLRenderTarget;
+    expect(() => uploadHeightmap(renderer, src, target)).toThrow(
+      /__webglTexture|Direct WebGL upload failed/
+    );
   });
 });

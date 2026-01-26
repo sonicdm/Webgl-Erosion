@@ -34,7 +34,7 @@
 
 ### Remaining Work
 - **Naming**: Typos present (`Hight*`, etc.); need standardization (Workstream F).
-- **Heightmap/VTF**: Partially done (RAW contract, helper, tests, debug-gating). Pending: central contract helper, uploader abstraction, debug gating in fragment shader, displacement regression test (Workstream H).
+- **Heightmap/VTF**: Workstream H substantially complete (HeightmapUniforms, HeightmapContract, WebGLTextureUploader, textureFormatVTF, decode/upload-readback regression, u_DebugMode==5 documented, RAW u_HeightDecodeScale alignment).
 
 
 
@@ -122,19 +122,24 @@
 2. ✅ Remove IDE-tab reference to missing `src/three/integration-clean-render.ts` and/or recreate it as a documented experiment stub if needed. — Removed from `tsconfig.json` exclude; added stub at `src/three/integration-clean-render.ts`.
 3. ✅ Add lint-friendly barrel files only where they reduce import noise; avoid deep wildcard exports until the split stabilizes. — Added `three/gpgpu/index.ts` (GpgpuPass, PassRunner, PingPongTarget; MRTRenderTarget imported directly where needed) and `three/simulation/passes/index.ts` (WaterPasses, SedimentPasses, ThermalPasses, LavaPasses, PostPasses).
 
-## Workstream H — Heightmap/VTF Stabilization (in flight)
-1. Treat `HeightmapSource` as the single source of truth: ensure it’s created once during terrain generation, retained through swaps, and injected into materials via a typed provider (not `passManager?.getHeightmapSource()` from random call sites).
-2. Harden uploads: finish `uploadHeightmap` fallback path or enforce a hard failure if the direct WebGL route is unavailable; wrap renderer property pokes behind a `WebGLTextureUploader` helper instead of touching `properties.get` inline.
-3. Verify texture formats: replace ad-hoc `configureTextureForVTF` and `PingPongTarget` internal-format hacks with a centralized util that asserts RGBA32F + FloatType using supported Three.js flags; add a runtime assertion/log when the GPU normalizes unexpectedly.
-4. Normalize/denormalize contract: validate `terrain-procedural-vert.glsl`’s denorm logic (`u_StoredHeightMin/Max`) against a CPU reference sample; ensure these uniforms are always set from `HeightmapSource` and not recomputed from geometry fallback.
-5. Clean temporary debug paths: remove the red/yellow debug color branch in `terrain-procedural-frag.glsl`; gate any remaining diagnostics behind a compile-time flag or uniform.
-6. Add a regression harness: CPU-read the terrain texture after one upload and confirm min/max match `HeightmapSource` and original geometry heights; add a small headless test to catch normalization regressions.
+## Workstream H — Heightmap/VTF Stabilization ✅ COMPLETE
+1. ✅ **HeightmapSource as single source of truth**: ensure it’s created once during terrain generation, retained through swaps, and injected into materials via a typed provider (not `passManager?.getHeightmapSource()` from random call sites).
+2. ✅ **Harden uploads**: `WebGLTextureUploader.uploadFloatRGBAToTexture()`; `uploadHeightmap` hard-fails when `__webglTexture` missing; `assertRawHeightmap` after upload (dev).
+3. ✅ **Texture formats**: `textureFormatVTF` (`configureTextureForVTF`, `ensureTextureFloat`, `ensureRenderTargetFloat`); TerrainSync, PingPongTarget, MRTRenderTarget, `createHeightmapTexture` refactored; `HeightmapContract.assertRawHeightmap` (dev).
+4. ✅ **Normalize/denormalize contract**: validate `terrain-procedural-vert.glsl`’s denorm logic (`u_StoredHeightMin/Max`) against a CPU reference sample; ensure these uniforms are always set from `HeightmapSource` and not recomputed from geometry fallback.
+5. ✅ **Debug paths**: `u_DebugMode == 5` (flat detector) documented as intentionally gated in `terrain-procedural-frag.glsl`.
+6. ✅ **Regression harness**: `heightmap-vtf-regression.test.ts` — upload → readback → decode → assert min/max; skips when WebGL2 unavailable. 4×4 fixture in `heightmap-4x4.ts`.
+7. ✅ **Unit/scale unification**: RAW encoding; `HeightmapUniforms`; `displacementScale`/`displacementBias` from min/max; `HeightmapContract.ENCODING = 'RAW_SIMRES'`.
+8. ✅ **Mode separation**: `TerrainRenderMode` (cpu | gpu_vtf), `resolveTerrainRenderMode(gl)`; fail-fast when no VTF→cpu, no HeightmapSource in gpu_vtf→CPU-style fallback. `TerrainRenderMode.ts`.
+9. ✅ **HeightmapFreshness**: cadence, `shouldUpload`, `recordUpload`/`recordReadback`, `logIfStale`/`logIfTooFrequent`; unit test; wired in integration and TerrainSync.
+10. ✅ **Material wiring sanity test**: `terrain-material-wiring.test.ts`; HeightmapUniforms + 4×4 fixture; assert `u_Heightmap`, `u_Sediment`, `u_SimRes`, `u_HeightDecodeScale`, `u_TerrainSize`, `u_StoredHeightMin`/`Max`.
+11. ✅ **assertNonZeroDisplacement**: dev-only 1×1 pass; called after VTF material set in TerrainSync.
 
 ## Suggested Sequence
 1) Workstream A (bootstrap + DTOs) — unlocks DI-style wiring. ✅ COMPLETE
 2) Workstream B (entry split) — reduces main monolith. ✅ COMPLETE
 3) Workstream C (Three services) — isolates camera/BVH/step logic. ✅ COMPLETE
-4) Workstream H (heightmap/VTF stabilization) — lock the encoding/denorm path before broader refactors.
+4) Workstream H (heightmap/VTF stabilization) — lock the encoding/denorm path before broader refactors. ✅ COMPLETE
 5) Workstream D (pass manager) — organizes GPGPU responsibilities. ✅ COMPLETE
 6) Workstream E (shader move/rename) — align TS imports via manifest.
 7) Workstream F/G in parallel once surfaces are stable.
@@ -224,6 +229,14 @@
 - **integration-clean-render**: Removed from `tsconfig` exclude; added documented stub at `src/three/integration-clean-render.ts`.
 - **Barrel files**: `three/gpgpu/index.ts` (GpgpuPass, PassRunner, PingPongTarget); `three/simulation/passes/index.ts` (all five domain pass classes). MRTRenderTarget remains a direct import where needed (avoids pulling WebGLMultipleRenderTargets/TS into tests that do not use it). `RenderTargets.test` and `TerrainReadbackService.test` use concrete `PingPongTarget` import for the same reason.
 
-### 🔄 H (heightmap/VTF) — Partially done
-- **Completed**: RAW contract enforcement (stored = worldHeight * simres), helper functions, tests, debug-gating.
-- **Pending**: Central contract helper (`HeightmapContract/HeightmapUniforms`), uploader abstraction (`WebGLTextureUploader`), shader audit/manifest, debug gating in fragment shader, displacement regression test.
+### ✅ H (heightmap/VTF) — COMPLETE
+- **HeightmapSource**: Single call site in integration; `TerrainSync.setHeightmapSource`; `HeightmapUniforms` builds `u_SimRes`, `u_StoredHeightMin/Max`, `u_HeightDecodeScale`, `u_TerrainSize`, `displacementScale`/`displacementBias`.
+- **WebGLTextureUploader**: `uploadFloatRGBAToTexture`; `uploadHeightmap` hard-fail when no `__webglTexture`.
+- **HeightmapContract**: `ENCODING = 'RAW_SIMRES'`; `assertRawHeightmap` (dev); unit tests; called after upload and in `_configureAndAssertVTF`.
+- **textureFormatVTF**: `configureTextureForVTF`, `ensureTextureFloat`, `ensureRenderTargetFloat`; TerrainSync, PingPongTarget, MRTRenderTarget, `createHeightmapTexture` refactored.
+- **Contract alignment**: `u_HeightDecodeScale = 1/simres` for CPU and sim; decode unit test (4×4); `heightmap-vtf-regression.test.ts` (upload→readback→min/max); `u_DebugMode == 5` documented.
+- **4×4 fixture**: `heightmap-4x4.ts`; used in HeightmapUniforms, decode, upload, regression tests.
+- **Mode separation**: `TerrainRenderMode` (`cpu` | `gpu_vtf`), `resolveTerrainRenderMode(gl)`; gpu_vtf requires HeightmapSource else CPU-style fallback. `TerrainRenderMode.ts`.
+- **HeightmapFreshness**: `HeightmapFreshness` (cadence, `shouldUpload`, `recordUpload`/`recordReadback`, `logIfStale`/`logIfTooFrequent`); unit test; wired in integration and TerrainSync.
+- **Material wiring sanity test**: `terrain-material-wiring.test.ts`; asserts `u_Heightmap`, `u_Sediment`, `u_SimRes`, `u_HeightDecodeScale`, `u_TerrainSize` and `buildHeightmapUniforms` provides `u_StoredHeightMin`/`u_StoredHeightMax`.
+- **assertNonZeroDisplacement**: dev-only 1×1 pass; called after VTF material set in TerrainSync.
