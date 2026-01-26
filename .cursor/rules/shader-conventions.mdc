@@ -37,19 +37,29 @@ uniform vec2 brushPos;
 
 ## Attribute Naming (Vertex Shaders)
 
-For GPGPU passes using fullscreen quad, use `fs_Pos`:
+Use consistent prefixes for attributes:
 
 ```glsl
-// ✅ GOOD - GPGPU fullscreen quad
-in vec2 fs_Pos;  // Fullscreen position [0,1] range
+// ✅ GOOD - GPGPU fullscreen quad (vertex shader input)
+in vec4 vs_Pos;  // Vertex shader position attribute
+out vec2 fs_Pos; // Fragment shader position varying [0,1] range
 
-// ✅ GOOD - Standard vertex attributes
+// ✅ GOOD - Standard Three.js mesh attributes
 in vec3 position;
 in vec2 uv;
 in vec3 normal;
+
+// ✅ GOOD - Custom vertex attributes (if needed)
+in vec4 vs_Pos;
+in vec4 vs_Nor;
+in vec4 vs_Col;
+in vec2 vs_Uv;
 ```
 
-**Rationale**: `fs_Pos` is the standard attribute name for fullscreen quad geometry used in GPGPU passes.
+**Rationale**: 
+- `vs_*` prefix for vertex shader inputs (custom attributes)
+- `fs_*` prefix for fragment shader varyings (output from vertex, input to fragment)
+- Standard names (`position`, `uv`, `normal`) for Three.js mesh attributes
 
 ## Output Layout (Fragment Shaders)
 
