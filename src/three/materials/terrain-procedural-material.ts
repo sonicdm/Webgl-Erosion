@@ -58,9 +58,7 @@ export function createTerrainProceduralMaterial(params: TerrainProceduralMateria
   const terrainProceduralVertShader = shaderManifest.getShaderSource('terrainProceduralVert');
   const terrainProceduralFragShader = shaderManifest.getShaderSource('terrainProceduralFrag');
   
-  // Trim shader sources to ensure no leading/trailing whitespace issues
-  // Note: We don't include #version directive - Three.js adds it automatically when using
-  // RawShaderMaterial with glslVersion: THREE.GLSL3
+  // ShaderManifest strips #version; RawShaderMaterial will inject GLSL3 header via glslVersion
   const vertexShaderSource = terrainProceduralVertShader.vert!.trim();
   const fragmentShaderSource = terrainProceduralFragShader.frag!.trim();
   

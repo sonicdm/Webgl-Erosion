@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BufferGeometry } from 'three';
 import { shaderManifest } from '../../shaders/manifest';
+import { stripShaderVersion } from '../utils/strip-shader-version';
 
 /**
  * Maps Three.js standard attributes to shader's expected attribute names.
@@ -10,7 +11,8 @@ import { shaderManifest } from '../../shaders/manifest';
  * Note: The shader only actually uses vs_Pos.x, vs_Pos.z, and vs_Uv, but declares all for compatibility.
  */
 function mapShaderAttributes(shaderSource: string): string {
-  let mapped = shaderSource;
+  // Remove #version to avoid duplication when RawShaderMaterial injects GLSL3 header
+  let mapped = stripShaderVersion(shaderSource);
   
   // Remove original attribute declarations
   mapped = mapped.replace(/in vec4 vs_Pos;\s*/g, '');
@@ -18,12 +20,17 @@ function mapShaderAttributes(shaderSource: string): string {
   mapped = mapped.replace(/in vec4 vs_Col;\s*/g, '');
   mapped = mapped.replace(/in vec2 vs_Uv;\s*/g, '');
   
-  // Add standard Three.js attributes after version directive
+  // Add standard Three.js attributes near the top
   if (!mapped.includes('in vec3 position')) {
-    mapped = mapped.replace(/#version 300 es/, `#version 300 es
-in vec3 position;
+    const attributeBlock = `in vec3 position;
 in vec3 normal;
-in vec2 uv;`);
+in vec2 uv;`;
+    const precisionRegex = /precision\s+highp\s+float\s*;\s*/i;
+    if (precisionRegex.test(mapped)) {
+      mapped = mapped.replace(precisionRegex, match => `${match}\n${attributeBlock}\n`);
+    } else {
+      mapped = `${attributeBlock}\n${mapped.trimStart()}`;
+    }
   }
   
   // Add attribute mapping at the start of main()

@@ -57,8 +57,8 @@ export class LavaPasses {
     this.lavaFlowPass.setUniform('u_Time', timer);
     
     // Lava physics constants
-    this.lavaFlowPass.setUniform('u_LavaViscosityPreExp', controls.LavaViscosityPreExp || 1.0);
-    this.lavaFlowPass.setUniform('u_LavaActivationEnergy', controls.LavaActivationEnergy || 1.0);
+    this.lavaFlowPass.setUniform('u_LavaViscosityPreExp', controls.LavaViscosityPreExp || 1e-5);
+    this.lavaFlowPass.setUniform('u_LavaActivationEnergy', controls.LavaActivationEnergy || 200000.0);
     this.lavaFlowPass.setUniform('u_LavaDensity', controls.LavaDensity || 2700.0);
     this.lavaFlowPass.setUniform('u_LavaGasConstant', 8.314); // Gas constant R = 8.314 J/(mol·K)
     this.lavaFlowPass.setUniform('u_LavaSolidificationTemp', controls.LavaSolidificationTemp || 800.0);
@@ -195,7 +195,7 @@ export class LavaPasses {
     
     // Thermal erosion and solidification constants
     this.lavaTerrainPass.setUniform('u_LavaContactHeatTransfer', controls.LavaContactHeatTransfer || 200.0);
-    this.lavaTerrainPass.setUniform('u_LavaMeltThreshold', controls.LavaMeltThreshold || 1000.0);
+    this.lavaTerrainPass.setUniform('u_LavaMeltThreshold', controls.LavaMeltThreshold || 1200.0);
     this.lavaTerrainPass.setUniform('u_LavaLatentHeatFusion', controls.LavaLatentHeatFusion || 400000.0);
     this.lavaTerrainPass.setUniform('u_LavaSolidificationTemp', controls.LavaSolidificationTemp || 800.0);
     this.lavaTerrainPass.setUniform('u_LavaInitialTemp', controls.LavaInitialTemp || 1200.0);

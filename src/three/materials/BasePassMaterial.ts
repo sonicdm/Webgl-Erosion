@@ -12,6 +12,7 @@ export abstract class BasePassMaterial {
   constructor(fragmentShader: string) {
     this.fragmentShader = fragmentShader;
     const quadVertShader = shaderManifest.getShaderSource('quadVert');
+    
     this.material = new THREE.RawShaderMaterial({
       glslVersion: THREE.GLSL3,
       vertexShader: quadVertShader.vert!,

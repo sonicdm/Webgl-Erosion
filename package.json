@@ -9,7 +9,12 @@
     "dev:webpack": "concurrently \"webpack --watch\" \"browser-sync start --server --files 'dist/*.js' --port 8080 --open\"",
     "test": "jest --runInBand",
     "test:ci": "jest --runInBand",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "validate:readback": "jest --runInBand src/three/__tests__/validation/validate-readback.test.ts",
+    "validate:screenshots": "jest --runInBand src/three/__tests__/validation/validate-screenshots.test.ts",
+    "validate:passes": "jest --runInBand src/three/__tests__/validation/validate-passes.test.ts",
+    "validate:performance": "jest --runInBand src/three/__tests__/validation/validate-performance.test.ts",
+    "validate:all": "jest --runInBand src/three/__tests__/validation/"
   },
   "devDependencies": {
     "@types/dat-gui": "^0.6.3",

@@ -103,13 +103,21 @@ export class TerrainTypeRegistry {
    * Get terrain type from UI selection (handles both numeric IDs and string names)
    */
   get(baseType: number | string): BaseTerrainType | null {
+    // Accept numeric strings by coercing before lookup
+    if (typeof baseType === 'string') {
+      const asNumber = Number(baseType);
+      if (Number.isFinite(asNumber)) {
+        baseType = asNumber;
+      }
+    }
+
     if (typeof baseType === 'number') {
       // Numeric ID -> shader terrain type (0-11)
       return this.getById(baseType);
-    } else {
-      // String name -> THREE.Terrain method
-      return this.getByName(baseType);
     }
+
+    // String name -> THREE.Terrain method
+    return this.getByName(baseType);
   }
 
   /**

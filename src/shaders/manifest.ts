@@ -31,6 +31,8 @@ export type ShaderId =
  * Import all shader sources at module load time
  * These are statically analyzed by Vite/TypeScript at build time
  */
+import { stripShaderVersion } from '../three/utils/strip-shader-version';
+
 // Water domain shaders
 import rainFragSource from './water/rain-frag.glsl?raw';
 import flowFragSource from './water/flow-frag.glsl?raw';
@@ -400,8 +402,8 @@ export class ShaderManifest {
     }
 
     return {
-      vert: config.vertPath ? this.loadShaderSource(config.vertPath) : undefined,
-      frag: config.fragPath ? this.loadShaderSource(config.fragPath) : undefined,
+      vert: config.vertPath ? stripShaderVersion(this.loadShaderSource(config.vertPath)) : undefined,
+      frag: config.fragPath ? stripShaderVersion(this.loadShaderSource(config.fragPath)) : undefined,
     };
   }
 

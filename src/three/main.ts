@@ -154,6 +154,7 @@ export class ThreeJSRuntime {
   private fullscreenQuad: THREE.BufferGeometry;
   private animationId: number | null = null;
   private isRunning: boolean = false;
+  private directionalLight: THREE.DirectionalLight;
 
   constructor(canvas: HTMLCanvasElement, glContext: WebGL2RenderingContext) {
     this.renderer = createThreeJSRenderer(canvas, glContext);
@@ -167,9 +168,9 @@ export class ThreeJSRuntime {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     this.scene.add(ambientLight);
     
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(1, 1, 1);
-    this.scene.add(directionalLight);
+    this.directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    this.directionalLight.position.set(1, 1, 1);
+    this.scene.add(this.directionalLight);
 
     // Create perspective camera for scene rendering
     this.camera = new THREE.PerspectiveCamera(
@@ -262,6 +263,15 @@ export class ThreeJSRuntime {
    */
   public getCamera(): THREE.PerspectiveCamera {
     return this.camera;
+  }
+
+  /**
+   * Updates the directional light position from controls
+   */
+  public updateLightPosition(lightPosX: number, lightPosY: number, lightPosZ: number): void {
+    if (this.directionalLight) {
+      this.directionalLight.position.set(lightPosX, lightPosY, lightPosZ);
+    }
   }
 
   /**

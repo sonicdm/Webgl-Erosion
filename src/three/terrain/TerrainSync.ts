@@ -15,8 +15,14 @@ import type { HeightmapFreshness } from '../utils/HeightmapFreshness';
 import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { TerrainStateHolder } from '../../app/state/TerrainStateHolder';
 
-const _terrainLog = (...a: unknown[]) => { if (process?.env?.NODE_ENV !== 'test') console.log(...a); };
-const _terrainWarn = (...a: unknown[]) => { if (process?.env?.NODE_ENV !== 'test') console.warn(...a); };
+const _terrainLog = (...a: unknown[]) => { 
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') return;
+  console.log(...a); 
+};
+const _terrainWarn = (...a: unknown[]) => { 
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') return;
+  console.warn(...a); 
+};
 
 /**
  * Terrain synchronization service
@@ -331,39 +337,29 @@ export class TerrainSync {
           if (y > maxHeight) maxHeight = y;
         }
         
-        // Create procedural terrain material with height-based coloring
-        // TEMPORARY: Use simple material to verify geometry renders correctly
-        const useSimpleMaterialForDebugging = true;
-        
+        // Create terrain material with biome-based texturing
+        // Use MeshStandardMaterial for Phase 1 (normal/roughness maps deferred to Phase 2)
         let material: THREE.Material;
-        if (useSimpleMaterialForDebugging) {
-          // Use simple material to verify geometry is visible
+        try {
+          // Try procedural material first (uses VTF textures)
+          material = createTerrainProceduralMaterial({
+            minHeight: minHeight,
+            maxHeight: maxHeight,
+            snowRange: this.controls?.SnowRange || 0.0,
+            forestRange: this.controls?.ForestRange || 0.0,
+            terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
+          });
+          _terrainLog('[Terrain Update] Material created with procedural terrain material');
+        } catch (error) {
+          _terrainWarn('[Terrain Update] Failed to create procedural material, using fallback:', error);
+          // Fallback to standard material with height-based color
           material = new THREE.MeshStandardMaterial({
-            color: 0x00ff00, // Bright green for visibility
-            wireframe: false,
+            color: 0x8B7355, // Brown base color
+            roughness: 0.8,
+            metalness: 0.1,
             side: THREE.DoubleSide,
             flatShading: false
           });
-          _terrainLog('[Terrain Update] Using simple green material for debugging');
-        } else {
-          try {
-            material = createTerrainProceduralMaterial({
-              minHeight: minHeight,
-              maxHeight: maxHeight,
-              snowRange: this.controls?.SnowRange || 0.0,
-              forestRange: this.controls?.ForestRange || 0.0,
-              terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
-            });
-            _terrainLog('[Terrain Update] Material created with procedural terrain material');
-          } catch (error) {
-            _terrainWarn('[Terrain Update] Failed to create procedural material, using fallback:', error);
-            material = new THREE.MeshStandardMaterial({
-              color: 0x888888,
-              wireframe: false,
-              side: THREE.DoubleSide,
-              flatShading: false
-            });
-          }
         }
         
         // Create mesh from geometry (geometry is already in correct XZ plane orientation)

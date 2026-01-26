@@ -38,7 +38,8 @@ export class ThermalPasses {
     this.maxslippagePass.setUniform('u_PipeLen', controls.pipelen);
     this.maxslippagePass.setUniform('u_timestep', controls.timestep);
     this.maxslippagePass.setUniform('u_PipeArea', controls.pipeAra);
-    this.maxslippagePass.setUniform('unif_TalusScale', controls.thermalTalusAngleScale || 1.0);
+    this.maxslippagePass.setUniform('unif_thermalErosionScale', controls.thermalErosionScale || 1.0);
+    this.maxslippagePass.setUniform('unif_TalusScale', controls.thermalTalusAngleScale || 8.0);
     this.maxslippagePass.setUniform('unif_rainMode', controls.RainErosion ? 1 : 0);
     this.passRunner.executePingPongPass(this.maxslippagePass, this.renderTargets.maxslippagePP);
   }

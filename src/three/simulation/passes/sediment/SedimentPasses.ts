@@ -50,11 +50,12 @@ export class SedimentPasses {
     this.sedimentPass.setInputTexture('readLava', this.renderTargets.lavaPP.getReadTexture());
     this.sedimentPass.setUniform('u_SimRes', this.simres);
     this.sedimentPass.setUniform('u_PipeLen', controls.pipelen);
-    this.sedimentPass.setUniform('Kc', controls.Kc);
-    this.sedimentPass.setUniform('Ks', controls.Ks);
-    this.sedimentPass.setUniform('Kd', controls.Kd);
+    this.sedimentPass.setUniform('u_Kc', controls.Kc);
+    this.sedimentPass.setUniform('u_Ks', controls.Ks);
+    this.sedimentPass.setUniform('u_Kd', controls.Kd);
     this.sedimentPass.setUniform('u_timestep', controls.timestep);
     this.sedimentPass.setUniform('u_Time', timer);
+    this.sedimentPass.setUniform('u_RockErosionResistance', controls.rockErosionResistance || 0.8);
     
     this.passRunner.executeMRTPass(this.sedimentPass, mrtTarget.getTargets());
     this.renderTargets.terrainPP.swap();
@@ -76,10 +77,10 @@ export class SedimentPasses {
     this.advectPass.setInputTexture('sedi', this.renderTargets.sedimentPP.getReadTexture());
     this.advectPass.setInputTexture('sediBlend', this.renderTargets.sedimentBlendPP.getReadTexture());
     this.advectPass.setInputTexture('terrain', this.renderTargets.terrainPP.getReadTexture());
-    this.advectPass.setUniform('unif_advectMultiplier', 1);
     this.advectPass.setUniform('u_SimRes', this.simres);
-    this.advectPass.setUniform('u_PipeLen', controls.pipelen);
     this.advectPass.setUniform('u_timestep', controls.timestep);
+    this.advectPass.setUniform('unif_advectionSpeedScale', controls.AdvectionSpeedScaling || 1.0);
+    this.advectPass.setUniform('unif_advectMultiplier', 1);
     this.passRunner.executeMRTPass(this.advectPass, mrt1.getTargets());
     
     // Subpass 2
@@ -98,8 +99,8 @@ export class SedimentPasses {
     this.macCormackPass.setInputTexture('sediadvecta', this.renderTargets.sedimentAdvectA.texture);
     this.macCormackPass.setInputTexture('sediadvectb', this.renderTargets.sedimentAdvectB.texture);
     this.macCormackPass.setUniform('u_SimRes', this.simres);
-    this.macCormackPass.setUniform('u_PipeLen', controls.pipelen);
     this.macCormackPass.setUniform('u_timestep', controls.timestep);
+    this.macCormackPass.setUniform('unif_advectionSpeedScale', controls.AdvectionSpeedScaling || 1.0);
     this.passRunner.executeSinglePass(this.macCormackPass, this.renderTargets.sedimentPP.getWriteTarget());
     
     this.renderTargets.sedimentBlendPP.swap();
@@ -120,10 +121,10 @@ export class SedimentPasses {
     this.advectPass.setInputTexture('sedi', this.renderTargets.sedimentPP.getReadTexture());
     this.advectPass.setInputTexture('sediBlend', this.renderTargets.sedimentBlendPP.getReadTexture());
     this.advectPass.setInputTexture('terrain', this.renderTargets.terrainPP.getReadTexture());
-    this.advectPass.setUniform('unif_advectMultiplier', 1);
     this.advectPass.setUniform('u_SimRes', this.simres);
-    this.advectPass.setUniform('u_PipeLen', controls.pipelen);
     this.advectPass.setUniform('u_timestep', controls.timestep);
+    this.advectPass.setUniform('unif_advectionSpeedScale', controls.AdvectionSpeedScaling || 1.0);
+    this.advectPass.setUniform('unif_advectMultiplier', 1);
     this.passRunner.executeMRTPass(this.advectPass, mrt.getTargets());
     
     this.renderTargets.sedimentBlendPP.swap();

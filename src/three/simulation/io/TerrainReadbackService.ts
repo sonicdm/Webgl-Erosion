@@ -279,15 +279,30 @@ export class TerrainReadbackService {
         let min = this.heightmapSource.minHeight;
         let max = this.heightmapSource.maxHeight;
         const tex = this.heightmapSource.textureData;
+        const firstSample = tex[0];
+        const midSample = tex[Math.floor(tex.length / 2)] || NaN;
+        const lastSample = tex[tex.length - 4] || NaN;
+
         console.log('[Terrain Generation] HeightmapSource stats:', {
           simres: this.simres,
           minHeight: min,
           maxHeight: max,
           textureDataLength: tex.length,
-          firstSample: tex[0],
-          midSample: tex[Math.floor(tex.length / 2)] || 'N/A',
-          lastSample: tex[tex.length - 4] || 'N/A'
+          firstSample,
+          midSample,
+          lastSample
         });
+
+        const invalid =
+          !Number.isFinite(min) ||
+          !Number.isFinite(max) ||
+          !Number.isFinite(firstSample) ||
+          !Number.isFinite(midSample) ||
+          !Number.isFinite(lastSample);
+
+        if (invalid) {
+          throw new Error(`[Terrain Generation] Invalid heightmap (NaN/Inf). baseType=${terrainBaseType}, type=${terrainType!.getName()}`);
+        }
       }
       
       // Now rotate the GEOMETRY to XZ plane (Y is height) for rendering
@@ -344,6 +359,7 @@ export class TerrainReadbackService {
       console.log('[Terrain Generation] Terrain generation complete');
     } catch (error) {
       console.error('Failed to generate terrain:', error);
+      // Do NOT fallback silently; propagate the error so UI can surface it
       throw error;
     }
   }

@@ -590,6 +590,10 @@ export class SimulationPassManager {
     return this.renderTargets.sedimentPP.getReadTexture();
   }
 
+  public getTerrainNormalTexture(): THREE.Texture {
+    return this.renderTargets.terrainNor.texture;
+  }
+
   /**
    * Resizes all targets when simulation resolution changes
    */

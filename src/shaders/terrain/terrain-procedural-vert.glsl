@@ -1,3 +1,4 @@
+#version 300 es
 precision highp float;
 
 // VTF (Vertex Texture Fetch) is supported in WebGL 2.0 / GLSL ES 3.00

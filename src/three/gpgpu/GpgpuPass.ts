@@ -150,6 +150,13 @@ export class GpgpuPass {
   }
 
   /**
+   * Gets the material (for testing purposes)
+   */
+  public getMaterial(): THREE.RawShaderMaterial {
+    return this.material;
+  }
+
+  /**
    * Disposes of resources
    */
   public dispose(): void {

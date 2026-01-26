@@ -178,10 +178,14 @@ export class WaterPasses {
 
   /**
    * Executes the evaporation pass
+   * evapod is the evaporation factor: 1.0 - evaporation rate
+   * The shader computes: eva = 1.0 - evapod, then multiplies water by eva
    */
   public executeEvaporation(controls: SimulationParams): void {
     this.evaporationPass.setInputTexture('terrain', this.renderTargets.terrainPP.getReadTexture());
-    this.evaporationPass.setUniform('evapod', controls.EvaporationConstant);
+    // evapod = 1.0 - evaporation rate (EvaporationConstant is the rate, 0-1)
+    const evapod = 1.0 - (controls.EvaporationConstant || 0.003);
+    this.evaporationPass.setUniform('evapod', evapod);
     this.passRunner.executePingPongPass(this.evaporationPass, this.renderTargets.terrainPP);
   }
 }

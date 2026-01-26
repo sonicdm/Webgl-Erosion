@@ -21,6 +21,8 @@ import { HeightmapFreshness } from './utils/HeightmapFreshness';
 import { rayCastBVH } from '../utils/bvh-raycast';
 import { rayCast } from '../utils/raycast';
 import type { TerrainStateHolder } from '../app/state/TerrainStateHolder';
+import { createWaterScene } from './scenes/water-scene';
+import { createLavaScene } from './scenes/lava-scene';
 
 export interface ThreeRuntimeDeps {
   runtime: ThreeJSRuntime;
@@ -52,6 +54,8 @@ export class ThreeJSSimulationRuntime {
   private controlsConfig: ControlsConfig | null = null;
   private terrainRenderMode: 'cpu' | 'gpu_vtf' = 'gpu_vtf';
   private heightmapFreshness: HeightmapFreshness;
+  private waterScene: ReturnType<typeof createWaterScene> | null = null;
+  private lavaScene: ReturnType<typeof createLavaScene> | null = null;
 
   constructor(deps: ThreeRuntimeDeps) {
     this.runtime = deps.runtime;
@@ -114,6 +118,35 @@ export class ThreeJSSimulationRuntime {
     this.terrainSync.setPassManager(this.passManager);
     this.heightmapBridge.setPassManager(this.passManager);
     this.stepRunner.setPassManager(this.passManager);
+    
+    // Create water scene
+    if (!this.waterScene) {
+      this.waterScene = createWaterScene(
+        this.simres,
+        this.passManager.getTerrainTexture(),
+        this.passManager.getSedimentTexture(),
+        this.passManager.getTerrainNormalTexture()
+      );
+      // Add water mesh to scene
+      const scene = this.runtime.getScene();
+      scene.add(this.waterScene.mesh);
+    }
+    
+    // Create lava scene
+    if (!this.lavaScene) {
+      this.lavaScene = createLavaScene(
+        this.simres,
+        this.passManager.getLavaTexture()
+      );
+      // Add lava mesh to scene (render after water)
+      const scene = this.runtime.getScene();
+      scene.add(this.lavaScene.mesh);
+      // Set render order: terrain < water < lava
+      this.lavaScene.mesh.renderOrder = 2;
+      if (this.waterScene) {
+        this.waterScene.mesh.renderOrder = 1;
+      }
+    }
   }
 
   /**
@@ -324,26 +357,28 @@ export class ThreeJSSimulationRuntime {
       
       if (!hit) {
         // Fallback to heightmap raycast if BVH misses
+        // Use combined height (terrain + sediment + lava) for accurate brush positioning
         const heightmapPos = vec2.fromValues(-10.0, -10.0);
+        const combinedHeightBuffer = this.readCombinedHeight();
         rayCast(
           rayOriginVec3,
           rayDirVec3,
           this.simres,
-          this.heightmapBridge.getHeightMapCpuBuffer(),
+          combinedHeightBuffer,
           heightmapPos
         );
         brushPos[0] = heightmapPos[0];
         brushPos[1] = heightmapPos[1];
       }
     } else {
-      // Use heightmap raycast (fast, works with initial terrain data)
-      // Note: heightMapCpuBuffer contains initial terrain data (GPU readback disabled for performance)
-      // For terraforming to work with raycasting, we'd need CPU-side tracking or a copy pass
+      // Use heightmap raycast with combined height (terrain + sediment + lava)
+      // This ensures brush positioning accounts for all height contributions
+      const combinedHeightBuffer = this.readCombinedHeight();
       rayCast(
         rayOriginVec3,
         rayDirVec3,
         this.simres,
-        this.heightmapBridge.getHeightMapCpuBuffer(),
+        combinedHeightBuffer,
         brushPos
       );
     }
@@ -373,6 +408,49 @@ export class ThreeJSSimulationRuntime {
     // Update material uniforms with current simulation state (for real-time terraforming)
     // Delegate to TerrainSync
     this.terrainSync.updateMaterialUniforms(this.controls, this.passManager);
+    
+    // Update light position from controls
+    if (this.controls.lightPosX !== undefined && this.controls.lightPosY !== undefined && this.controls.lightPosZ !== undefined) {
+      this.runtime.updateLightPosition(this.controls.lightPosX, this.controls.lightPosY, this.controls.lightPosZ);
+    }
+    
+    // Update water scene textures and uniforms
+    if (this.waterScene && this.passManager) {
+      this.waterScene.updateTextures({
+        terrain: this.passManager.getTerrainTexture(),
+        sediment: this.passManager.getSedimentTexture(),
+        normal: this.passManager.getTerrainNormalTexture(),
+      });
+      
+      const threeCamera = this.cameraService.getThreeJSCamera();
+      const rendererSize = renderer.getSize(new THREE.Vector2());
+      this.waterScene.updateUniforms({
+        simres: this.simres,
+        waterTransparency: this.controls.WaterTransparency || 0.5,
+        lightPos: new THREE.Vector3(
+          this.controls.lightPosX || 0.4,
+          this.controls.lightPosY || 0.8,
+          this.controls.lightPosZ || -0.0
+        ),
+        camera: threeCamera,
+        dimensions: new THREE.Vector2(rendererSize.x, rendererSize.y),
+      });
+    }
+    
+    // Update lava scene textures and uniforms
+    if (this.lavaScene && this.passManager) {
+      this.lavaScene.updateTextures({
+        lava: this.passManager.getLavaTexture(),
+      });
+      
+      this.lavaScene.updateUniforms({
+        simres: this.simres,
+        lavaInitialTemp: this.controls.LavaInitialTemp || 1200.0,
+        lavaSolidificationTemp: this.controls.LavaSolidificationTemp || 800.0,
+        lavaAmbientTemp: this.controls.LavaAmbientTemp || 20.0,
+        lavaGlowIntensity: this.controls.LavaGlowIntensity || 2.0,
+      });
+    }
     
     // Throttled debug log for live sim heightmap path
     this.renderDebugCounter++;
@@ -459,8 +537,40 @@ export class ThreeJSSimulationRuntime {
 
       console.log('[RegenerateTerrain] Terrain regenerated successfully');
       console.log('[RegenerateTerrain] VTF setup complete - mesh ready for GPU displacement');
+
+      // Clear any previous on-screen error banner
+      if (typeof document !== 'undefined') {
+        const existing = document.getElementById('terrain-error-banner');
+        if (existing && existing.parentElement) {
+          existing.parentElement.removeChild(existing);
+        }
+      }
     } catch (error) {
       console.error('[RegenerateTerrain] ERROR: Failed to regenerate terrain:', error);
+
+      // Surface visibly in the UI
+      if (typeof document !== 'undefined') {
+        let banner = document.getElementById('terrain-error-banner');
+        if (!banner) {
+          banner = document.createElement('div');
+          banner.id = 'terrain-error-banner';
+          banner.style.position = 'fixed';
+          banner.style.top = '0';
+          banner.style.left = '0';
+          banner.style.width = '100%';
+          banner.style.zIndex = '9999';
+          banner.style.padding = '12px 16px';
+          banner.style.background = '#b00020';
+          banner.style.color = '#fff';
+          banner.style.fontFamily = 'monospace';
+          banner.style.fontSize = '14px';
+          banner.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)';
+          banner.style.pointerEvents = 'none';
+          document.body.appendChild(banner);
+        }
+        banner.textContent = `Terrain generation failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+
       throw error;
     }
   }

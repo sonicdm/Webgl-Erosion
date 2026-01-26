@@ -386,11 +386,11 @@ The master branch has a complete WebGL renderer with:
    - *Checkpoint*: Brush positioning accurate
 
 7. **Validation Suite** (Exit Criteria)
-   - *Owner*: `__tests__/validation/`
-   - *DoD*: All validation tests pass (`npm run validate:all`), visual comparison tool functional, GPU readback within 1% tolerance
-   - *Checkpoint*: Phase 1 features validated against master baselines
+    - *Owner*: `__tests__/validation/`
+    - *DoD*: All validation tests pass (`npm run validate:all`), visual comparison tool functional, GPU readback within 1% tolerance
+    - *Checkpoint*: Phase 1 features validated against master baselines
 
-**Phase 1 Complete When**: All 7 items above have DoD met and validation suite passes.
+**Phase 1 Complete When**: All 7 items above have DoD met and validation suite passes, and any new terrain GUI/heightmap changes are validated but not tracked as Phase 1 scope.
 
 ### Phase 2: Visual Polish (Should Have)
 
