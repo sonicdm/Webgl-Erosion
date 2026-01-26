@@ -5,8 +5,18 @@ import * as THREE from 'three';
 import { createTerrainGeometry, updateTerrainGeometry } from '../../utils/terrain-geometry-builder';
 import { createTerrainProceduralMaterial, updateTerrainProceduralMaterial } from '../materials/terrain-procedural-material';
 import { createHeightmapTexture } from '../utils/terrain-heightmap-converter';
+import { buildHeightmapUniforms } from '../utils/HeightmapUniforms';
+import { assertRawHeightmap } from '../utils/HeightmapContract';
+import { configureTextureForVTF } from '../utils/textureFormatVTF';
+import { assertNonZeroDisplacement } from '../utils/assertNonZeroDisplacement';
+import type { HeightmapSource } from '../utils/HeightmapSource';
+import type { TerrainRenderMode } from '../utils/TerrainRenderMode';
+import type { HeightmapFreshness } from '../utils/HeightmapFreshness';
 import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { TerrainStateHolder } from '../../app/state/TerrainStateHolder';
+
+const _terrainLog = (...a: unknown[]) => { if (process?.env?.NODE_ENV !== 'test') console.log(...a); };
+const _terrainWarn = (...a: unknown[]) => { if (process?.env?.NODE_ENV !== 'test') console.warn(...a); };
 
 /**
  * Terrain synchronization service
@@ -17,6 +27,9 @@ export class TerrainSync {
   private terrainMesh: THREE.Mesh | null = null;
   private terrainGeometry: THREE.BufferGeometry | null = null;
   private cpuHeightmapTexture: THREE.Texture | null = null;
+  private heightmapSource: HeightmapSource | null = null;
+  private terrainRenderMode: TerrainRenderMode = 'gpu_vtf';
+  private heightmapFreshness: HeightmapFreshness | null = null;
 
   constructor(
     private runtime: ThreeJSRuntime,
@@ -42,7 +55,7 @@ export class TerrainSync {
       
       // Remove fallback mesh if it exists (created before THREE.Terrain was ready)
       if (this.terrainMesh && this.terrainMesh !== terrainMesh) {
-        console.log('[Terrain Update] Removing fallback mesh, replacing with THREE.Terrain mesh');
+        _terrainLog('[Terrain Update] Removing fallback mesh, replacing with THREE.Terrain mesh');
         const scene = this.runtime.getScene();
         scene.remove(this.terrainMesh);
         if (this.terrainMesh.geometry) {
@@ -54,7 +67,7 @@ export class TerrainSync {
       }
       
       if (needsSetup) {
-        console.log('[Terrain Update] Using THREE.Terrain generated mesh for rendering');
+        _terrainLog('[Terrain Update] Using THREE.Terrain generated mesh for rendering');
         this.terrainMesh = terrainMesh;
         this.terrainGeometry = terrainMesh.geometry;
       }
@@ -74,7 +87,7 @@ export class TerrainSync {
         const terrainSize = terrainScale * 320.0;
         const segments = this.simres - 1; // Creates exactly simres x simres vertices
       
-        console.log('[Terrain Update] Creating flat plane geometry:', {
+        _terrainLog('[Terrain Update] Creating flat plane geometry:', {
           terrainScale,
           terrainSize,
           segments,
@@ -117,11 +130,37 @@ export class TerrainSync {
         this.terrainMesh.geometry = flatGeometry;
         oldGeometry.dispose(); // Dispose old geometry
         
-        console.log('[Terrain Update] Replaced THREE.Terrain geometry with flat plane for VTF displacement');
-        console.log('[Terrain Update] Height range from original geometry:', { minHeight, maxHeight });
+        _terrainLog('[Terrain Update] Replaced THREE.Terrain geometry with flat plane for VTF displacement');
+        _terrainLog('[Terrain Update] Height range from original geometry:', { minHeight, maxHeight });
         
         // Replace material with procedural terrain material
         const oldMaterial = this.terrainMesh.material;
+        // Mode separation (H): gpu_vtf requires HeightmapSource; refuse VTF when missing
+        if (this.terrainRenderMode === 'gpu_vtf' && !this.heightmapSource) {
+          _terrainWarn('[Terrain Update] gpu_vtf mode but HeightmapSource not available; using CPU-style fallback material');
+          this.terrainMesh.material = new THREE.MeshStandardMaterial({
+            color: 0x888888,
+            wireframe: false,
+            side: THREE.DoubleSide,
+            flatShading: false
+          });
+          if (oldMaterial instanceof THREE.Material) oldMaterial.dispose();
+          const scene = this.runtime.getScene();
+          scene.add(this.terrainMesh);
+          if (this.terrainGeometry) {
+            this.terrainStateHolder.terrainGeometry = this.terrainGeometry;
+            this.buildBVHForRaycasting(this.terrainGeometry);
+          }
+          _terrainLog('[Terrain Update] THREE.Terrain mesh added to scene (CPU fallback)');
+          _terrainLog('[Terrain Update] Mesh details:', {
+            visible: this.terrainMesh.visible,
+            position: this.terrainMesh.position,
+            scale: this.terrainMesh.scale,
+            rotation: this.terrainMesh.rotation,
+            geometryVertices: this.terrainMesh.geometry.attributes.position.count
+          });
+          return;
+        }
         
         try {
           // Get textures from simulation pass manager
@@ -140,29 +179,28 @@ export class TerrainSync {
             debugScale: Math.max((maxHeight || 240.0) - (minHeight || 0.0), 1.0),
           });
           
-          // Set uniforms from HeightmapSource uniformBlock
-          const heightmapSource = this.passManager?.getHeightmapSource();
+          // Set uniforms from HeightmapSource via HeightmapUniforms (H7: single source of truth)
+          const heightmapSource = this.heightmapSource;
           const simres = this.simres;
+          const terrainSize = (this.controls?.TerrainScale || 3.2) * 320.0;
           let usedCpuHeightmap = false;
           
           if (heightmapSource) {
-            const uniformBlock = heightmapSource.getUniformBlock();
-            // One-time detailed log about CPU heightmap
-            console.log('[Terrain Update] CPU Heightmap info:', {
-              simres: this.simres,
+            const block = buildHeightmapUniforms(heightmapSource, { terrainSize });
+            _terrainLog('[Terrain Update] CPU Heightmap info:', {
+              simres: heightmapSource.simres,
               minHeight: heightmapSource.minHeight,
               maxHeight: heightmapSource.maxHeight,
-              storedMin: uniformBlock.u_StoredHeightMin.value,
-              storedMax: uniformBlock.u_StoredHeightMax.value,
+              storedMin: block.u_StoredHeightMin.value,
+              storedMax: block.u_StoredHeightMax.value,
               width: heightmapSource.width,
               height: heightmapSource.height,
               cpuTextureBytes: heightmapSource.textureData.byteLength
             });
             
-            // Apply uniform block to material (only u_SimRes needed for raw contract)
-            if (newMaterial.uniforms.u_SimRes) {
-              newMaterial.uniforms.u_SimRes.value = uniformBlock.u_SimRes.value;
-            }
+            if (newMaterial.uniforms.u_SimRes) newMaterial.uniforms.u_SimRes.value = block.u_SimRes.value;
+            if (newMaterial.uniforms.u_HeightDecodeScale) newMaterial.uniforms.u_HeightDecodeScale.value = block.u_HeightDecodeScale.value;
+            if (block.u_TerrainSize && newMaterial.uniforms.u_TerrainSize) newMaterial.uniforms.u_TerrainSize.value = block.u_TerrainSize.value;
 
             // Bind a CPU-built DataTexture for the heightmap to guarantee VTF has data on first render
             if (newMaterial.uniforms.u_Heightmap) {
@@ -172,12 +210,13 @@ export class TerrainSync {
                 heightmapSource.height
               );
               cpuTexture.needsUpdate = true;
-              this.configureTextureForVTF(cpuTexture);
+              this._configureAndAssertVTF(cpuTexture);
               newMaterial.uniforms.u_Heightmap.value = cpuTexture;
               this.cpuHeightmapTexture = cpuTexture;
               usedCpuHeightmap = true;
+              this.heightmapFreshness?.recordUpload();
 
-              console.log('[Terrain Update] Bound CPU heightmap texture for initial render:', {
+              _terrainLog('[Terrain Update] Bound CPU heightmap texture for initial render:', {
                 width: heightmapSource.width,
                 height: heightmapSource.height,
                 type: cpuTexture.type,
@@ -185,38 +224,25 @@ export class TerrainSync {
               });
             }
           } else {
-            // Fallback: use simres from runtime
-            if (newMaterial.uniforms.u_SimRes) {
-              newMaterial.uniforms.u_SimRes.value = simres;
-            }
-            console.warn('[Terrain Update] Using fallback simres - HeightmapSource not available');
-          }
-          
-          // Set TerrainSize uniform
-          if (newMaterial.uniforms.u_TerrainSize) {
-            const terrainSize = (this.controls?.TerrainScale || 3.2) * 320.0;
-            newMaterial.uniforms.u_TerrainSize.value = terrainSize;
-          }
-          // Set height decode scale for CPU heightmap (RAW encoding = worldHeight * simres)
-          if (newMaterial.uniforms.u_HeightDecodeScale) {
-            newMaterial.uniforms.u_HeightDecodeScale.value = 1.0 / this.simres;
+            if (newMaterial.uniforms.u_SimRes) newMaterial.uniforms.u_SimRes.value = simres;
+            if (newMaterial.uniforms.u_TerrainSize) newMaterial.uniforms.u_TerrainSize.value = terrainSize;
+            _terrainWarn('[Terrain Update] Using fallback simres - HeightmapSource not available');
           }
           
           // Configure and assign textures for VTF
-          // Three.js will automatically handle texture binding when uniforms are set
           if (!usedCpuHeightmap && terrainTexture && newMaterial.uniforms.u_Heightmap) {
-            // Configure texture properties for VTF (set once, not every frame)
-            this.configureTextureForVTF(terrainTexture);
+            this._configureAndAssertVTF(terrainTexture);
             newMaterial.uniforms.u_Heightmap.value = terrainTexture;
-            // Both CPU and simulation textures use RAW encoding (worldHeight * simres)
-            // Both need 1/simres to decode from RAW to world units
+            this.heightmapFreshness?.recordUpload();
             if (newMaterial.uniforms.u_HeightDecodeScale) {
-              newMaterial.uniforms.u_HeightDecodeScale.value = 1.0 / this.simres;
+              newMaterial.uniforms.u_HeightDecodeScale.value = heightmapSource
+                ? 1.0 / heightmapSource.simres
+                : 1.0 / simres;
             }
             
             // Debug: Log texture info
             const texAny = terrainTexture as any;
-            console.log('[Terrain Update] Heightmap texture assigned:', {
+            _terrainLog('[Terrain Update] Heightmap texture assigned:', {
               hasTexture: !!terrainTexture,
               textureType: terrainTexture.type,
               textureFormat: terrainTexture.format,
@@ -227,7 +253,7 @@ export class TerrainSync {
           }
           
           if (sedimentTexture && newMaterial.uniforms.u_Sediment) {
-            this.configureTextureForVTF(sedimentTexture);
+            this._configureAndAssertVTF(sedimentTexture);
             newMaterial.uniforms.u_Sediment.value = sedimentTexture;
           }
           
@@ -240,10 +266,13 @@ export class TerrainSync {
           }
           
           this.terrainMesh.material = newMaterial;
-          
-          console.log('[Terrain Update] Material replaced with procedural terrain material');
+          _terrainLog('[Terrain Update] Material replaced with procedural terrain material');
+          try {
+            const cam = this.runtime.getCamera();
+            if (cam) assertNonZeroDisplacement(this.runtime.getRenderer(), cam, this.terrainMesh);
+          } catch (_) { /* dev-only, non-fatal */ }
         } catch (error) {
-          console.warn('[Terrain Update] Failed to create procedural material, using fallback:', error);
+          _terrainWarn('[Terrain Update] Failed to create procedural material, using fallback:', error);
           // Fallback to simple material
           this.terrainMesh.material = new THREE.MeshStandardMaterial({
             color: 0x888888,
@@ -273,8 +302,8 @@ export class TerrainSync {
           this.buildBVHForRaycasting(this.terrainGeometry);
         }
 
-        console.log('[Terrain Update] THREE.Terrain mesh added to scene');
-        console.log('[Terrain Update] Mesh details:', {
+        _terrainLog('[Terrain Update] THREE.Terrain mesh added to scene');
+        _terrainLog('[Terrain Update] Mesh details:', {
           visible: this.terrainMesh.visible,
           position: this.terrainMesh.position,
           scale: this.terrainMesh.scale,
@@ -287,7 +316,7 @@ export class TerrainSync {
     
     // Fallback: Create geometry from heightmap if THREE.Terrain mesh not available
     if (!this.terrainMesh && !this.terrainGeometry) {
-      console.log('[Terrain Update] THREE.Terrain mesh not available, creating geometry from heightmap');
+      _terrainLog('[Terrain Update] THREE.Terrain mesh not available, creating geometry from heightmap');
       this.terrainGeometry = createTerrainGeometry(this.simres, heightData, 1.0);
       
       // Create terrain mesh from the geometry
@@ -315,7 +344,7 @@ export class TerrainSync {
             side: THREE.DoubleSide,
             flatShading: false
           });
-          console.log('[Terrain Update] Using simple green material for debugging');
+          _terrainLog('[Terrain Update] Using simple green material for debugging');
         } else {
           try {
             material = createTerrainProceduralMaterial({
@@ -325,9 +354,9 @@ export class TerrainSync {
               forestRange: this.controls?.ForestRange || 0.0,
               terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
             });
-            console.log('[Terrain Update] Material created with procedural terrain material');
+            _terrainLog('[Terrain Update] Material created with procedural terrain material');
           } catch (error) {
-            console.warn('[Terrain Update] Failed to create procedural material, using fallback:', error);
+            _terrainWarn('[Terrain Update] Failed to create procedural material, using fallback:', error);
             material = new THREE.MeshStandardMaterial({
               color: 0x888888,
               wireframe: false,
@@ -353,8 +382,8 @@ export class TerrainSync {
         const scene = this.runtime.getScene();
         scene.add(this.terrainMesh);
 
-        console.log('[Terrain Update] Terrain mesh created and added to scene using createTerrainGeometry');
-        console.log('[Terrain Update] Mesh details:', {
+        _terrainLog('[Terrain Update] Terrain mesh created and added to scene using createTerrainGeometry');
+        _terrainLog('[Terrain Update] Mesh details:', {
           visible: this.terrainMesh.visible,
           position: this.terrainMesh.position,
           scale: this.terrainMesh.scale,
@@ -464,43 +493,35 @@ export class TerrainSync {
   }
 
   /**
+   * Sets the HeightmapSource from the single call site (orchestrator).
+   * Replaces passManager?.getHeightmapSource() from TerrainSync.
+   */
+  public setHeightmapSource(source: HeightmapSource | null): void {
+    this.heightmapSource = source;
+  }
+
+  /** Mode separation (H): cpu vs gpu_vtf; gpu_vtf requires HeightmapSource. */
+  public setTerrainRenderMode(mode: TerrainRenderMode): void {
+    this.terrainRenderMode = mode;
+  }
+
+  /** Wire HeightmapFreshness for recordUpload (optional). */
+  public setHeightmapFreshness(f: HeightmapFreshness | null): void {
+    this.heightmapFreshness = f;
+  }
+
+  /**
    * Updates the controls reference (for material updates)
    */
   public setControls(controls: SimulationParams | any): void {
     this.controls = controls;
   }
 
-  /**
-   * Configures a texture for Vertex Texture Fetch (VTF) usage
-   * Sets properties once - these should not be changed every frame
-   */
-  private configureTextureForVTF(texture: THREE.Texture): void {
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.generateMipmaps = false;
-    
-    // CRITICAL: Ensure texture type and format are explicitly set for FloatType
-    // This prevents Three.js from normalizing the texture when binding for VTF
-    texture.type = THREE.FloatType;
-    texture.format = THREE.RGBAFormat;
-    texture.needsUpdate = true;
-    
-    // CRITICAL: Force Three.js internal state to recognize FloatType
-    // This ensures the texture is bound with RGBA32F internal format, not normalized
-    const renderer = this.runtime.getRenderer();
-    const properties = (renderer as any).properties;
-    if (properties) {
-      const textureProperties = properties.get(texture);
-      if (textureProperties) {
-        const gl = renderer.getContext() as WebGL2RenderingContext;
-        // Ensure internal format is RGBA32F (not normalized)
-        (textureProperties as any).__webglTextureType = gl.FLOAT;
-        (textureProperties as any).__webglTextureFormat = gl.RGBA;
-        (textureProperties as any).__webglTextureInternalFormat = gl.RGBA32F || 0x8814;
-      }
-    }
+  /** Configures texture for VTF and asserts RAW format (dev). */
+  private _configureAndAssertVTF(texture: THREE.Texture): void {
+    const r = this.runtime.getRenderer();
+    configureTextureForVTF(texture, r);
+    assertRawHeightmap({ texture, internalFormat: 0x8814, renderer: r });
   }
 
   /**
@@ -509,19 +530,18 @@ export class TerrainSync {
    */
   private buildBVHForRaycasting(geometry: THREE.BufferGeometry): void {
     if (this.terrainStateHolder.terrainBVHBuildInProgress) {
-      console.log('[BVH] Build already in progress, skipping');
+      _terrainLog('[BVH] Build already in progress, skipping');
       return;
     }
     
     if (!geometry) {
-      console.warn('[BVH] No geometry provided for BVH build');
+      _terrainWarn('[BVH] No geometry provided for BVH build');
       return;
     }
     
-    // Mark as in progress
     this.terrainStateHolder.terrainBVHBuildInProgress = true;
-    console.log('[BVH] Starting BVH build from terrain geometry');
-    
+    _terrainLog('[BVH] Starting BVH build from terrain geometry');
+
     // Build BVH asynchronously to avoid blocking
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -536,11 +556,10 @@ export class TerrainSync {
           });
           
           const bvhDuration = performance.now() - bvhStartTime;
-          console.log(`[BVH] BVH construction complete in ${bvhDuration.toFixed(2)}ms`);
-          
-          // Store for brush system access (holder setter clears terrainBVHBuildInProgress)
+          _terrainLog(`[BVH] BVH construction complete in ${bvhDuration.toFixed(2)}ms`);
+
           this.terrainStateHolder.terrainBVH = bvh;
-          console.log('[BVH] BVH stored for brush raycasting');
+          _terrainLog('[BVH] BVH stored for brush raycasting');
         } catch (error) {
           console.error('[BVH] Failed to build BVH:', error);
           this.terrainStateHolder.terrainBVHBuildInProgress = false;
@@ -595,28 +614,11 @@ export class TerrainSync {
         const isDummy = currentWidth === 1;
         const referenceChanged = currentTexture !== targetHeightmap;
         if (referenceChanged || isDummy) {
-          // Validate texture before binding
-          if (!targetHeightmap) {
-            console.error('[TerrainSync] ERROR: targetHeightmap is null when UseSimHeightmap is', useSimHeightmap);
-            return;
-          }
-          
-          // Configure texture for VTF
-          this.configureTextureForVTF(targetHeightmap);
+          this._configureAndAssertVTF(targetHeightmap);
           material.uniforms.u_Heightmap.value = targetHeightmap;
           targetHeightmap.needsUpdate = true;
           material.needsUpdate = true;
-          
-          // Log texture switch for debugging
-          const texAny = targetHeightmap as any;
-          console.log('[TerrainSync] Texture switched:', {
-            useSimHeightmap,
-            textureType: targetHeightmap.type,
-            textureFormat: targetHeightmap.format,
-            width: texAny?.image?.width || texAny?.source?.data?.width || 'N/A',
-            height: texAny?.image?.height || texAny?.source?.data?.height || 'N/A',
-            decodeScale: material.uniforms.u_HeightDecodeScale?.value || 'N/A'
-          });
+          this.heightmapFreshness?.recordUpload();
         }
       } else if (useSimHeightmap && !terrainTexture) {
         console.warn('[TerrainSync] WARNING: UseSimHeightmap is true but terrainTexture is null');
@@ -625,15 +627,16 @@ export class TerrainSync {
       if (sedimentTexture && material.uniforms.u_Sediment) {
         const currentSed = material.uniforms.u_Sediment.value as THREE.Texture;
         if (currentSed !== sedimentTexture) {
-          this.configureTextureForVTF(sedimentTexture);
+          this._configureAndAssertVTF(sedimentTexture);
           material.uniforms.u_Sediment.value = sedimentTexture;
           sedimentTexture.needsUpdate = true;
         }
       }
 
-      // Update simulation parameters
+      // Update simulation parameters (H7: from HeightmapSource when available)
+      const simresForUniforms = this.heightmapSource ? this.heightmapSource.simres : this.simres;
       if (material.uniforms.u_SimRes) {
-        material.uniforms.u_SimRes.value = this.simres;
+        material.uniforms.u_SimRes.value = simresForUniforms;
       }
       if (material.uniforms.u_TerrainSize) {
         const terrainScale = controls?.TerrainScale || 3.2;
@@ -643,10 +646,11 @@ export class TerrainSync {
         const dbgScale = (material.uniforms.u_MaxHeight.value || 0) - (material.uniforms.u_MinHeight.value || 0);
         material.uniforms.u_DebugScale.value = Math.max(dbgScale, 1.0);
       }
-      // Height decode scale: Both CPU and simulation textures use RAW encoding (worldHeight * simres)
-      // Both need 1/simres to decode from RAW to world units
+      // RAW contract: u_HeightDecodeScale = 1/simres for both CPU and sim; single source from HeightmapSource when present.
       if (material.uniforms.u_HeightDecodeScale) {
-        material.uniforms.u_HeightDecodeScale.value = 1.0 / this.simres;
+        material.uniforms.u_HeightDecodeScale.value = this.heightmapSource
+          ? 1.0 / this.heightmapSource.simres
+          : 1.0 / this.simres;
       }
       // Allow live debug mode override from controls.DebugMode (optional)
       if (controls && typeof (controls as any).DebugMode === 'number' && material.uniforms.u_DebugMode) {

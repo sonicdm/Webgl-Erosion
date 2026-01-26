@@ -16,6 +16,8 @@ import { StepRunner } from './simulation/StepRunner';
 import { SimulationParams, createSimulationParams } from '../app/dto/SimulationParams';
 import { BrushInput, createBrushInput } from '../app/dto/BrushInput';
 import { SourceArrays } from '../app/dto/SourceArrays';
+import { resolveTerrainRenderMode } from './utils/TerrainRenderMode';
+import { HeightmapFreshness } from './utils/HeightmapFreshness';
 import { rayCastBVH } from '../utils/bvh-raycast';
 import { rayCast } from '../utils/raycast';
 import type { TerrainStateHolder } from '../app/state/TerrainStateHolder';
@@ -48,6 +50,8 @@ export class ThreeJSSimulationRuntime {
   private sourceArrays: SourceArrays;
   private terrainStateHolder: TerrainStateHolder;
   private controlsConfig: ControlsConfig | null = null;
+  private terrainRenderMode: 'cpu' | 'gpu_vtf' = 'gpu_vtf';
+  private heightmapFreshness: HeightmapFreshness;
 
   constructor(deps: ThreeRuntimeDeps) {
     this.runtime = deps.runtime;
@@ -58,6 +62,11 @@ export class ThreeJSSimulationRuntime {
     this.stepRunner = deps.stepRunner;
     this.sourceArrays = deps.sourceArrays;
     this.terrainStateHolder = deps.terrainStateHolder;
+    const gl = deps.runtime.getRenderer().getContext() as WebGL2RenderingContext;
+    this.terrainRenderMode = resolveTerrainRenderMode(gl);
+    this.heightmapFreshness = new HeightmapFreshness({ cadenceFrames: 1 });
+    deps.terrainSync.setTerrainRenderMode(this.terrainRenderMode);
+    deps.terrainSync.setHeightmapFreshness(this.heightmapFreshness);
   }
   
   /**
@@ -196,7 +205,16 @@ export class ThreeJSSimulationRuntime {
    * Updates heightMapCpuBuffer to keep it synchronized
    */
   public readCombinedHeight(): Float32Array {
-    return this.heightmapBridge.readCombinedHeight();
+    const out = this.heightmapBridge.readCombinedHeight();
+    this.heightmapFreshness.recordReadback();
+    return out;
+  }
+
+  /**
+   * Refreshes HeightmapSource on TerrainSync from the single call site (passManager).
+   */
+  private refreshHeightmapSourceForTerrainSync(): void {
+    this.terrainSync.setHeightmapSource(this.passManager?.getHeightmapSource() ?? null);
   }
 
   /**
@@ -204,6 +222,7 @@ export class ThreeJSSimulationRuntime {
    * Uses THREE.Terrain mesh if available, otherwise creates geometry from heightmap
    */
   public updateTerrainGeometry(heightData: Float32Array): void {
+    this.refreshHeightmapSourceForTerrainSync();
     this.terrainSync.updateTerrainGeometry(heightData);
   }
   /**
@@ -433,9 +452,8 @@ export class ThreeJSSimulationRuntime {
       // Update terrain sync with new controls
       this.terrainSync.setControls(controls);
       
-      // Update terrain geometry from pass manager
-      // The pass manager has already regenerated the terrain mesh
-      // We need to trigger terrain sync to update the geometry
+      // Refresh HeightmapSource from pass manager (single call site) then update geometry
+      this.refreshHeightmapSourceForTerrainSync();
       const heightData = this.readCombinedHeight();
       this.terrainSync.updateTerrainGeometry(heightData);
 

@@ -15,6 +15,9 @@
 
 import * as THREE from 'three';
 import { HeightmapSource } from './HeightmapSource';
+import { assertRawHeightmap } from './HeightmapContract';
+import { uploadFloatRGBAToTexture } from './WebGLTextureUploader';
+import { ensureTextureFloat } from './textureFormatVTF';
 
 const HEIGHTMAP_DEBUG = false;
 
@@ -226,22 +229,7 @@ export function createHeightmapTexture(
     THREE.RGBAFormat,
     THREE.FloatType
   );
-
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.generateMipmaps = false;
-  texture.needsUpdate = true;
-
-  // CRITICAL: Ensure texture uses RGBA32F internal format for raw float values
-  // This prevents normalization when reading in vertex shaders
-  // Note: Three.js should handle this automatically for FloatType, but we verify
-  if ((texture as any).__webglTexture) {
-    // Texture already uploaded - internal format should be set
-    // If not, we'll need to re-upload with correct format
-  }
-
+  ensureTextureFloat(texture);
   return texture;
 }
 
@@ -259,112 +247,27 @@ export function uploadHeightmap(
   target: THREE.WebGLRenderTarget
 ): void {
   const heightmapData = heightmapSource.textureData;
-  const gl = renderer.getContext() as WebGL2RenderingContext;
-  
-  // CRITICAL: Upload directly to render target texture using WebGL API
-  // This bypasses Three.js texture handling which might normalize values
-  // We need to bind the render target texture and upload Float32Array directly
   const texture = target.texture;
-  
-  // Get the WebGL texture handle from Three.js internal state
-  const properties = (renderer as any).properties;
-  if (properties) {
-    const textureProperties = properties.get(texture);
-    if (textureProperties && textureProperties.__webglTexture) {
-      const webglTexture = textureProperties.__webglTexture;
-      
-      // Bind the render target texture
-      gl.bindTexture(gl.TEXTURE_2D, webglTexture);
-      
-      // Upload Float32Array directly with RGBA32F internal format
-      // This preserves raw float values without normalization
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0, // mip level
-        gl.RGBA32F, // internal format: RGBA 32-bit float
-        target.width,
-        target.height,
-        0, // border
-        gl.RGBA, // format
-        gl.FLOAT, // type: Float32Array
-        heightmapData // data: Float32Array with raw float values
-      );
-      
-      // Set texture parameters
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      
-      // Unbind
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      
-      // CRITICAL: Mark texture properties to ensure Three.js doesn't re-upload and normalize
-      texture.needsUpdate = false; // Already uploaded directly
-      textureProperties.__webglInit = true;
-      
-      // CRITICAL: Ensure texture type and format are preserved
-      // Three.js might try to normalize if it thinks the texture is UnsignedByteType
-      texture.type = THREE.FloatType;
-      texture.format = THREE.RGBAFormat;
-      
-      // Force Three.js to recognize this as a FloatType texture
-      // This prevents normalization when binding for VTF
-      (textureProperties as any).__webglTextureType = gl.FLOAT;
-      (textureProperties as any).__webglTextureFormat = gl.RGBA;
-      (textureProperties as any).__webglTextureInternalFormat = gl.RGBA32F;
-      
-      debugLog('[Heightmap Upload] Uploaded world-space heightmap data:', {
-        width: target.width,
-        height: target.height,
-        dataLength: heightmapData.length,
-        contract: 'WORLD (direct)'
-      });
-      return;
-    }
+
+  const ok = uploadFloatRGBAToTexture(
+    renderer,
+    texture,
+    heightmapData,
+    target.width,
+    target.height
+  );
+  if (!ok) {
+    throw new Error(
+      '[uploadHeightmap] Direct WebGL upload failed: texture has no __webglTexture. ' +
+      'Ensure the render target has been used in a render pass (or renderer.initTexture) before uploading.'
+    );
   }
-  
-  // Fallback: Use shader-based copy if direct upload fails
-  debugWarn('[Heightmap Upload] Direct WebGL upload failed, falling back to shader copy');
-  const sourceTexture = createHeightmapTexture(heightmapData, target.width, target.height);
 
-  const copyVertexShader = `
-    #version 300 es
-    precision highp float;
-    in vec4 vs_Pos;
-    out vec2 fs_Pos;
-    void main() {
-      fs_Pos = vs_Pos.xy;
-      gl_Position = vs_Pos;
-    }
-  `;
-
-  const copyFragmentShader = `
-    #version 300 es
-    precision highp float;
-    in vec2 fs_Pos;
-    uniform sampler2D u_Heightmap;
-    out vec4 fragColor;
-    void main() {
-      vec2 uv = fs_Pos * 0.5 + 0.5;
-      // CRITICAL: Read raw float values, don't normalize
-      // The source texture is FloatType, so texture() returns raw floats
-      // We must output raw floats to the render target (also FloatType)
-      vec4 rawValue = texture(u_Heightmap, uv);
-      fragColor = rawValue; // Direct passthrough - preserves float values
-    }
-  `;
-
-  const material = new THREE.RawShaderMaterial({
-    glslVersion: THREE.GLSL3,
-    vertexShader: copyVertexShader,
-    fragmentShader: copyFragmentShader,
-    uniforms: {
-      u_Heightmap: { value: sourceTexture }
-    }
+  debugLog('[Heightmap Upload] Uploaded world-space heightmap data:', {
+    width: target.width,
+    height: target.height,
+    dataLength: heightmapData.length,
+    contract: 'WORLD (direct)'
   });
-
-  // Note: Fallback path requires fullscreenQuad and camera, but we removed them from signature
-  // This fallback should rarely be needed if direct upload works
-  debugWarn('[Heightmap Upload] Fallback path not fully implemented - direct upload should be used');
+  assertRawHeightmap({ source: heightmapSource, texture, internalFormat: 0x8814, renderer });
 }

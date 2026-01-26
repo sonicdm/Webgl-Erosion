@@ -92,7 +92,7 @@ void main() {
     fragColor = vec4(yNorm, 0.0, 1.0 - yNorm, 1.0);
     return;
   } else if (u_DebugMode == 5) {
-    // Original flat detector: red/yellow bands
+    // Intentionally gated by u_DebugMode: flat detector (red |y|<0.1, yellow |y|<1.0) for VTF/displacement debugging.
     float debugY = vPosition.y;
     if (abs(debugY) < 0.1) {
       fragColor = vec4(1.0, 0.0, 0.0, 1.0);

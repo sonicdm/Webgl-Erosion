@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ensureRenderTargetFloat } from '../utils/textureFormatVTF';
 
 /**
  * Manages a pair of ping-pong render targets for GPGPU passes.
@@ -35,17 +36,7 @@ export class PingPongTarget {
       depthBuffer: false,
       stencilBuffer: false,
     });
-
-    // CRITICAL: Explicitly set internal format to RGBA32F to ensure raw float values
-    // Without this, Three.js might use a normalized format
-    const gl = (target as any).__webglContext;
-    if (gl) {
-      const texture = target.texture;
-      // Force RGBA32F internal format for raw float values
-      // This ensures vertex shaders read raw floats, not normalized [0,1] values
-      (texture as any).internalFormat = gl.RGBA32F || 0x8814; // RGBA32F
-    }
-
+    ensureRenderTargetFloat(target);
     return target;
   }
 
