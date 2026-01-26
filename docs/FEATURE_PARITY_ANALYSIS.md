@@ -75,17 +75,16 @@ This document identifies features present in `master` that need to be ported to 
 #### 1.1 Terrain Rendering
 - **Status**: Basic mesh exists, but needs:
   - [ ] Full material integration (`MeshStandardMaterial`/`MeshPhysicalMaterial`)
-  - [ ] Normal map generation from heightmap
-  - [ ] Roughness map generation
   - [ ] Texture mapping (biome-based texturing)
   - [ ] Proper lighting integration
-  - [ ] **Shadow Maps**: Directional light shadows (see Post-Processing section for ownership)
+  - **Note**: Normal/roughness maps deferred to Phase 2 (Advanced Materials)
+  - **Note**: Shadow maps owned by Post-Processing (see section 1.4)
 
 **Owner**: `src/three/terrain/TerrainSync.ts`, `src/three/scenes/terrain-scene.ts`  
 **Definition of Done**:
 - Terrain renders with standard materials matching master visual quality
-- Normal maps generated and applied
 - Biome texturing functional
+- Basic lighting works (ambient + directional)
 - Visual comparison screenshot matches master within tolerance
 
 #### 1.2 Water Rendering
@@ -121,7 +120,7 @@ This document identifies features present in `master` that need to be ported to 
 #### 1.4 Post-Processing
 - **Status**: Not implemented
 - **Needed**:
-  - [ ] **Shadow Maps**: Directional light shadows (owned by post-processing, not terrain rendering)
+  - [ ] Shadow Maps: Directional light shadows (applies to all scene objects: terrain, water, lava)
   - [ ] Scattering pass (atmospheric scattering)
   - [ ] Bilateral blur (optional, for soft shadows)
   - [ ] Combine pass (terrain + water + lava + effects)
@@ -129,12 +128,12 @@ This document identifies features present in `master` that need to be ported to 
 
 **Owner**: `src/three/post-processing/` (new directory)  
 **Definition of Done**:
-- Shadow maps render correctly for all scene objects
+- Shadow maps render correctly for all scene objects (terrain, water, lava)
 - Scattering pass matches master visual quality
 - Combine pass produces final output matching master
 - EffectComposer chain functional
 
-**Note**: Shadow maps are owned by post-processing phase, not terrain rendering. Terrain rendering provides geometry; post-processing adds shadows.
+**Note**: Shadow maps are owned by post-processing phase, not terrain rendering. Terrain rendering provides geometry; post-processing adds shadows via `EffectComposer` and directional light shadow maps.
 
 ### 2. **Simulation Pass Uniforms** (Critical - Simulation Functionality)
 
@@ -289,9 +288,22 @@ This document identifies features present in `master` that need to be ported to 
 
 **Owner**: `src/three/utils/profiling.ts` (new file)  
 **Definition of Done**:
-- Profiling tools functional
-- Performance metrics documented
-- Optimization targets met (60fps at 1024x1024)
+- Profiling tools functional (`npm run profile:gpu`, `npm run profile:memory`)
+- Performance metrics documented for all target resolutions
+- Optimization targets met per resolution (see Performance Targets table below)
+- Hardware baseline documented (tested on reference hardware)
+
+**Performance Targets** (Desktop WebGL2, Chrome/Firefox/Edge):
+- **512x512**: 60fps minimum (baseline: GTX 1060 / RX 580 or equivalent)
+- **1024x1024**: 60fps minimum (baseline: GTX 1060 / RX 580 or equivalent)
+- **2048x2048**: 30fps minimum (baseline: GTX 1060 / RX 580 or equivalent)
+- **4096x4096**: 15fps minimum (baseline: RTX 3060 / RX 6600 or equivalent)
+
+**Measurement Method**:
+- Use `npm run profile:gpu` to measure frame time per pass
+- Use browser DevTools Performance tab for overall frame time
+- Measure average FPS over 60-second test run
+- Document hardware configuration in performance reports
 
 ### 7. **Validation & Testing** (Phase 1 Exit Criteria - Required for Acceptance)
 
@@ -304,11 +316,25 @@ This document identifies features present in `master` that need to be ported to 
   - [ ] Regression tests (automated where possible)
 
 **Owner**: `src/three/__tests__/validation/` (new directory)  
+**Tools & Scripts**:
+- `npm run validate:readback` - GPU readback comparison (512x512 test cases)
+- `npm run validate:screenshots` - Visual screenshot comparison tool
+- `npm run validate:passes` - Pass-by-pass validation
+- `npm run validate:performance` - Performance benchmark suite
+- Baseline files: `tests/baselines/master/` (screenshots and GPU readback data from master branch)
+
 **Definition of Done**:
-- Validation suite runs and passes
-- Visual comparison tool functional
-- Performance benchmarks documented
-- Regression tests prevent breaking changes
+- Validation suite runs and passes (`npm run validate:all`)
+- Visual comparison tool functional: Screenshot diff tool compares Three.js output vs master baselines
+- GPU readback validation: 512x512 test cases match master within 1% tolerance (automated)
+- Pass-by-pass validation: Each simulation pass output validated individually
+- Performance benchmarks documented: Frame time and memory usage logged per resolution
+- Regression tests prevent breaking changes: Automated tests run in CI
+
+**Invocation**:
+- **CI**: Runs `npm run validate:all` on every commit
+- **Manual**: Developers run `npm run validate:readback` and `npm run validate:screenshots` before PR
+- **Baselines**: Stored in `tests/baselines/master/` directory, updated when master branch changes
 
 **Note**: Validation is **required** for Phase 1 completion, not optional. Core features cannot be accepted without validation.
 
@@ -336,8 +362,8 @@ The master branch has a complete WebGL renderer with:
 
 2. **Basic terrain rendering with materials**
    - *Owner*: `TerrainSync.ts`, `terrain-scene.ts`
-   - *DoD*: Standard materials functional, normal maps generated, visual match
-   - *Checkpoint*: Terrain renders with materials matching master quality
+   - *DoD*: Standard materials functional, biome texturing works, basic lighting, visual match
+   - *Checkpoint*: Terrain renders with materials matching master quality (normal/roughness maps deferred to Phase 2)
 
 3. **Basic water rendering**
    - *Owner*: `water-scene.ts`
@@ -361,8 +387,8 @@ The master branch has a complete WebGL renderer with:
 
 7. **Validation Suite** (Exit Criteria)
    - *Owner*: `__tests__/validation/`
-   - *DoD*: All validation tests pass, visual comparison tool functional
-   - *Checkpoint*: Phase 1 features validated against master
+   - *DoD*: All validation tests pass (`npm run validate:all`), visual comparison tool functional, GPU readback within 1% tolerance
+   - *Checkpoint*: Phase 1 features validated against master baselines
 
 **Phase 1 Complete When**: All 7 items above have DoD met and validation suite passes.
 
@@ -377,8 +403,8 @@ The master branch has a complete WebGL renderer with:
 
 2. **Advanced materials (normal maps, roughness)**
    - *Owner*: `TerrainSync.ts`
-   - *DoD*: Normal/roughness maps generated and applied
-   - *Checkpoint*: Terrain detail matches master
+   - *DoD*: Normal maps generated from heightmap, roughness maps generated, both applied to terrain material
+   - *Checkpoint*: Terrain detail matches master (normal/roughness maps enhance Phase 1 basic materials)
 
 3. **Water effects (reflection, refraction)**
    - *Owner*: `water-scene.ts`
@@ -423,7 +449,7 @@ The master branch has a complete WebGL renderer with:
 
 **Phase 3 Complete When**: All 4 items above have DoD met.
 
-## Feature → File Mapping
+## Feature -> File Mapping
 
 | Feature | Primary File(s) | Secondary Files | Notes |
 |---------|----------------|-----------------|-------|
@@ -506,11 +532,22 @@ The master branch has a complete WebGL renderer with:
 ### Platform/Resolution Targets
 **Target**: Desktop WebGL2 (Chrome, Firefox, Edge) at resolutions 512x512, 1024x1024, 2048x2048, 4096x4096.
 
-**Performance Targets**:
-- 512x512: 60fps minimum
-- 1024x1024: 60fps minimum
-- 2048x2048: 30fps minimum
-- 4096x4096: 15fps minimum (acceptable for high-res)
+**Hardware Baseline**:
+- **Minimum (512-1024)**: GTX 1060 / RX 580 or equivalent (6GB VRAM)
+- **Recommended (2048)**: GTX 1060 / RX 580 or equivalent (6GB VRAM)
+- **High-res (4096)**: RTX 3060 / RX 6600 or equivalent (8GB+ VRAM)
+
+**Performance Targets** (measured with `npm run profile:gpu`):
+- **512x512**: 60fps minimum (baseline: GTX 1060 / RX 580)
+- **1024x1024**: 60fps minimum (baseline: GTX 1060 / RX 580)
+- **2048x2048**: 30fps minimum (baseline: GTX 1060 / RX 580)
+- **4096x4096**: 15fps minimum (baseline: RTX 3060 / RX 6600)
+
+**Measurement Method**:
+- Use `npm run profile:gpu` for per-pass GPU timing
+- Use browser DevTools Performance tab for overall frame time
+- Average FPS over 60-second test run
+- Document hardware configuration in performance reports
 
 **Material Choice**: Prefer `MeshStandardMaterial`/`MeshPhysicalMaterial` for compatibility and performance. Custom shaders only where necessary (GPGPU passes, texture combines).
 
