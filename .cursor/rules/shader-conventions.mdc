@@ -1,0 +1,224 @@
+---
+description: Shader conventions and patterns for GLSL shaders (WebGL2/GLSL 300 es)
+globs: **/*.glsl
+alwaysApply: false
+---
+
+# Shader Conventions
+
+## Version and Precision
+
+All shaders must start with:
+
+```glsl
+#version 300 es
+precision highp float;
+```
+
+**Rationale**: WebGL2 requires GLSL 300 es. High precision ensures accuracy for simulation calculations.
+
+## Uniform Naming Convention
+
+Use `u_` prefix for all uniforms:
+
+```glsl
+// ✅ GOOD
+uniform float u_Time;
+uniform vec2 u_BrushPos;
+uniform sampler2D u_Heightmap;
+uniform int u_BrushType;
+
+// ❌ BAD
+uniform float time;
+uniform vec2 brushPos;
+```
+
+**Rationale**: Consistent prefix makes uniforms easily identifiable and avoids conflicts with variables.
+
+## Attribute Naming (Vertex Shaders)
+
+For GPGPU passes using fullscreen quad, use `fs_Pos`:
+
+```glsl
+// ✅ GOOD - GPGPU fullscreen quad
+in vec2 fs_Pos;  // Fullscreen position [0,1] range
+
+// ✅ GOOD - Standard vertex attributes
+in vec3 position;
+in vec2 uv;
+in vec3 normal;
+```
+
+**Rationale**: `fs_Pos` is the standard attribute name for fullscreen quad geometry used in GPGPU passes.
+
+## Output Layout (Fragment Shaders)
+
+For MRT (Multiple Render Targets), use explicit location layout:
+
+```glsl
+// ✅ GOOD - MRT with explicit locations
+layout (location = 0) out vec4 writeTerrain;
+layout (location = 1) out vec4 writeFlux;
+layout (location = 2) out vec4 writeVelocity;
+
+// ✅ GOOD - Single output (no layout needed)
+out vec4 fragColor;
+```
+
+**Rationale**: Explicit locations ensure correct MRT binding. Single outputs don't need layout qualifiers.
+
+## Texture Uniform Naming
+
+Use descriptive names indicating read/write purpose:
+
+```glsl
+// ✅ GOOD - Clear read/write intent
+uniform sampler2D readTerrain;   // Input texture
+uniform sampler2D readLava;      // Input texture
+layout (location = 0) out vec4 writeTerrain;  // Output
+
+// ❌ BAD - Ambiguous
+uniform sampler2D terrain;
+uniform sampler2D lava;
+```
+
+**Rationale**: `read`/`write` prefix clarifies texture direction in ping-pong passes.
+
+## Simulation Resolution
+
+Always use `u_SimRes` for simulation resolution:
+
+```glsl
+uniform float u_SimRes;  // Simulation resolution (e.g., 512, 1024, 2048)
+
+// Calculate UV offset for neighbor sampling
+vec2 offset = vec2(1.0 / u_SimRes, 1.0 / u_SimRes);
+```
+
+**Rationale**: Consistent resolution uniform enables neighbor sampling calculations.
+
+## Time Uniform
+
+Use `u_Time` for animation time:
+
+```glsl
+uniform float u_Time;  // Animation time in seconds
+
+// Use in calculations
+vec2 animatedUV = uv + vec2(u_Time * 0.1, u_Time * 0.05);
+```
+
+**Rationale**: Standardized time uniform enables consistent animation across shaders.
+
+## Brush Uniforms Pattern
+
+Standard brush uniforms (from research patterns):
+
+```glsl
+uniform vec2 u_BrushPos;           // Brush position [0,1] UV space
+uniform float u_BrushSize;          // Brush size in UV space
+uniform float u_BrushStrength;      // Brush strength multiplier
+uniform int u_BrushType;            // Brush type ID (0=terrain, 1=water, etc.)
+uniform int u_BrushOperation;       // Operation (0=add, 1=subtract, etc.)
+uniform int u_BrushPressed;         // 0=not pressed, 1=pressed
+uniform vec4 u_MouseWorldPos;       // Mouse world position (x, y, z, w)
+uniform vec3 u_MouseWorldDir;       // Mouse world direction vector
+```
+
+**Rationale**: Standardized brush uniforms enable consistent terraforming across all passes.
+
+## Source Array Pattern
+
+For water/lava source injection:
+
+```glsl
+uniform int u_SourceCount;                    // Number of active sources
+uniform vec2 u_SourcePositions[16];           // Source positions [0,1] UV space
+uniform float u_SourceSizes[16];              // Source sizes
+uniform float u_SourceStrengths[16];          // Source injection rates
+```
+
+**Rationale**: Array-based source system supports multiple injection points efficiently.
+
+## Noise Functions
+
+Reusable noise functions should be in `common/` domain shaders or included:
+
+```glsl
+// ✅ GOOD - Reusable noise function
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float noise(vec2 p) {
+    // Implementation...
+}
+```
+
+**Rationale**: Shared noise functions ensure consistency across terrain generation and effects.
+
+## Texture Sampling
+
+Always use `texture()` (not `texture2D()`) in GLSL 300 es:
+
+```glsl
+// ✅ GOOD - GLSL 300 es syntax
+vec4 sample = texture(u_Heightmap, uv);
+
+// ❌ BAD - GLSL 100 syntax (not compatible)
+vec4 sample = texture2D(u_Heightmap, uv);
+```
+
+**Rationale**: `texture()` is the GLSL 300 es standard. `texture2D()` is deprecated.
+
+## UV Coordinate Handling
+
+UV coordinates are typically [0,1] range:
+
+```glsl
+in vec2 fs_Pos;  // [0,1] range for fullscreen quad
+in vec2 vUv;     // [0,1] range for standard mesh
+
+// Convert to texture space
+vec2 texCoord = fs_Pos;  // Already [0,1] for fullscreen quad
+```
+
+**Rationale**: Consistent [0,1] UV range simplifies texture sampling and calculations.
+
+## Domain Organization
+
+Shaders are organized by domain:
+- `water/` - Water simulation passes
+- `sediment/` - Sediment transport passes
+- `thermal/` - Thermal erosion passes
+- `lava/` - Lava simulation passes
+- `terrain/` - Terrain generation and rendering
+- `common/` - Shared utilities (quad vertex, noise, etc.)
+
+**Rationale**: Domain organization matches simulation pass structure and improves maintainability.
+
+## Shader Accuracy Requirement
+
+**CRITICAL**: When implementing terrain generation or mask algorithms in TypeScript, the formulas must match the shader (`initial-frag.glsl`) exactly. The shader is the source of truth.
+
+**Rationale**: Ensures visual consistency between CPU-side generation and GPU-side rendering.
+
+## Examples from Research Files
+
+### Water Rendering (WebGPU/TSL pattern - reference only)
+- Uses `WaterMesh` with normal map animation
+- Flow direction controls animation
+- Color and scale parameters
+
+### Particle Systems (WebGPU/TSL pattern - reference only)
+- Uses `SpriteNodeMaterial` for particles
+- Life-based opacity and color transitions
+- Position/scale based on time and range functions
+
+### Lava Shader (WebGL pattern - closer to current project)
+- Uses noise textures for distortion
+- Time-based UV animation
+- Color temperature gradients (red/yellow/orange)
+- Fog integration for depth
+
+**Note**: Current project uses WebGL2/GLSL 300 es, not WebGPU/TSL. Research files provide visual reference and effect patterns, but implementation uses GLSL shaders.
