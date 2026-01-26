@@ -1,8 +1,8 @@
 import { vec2 } from 'gl-matrix';
 import { Controls as GUIControls } from '../../gui/gui-setup';
 import { Controls as EventHandlerControls } from '../../events/event-handlers';
-import { Controls as HeightmapLoaderControls } from '../../utils/heightmap-loader';
-import { simres } from '../../simulation/simulation-state';
+import { HeightmapLoaderControls } from '../../utils/heightmap-loader';
+import { DEFAULT_SIMRES } from '../constants';
 
 // Unified Controls type that satisfies all module requirements
 export type Controls = GUIControls & EventHandlerControls & HeightmapLoaderControls;
@@ -11,6 +11,11 @@ export type Controls = GUIControls & EventHandlerControls & HeightmapLoaderContr
  * Options for creating controls object
  */
 export interface CreateControlsOptions {
+  /**
+   * Initial simulation resolution for SimulationResolution. Default 1024.
+   * Used at bootstrap before holders exist.
+   */
+  initialSimres?: number;
   /**
    * Callback functions that will be set after controls creation
    * These are set separately because they may depend on other initialized objects
@@ -35,6 +40,7 @@ export interface CreateControlsOptions {
  */
 export function createControls(options: CreateControlsOptions = {}): Controls {
   const {
+    initialSimres = DEFAULT_SIMRES,
     callbacks = {},
   } = options;
 
@@ -112,7 +118,7 @@ export function createControls(options: CreateControlsOptions = {}): Controls {
     // Advection parameters
     AdvectionMethod: 1,
     VelocityAdvectionMag: 0.2,
-    SimulationResolution: simres,
+    SimulationResolution: initialSimres,
     
     // Lava physics parameters
     LavaViscosityPreExp: 1e-5,

@@ -1,11 +1,16 @@
-import { getHeightMapTexture, setHeightMapTexture, read_terrain_tex, frame_buffer } from '../simulation/texture-management';
-import { setTerrainGeometryDirty } from '../simulation/simulation-state'; // @deprecated - will be replaced with state holders
-import * as simulationState from '../simulation/simulation-state'; // @deprecated - will be replaced with state holders
 import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 
-export interface Controls {
-    TerrainHeight: number;
+export interface HeightmapLoaderControls {
+    TerrainHeight?: number;
     SimulationResolution?: number;
+}
+
+/** Pool provides texture/framebuffer access for load, clear, and export. */
+export interface HeightmapLoaderPool {
+    getHeightMapTexture(): WebGLTexture | null;
+    setHeightMapTexture(tex: WebGLTexture | null): void;
+    getReadTerrainTex(): WebGLTexture;
+    getFrameBuffer(): WebGLFramebuffer;
 }
 
 // Reusable buffer for heightmap conversion (reused across loads to avoid allocations)
@@ -16,8 +21,9 @@ let reusableCanvasContext: CanvasRenderingContext2D | null = null;
 export function createHeightMapLoader(
     gl_context: WebGL2RenderingContext,
     simres: number,
-    controls: Controls,
-    simulationState?: SimulationStateHolder // Optional state holder for new code paths
+    controls: HeightmapLoaderControls,
+    simulationState: SimulationStateHolder,
+    pool: HeightmapLoaderPool
 ) {
     function loadHeightMap() {
         const input = document.createElement('input');
@@ -54,7 +60,7 @@ export function createHeightMapLoader(
                     
                     // Convert image data to height map texture
                     // Use grayscale (red channel) as height, scale to terrain height range
-                    const maxHeight = controls.TerrainHeight * 120.0;
+                    const maxHeight = (controls.TerrainHeight ?? 2.0) * 120.0;
                     
                     for (let i = 0; i < simres * simres; i++) {
                         const r = imageData.data[i * 4];
@@ -71,7 +77,7 @@ export function createHeightMapLoader(
                     }
                     
                     // Create or update height map texture
-                    let heightmap_tex = getHeightMapTexture();
+                    let heightmap_tex = pool.getHeightMapTexture();
                     if (!heightmap_tex) {
                         heightmap_tex = gl_context.createTexture();
                     }
@@ -86,14 +92,10 @@ export function createHeightMapLoader(
                     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
                     
                     // Store the height map texture
-                    setHeightMapTexture(heightmap_tex);
+                    pool.setHeightMapTexture(heightmap_tex);
                     
                     // Mark terrain as dirty to regenerate
-                    if (simulationState) {
-                        simulationState.terrainGeometryDirty = true;
-                    } else {
-                        setTerrainGeometryDirty(true); // Fallback to global
-                    }
+                    simulationState.terrainGeometryDirty = true;
                     console.log('Height map loaded successfully');
                 };
                 img.src = event.target?.result as string;
@@ -104,29 +106,25 @@ export function createHeightMapLoader(
     }
 
     function clearHeightMap() {
-        const heightmap_tex = getHeightMapTexture();
+        const heightmap_tex = pool.getHeightMapTexture();
         if (heightmap_tex) {
             gl_context.deleteTexture(heightmap_tex);
-            setHeightMapTexture(null);
-            if (simulationState) {
-                simulationState.terrainGeometryDirty = true;
-            } else {
-                setTerrainGeometryDirty(true); // Fallback to global
-            }
+            pool.setHeightMapTexture(null);
+            simulationState.terrainGeometryDirty = true;
             console.log('Height map cleared, using procedural generation');
         }
     }
 
     function exportHeightMapPNG() {
+        const read_terrain_tex = pool.getReadTerrainTex();
+        const frame_buffer = pool.getFrameBuffer();
         if (!read_terrain_tex || !frame_buffer) {
             console.error('Terrain texture or framebuffer not available for export');
             return;
         }
 
-        // Get current resolution from controls (this is the source of truth for current resolution)
-        const currentRes = Number(controls.SimulationResolution) 
-            || simulationState?.simres 
-            || simulationState.simres; // Fallback to global
+        // Get current resolution: holder if provided, else controls, else param
+        const currentRes = simulationState.simres;
 
         // Create temporary buffer for reading heightmap data
         const bufferSize = currentRes * currentRes * 4;
@@ -144,7 +142,7 @@ export function createHeightMapLoader(
         // For export, we need to reverse: convert back to 0-255 range
         // Import uses: gray * maxHeight where maxHeight = TerrainHeight * 120.0
         // So export: height / maxHeight * 255
-        const maxHeight = controls.TerrainHeight * 120.0;
+        const maxHeight = (controls.TerrainHeight ?? 2.0) * 120.0;
 
         // Reuse canvas if available, create new one only if needed or size changed
         if (!reusableCanvas || reusableCanvas.width !== currentRes || reusableCanvas.height !== currentRes) {
@@ -210,15 +208,15 @@ export function createHeightMapLoader(
     }
 
     function exportHeightMapRaw() {
+        const read_terrain_tex = pool.getReadTerrainTex();
+        const frame_buffer = pool.getFrameBuffer();
         if (!read_terrain_tex || !frame_buffer) {
             console.error('Terrain texture or framebuffer not available for export');
             return;
         }
 
-        // Get current resolution from controls (this is the source of truth for current resolution)
-        const currentRes = Number(controls.SimulationResolution) 
-            || simulationState?.simres 
-            || simulationState.simres; // Fallback to global
+        // Get current resolution: holder if provided, else controls, else param
+        const currentRes = simulationState.simres;
 
         // Create temporary buffer for reading heightmap data
         const bufferSize = currentRes * currentRes * 4;

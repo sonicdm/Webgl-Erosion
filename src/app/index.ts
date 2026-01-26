@@ -37,6 +37,7 @@ export { setupAppGUI, type GUISetupResult } from './ui/gui';
 export { calculateBrushInput, normalizeMousePosition, updateBrushInputFromControls } from './input/brush-controls';
 
 // Runtime
+export { createThreeRuntime } from './runtime/create-three-runtime';
 export { createThreeRunner, type ThreeRunnerResult } from './runtime/three-runner';
 export { createLegacyRunner, type LegacyRunnerResult, type LegacyRunnerConfig } from './runtime/legacy-runner';
 export { initializeLegacyPipeline, type LegacyInitializationResult } from './runtime/legacy-initialization';

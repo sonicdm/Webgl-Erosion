@@ -5,7 +5,6 @@
 
 import { ThreeJSRuntime } from './main';
 import { SimulationPassManager } from './simulation/SimulationPassManager';
-import { readCombinedHeight } from './utils/combined-height-readback';
 import * as THREE from 'three';
 import { vec2, vec3, vec4 } from 'gl-matrix';
 import Camera from '../Camera';
@@ -14,42 +13,51 @@ import { CameraService } from './camera/CameraService';
 import { TerrainSync } from './terrain/TerrainSync';
 import { HeightmapBridge } from './io/HeightmapBridge';
 import { StepRunner } from './simulation/StepRunner';
-import { waterSources as waterSourcesList } from '../utils/water-sources';
-import { lavaSources as lavaSourcesList } from '../utils/lava-sources';
 import { SimulationParams, createSimulationParams } from '../app/dto/SimulationParams';
 import { BrushInput, createBrushInput } from '../app/dto/BrushInput';
 import { SourceArrays } from '../app/dto/SourceArrays';
-import { createHeightmapTexture } from './utils/terrain-heightmap-converter';
-import { MeshBVH, SAH } from 'three-mesh-bvh';
-import { setTerrainGeometry, setTerrainBVH, setTerrainBVHBuildInProgress, terrainBVHBuildInProgress, terrainBVH, terrainGeometry } from '../simulation/simulation-state';
 import { rayCastBVH } from '../utils/bvh-raycast';
 import { rayCast } from '../utils/raycast';
-// CPU-side terraforming removed - now using GPU-based VTF displacement
-// import { applyTerraforming, TerraformParams } from './utils/cpu-terraforming';
+import type { TerrainStateHolder } from '../app/state/TerrainStateHolder';
+
+export interface ThreeRuntimeDeps {
+  runtime: ThreeJSRuntime;
+  cameraService: CameraService;
+  terrainSync: TerrainSync;
+  heightmapBridge: HeightmapBridge;
+  stepRunner: StepRunner;
+  sourceArrays: SourceArrays;
+  simres: number;
+  terrainStateHolder: TerrainStateHolder;
+}
 
 /**
- * Main Three.js simulation runtime that integrates with the existing system
+ * Main Three.js simulation runtime that integrates with the existing system.
+ * All dependencies are injected via ThreeRuntimeDeps (no construction of services inside).
  */
 export class ThreeJSSimulationRuntime {
   private runtime: ThreeJSRuntime;
   private passManager: SimulationPassManager | null = null;
   private simres: number;
   private renderDebugCounter = 0;
-  private controls: SimulationParams | any = null; // Store controls for material updates (SimulationParams preferred)
-  private cameraService: CameraService; // Camera service for camera management
-  private terrainSync: TerrainSync; // Terrain sync service for geometry and BVH management
-  private heightmapBridge: HeightmapBridge; // Heightmap bridge for readback and buffer management
-  private stepRunner: StepRunner; // Step runner for simulation execution
-  private controlsConfig: ControlsConfig | null = null; // Camera configuration (stored for reference)
-  // terraformingActive flag removed - terraforming is now GPU-based (rain shader)
+  private controls: SimulationParams | any = null;
+  private cameraService: CameraService;
+  private terrainSync: TerrainSync;
+  private heightmapBridge: HeightmapBridge;
+  private stepRunner: StepRunner;
+  private sourceArrays: SourceArrays;
+  private terrainStateHolder: TerrainStateHolder;
+  private controlsConfig: ControlsConfig | null = null;
 
-  constructor(canvas: HTMLCanvasElement, glContext: WebGL2RenderingContext, simres: number) {
-    this.runtime = new ThreeJSRuntime(canvas, glContext);
-    this.simres = simres;
-    this.cameraService = new CameraService(this.runtime);
-    this.terrainSync = new TerrainSync(this.runtime, simres, null, null);
-    this.heightmapBridge = new HeightmapBridge(simres);
-    this.stepRunner = new StepRunner(null, simres);
+  constructor(deps: ThreeRuntimeDeps) {
+    this.runtime = deps.runtime;
+    this.simres = deps.simres;
+    this.cameraService = deps.cameraService;
+    this.terrainSync = deps.terrainSync;
+    this.heightmapBridge = deps.heightmapBridge;
+    this.stepRunner = deps.stepRunner;
+    this.sourceArrays = deps.sourceArrays;
+    this.terrainStateHolder = deps.terrainStateHolder;
   }
   
   /**
@@ -170,11 +178,8 @@ export class ThreeJSSimulationRuntime {
       }
     }
     
-    // Create SourceArrays from globals (will be passed from caller in Phase 6)
-    const sourceArrays = new SourceArrays(waterSourcesList, lavaSourcesList);
-    
-    // Delegate to StepRunner
-    this.stepRunner.executeStep(simParams, brushInput, timer, sourceArrays);
+    // Delegate to StepRunner (sourceArrays injected via ctor)
+    this.stepRunner.executeStep(simParams, brushInput, timer, this.sourceArrays);
   }
 
   /**
@@ -287,10 +292,9 @@ export class ThreeJSSimulationRuntime {
     const rayDirVec3 = vec3.fromValues(rayDir.x, rayDir.y, rayDir.z);
     
     // Try BVH raycast first if available and enabled, otherwise use heightmap raycast
-    // Heightmap raycast is fast and works with initial terrain data
-    // BVH is more accurate but expensive (39% CPU time when used every frame)
+    const terrainBVH = this.terrainStateHolder.terrainBVH;
+    const terrainGeometry = this.terrainStateHolder.terrainGeometry;
     if (this.controlsConfig?.raycast?.method === 'bvh' && terrainBVH && terrainGeometry) {
-      // Use BVH raycast (expensive but accurate)
       const hit = rayCastBVH(
         rayOriginVec3,
         rayDirVec3,

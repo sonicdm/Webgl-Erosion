@@ -2,6 +2,7 @@ import { TerrainSync } from '../TerrainSync';
 import { ThreeJSRuntime } from '../../main';
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
+import { TerrainStateHolder } from '../../../app/state/TerrainStateHolder';
 
 // Mock ThreeJSRuntime
 jest.mock('../../main', () => {
@@ -47,17 +48,10 @@ jest.mock('three-mesh-bvh', () => ({
   SAH: 'SAH',
 }));
 
-// Mock simulation state
-jest.mock('../../../simulation/simulation-state', () => ({
-  setTerrainGeometry: jest.fn(),
-  setTerrainBVH: jest.fn(),
-  setTerrainBVHBuildInProgress: jest.fn(),
-  terrainBVHBuildInProgress: false,
-}));
-
 describe('TerrainSync', () => {
   let mockRuntime: ThreeJSRuntime;
   let terrainSync: TerrainSync;
+  let terrainStateHolder: TerrainStateHolder;
   let mockCanvas: HTMLCanvasElement;
   let mockGLContext: WebGL2RenderingContext;
 
@@ -68,7 +62,8 @@ describe('TerrainSync', () => {
     } as any;
 
     mockRuntime = new ThreeJSRuntime(mockCanvas, mockGLContext);
-    terrainSync = new TerrainSync(mockRuntime, 1024, null, null);
+    terrainStateHolder = new TerrainStateHolder(1024);
+    terrainSync = new TerrainSync(mockRuntime, 1024, null, null, terrainStateHolder);
   });
 
   describe('updateTerrainGeometry', () => {
@@ -257,7 +252,8 @@ describe('TerrainSync', () => {
 
   describe('updateTerrainGeometry error handling', () => {
     it('should handle null controls gracefully', () => {
-      const terrainSyncWithNullControls = new TerrainSync(mockRuntime, 64, null, null);
+      const holder = new TerrainStateHolder(64);
+      const terrainSyncWithNullControls = new TerrainSync(mockRuntime, 64, null, null, holder);
       const heightData = new Float32Array(64 * 64 * 4);
       
       // Should not throw, but may log error

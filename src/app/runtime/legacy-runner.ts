@@ -11,86 +11,6 @@ import ShaderProgram from '../../rendering/gl/ShaderProgram';
 import Square from '../../geometry/Square';
 import Plane from '../../geometry/Plane';
 import { Render2Texture } from '../../rendering/render-utils';
-import {
-  frame_buffer,
-  read_terrain_tex,
-  write_terrain_tex,
-  read_flux_tex,
-  write_flux_tex,
-  read_vel_tex,
-  write_vel_tex,
-  read_sediment_tex,
-  write_sediment_tex,
-  terrain_nor,
-  read_sediment_blend,
-  write_sediment_blend,
-  sediment_advect_a,
-  sediment_advect_b,
-  read_maxslippage_tex,
-  write_maxslippage_tex,
-  read_terrain_flux_tex,
-  write_terrain_flux_tex,
-  shadowMap_frame_buffer,
-  shadowMap_tex,
-  shadowMap_render_buffer,
-  deferred_frame_buffer,
-  scene_depth_tex,
-  deferred_render_buffer,
-  color_pass_tex,
-  color_pass_reflection_tex,
-  scatter_pass_tex,
-  bilateral_filter_horizontal_tex,
-  bilateral_filter_vertical_tex,
-  swapTerrainTextures,
-  swapFluxTextures,
-  swapVelTextures,
-  swapSedimentTextures,
-  swapSedimentBlendTextures,
-  swapMaxSlippageTextures,
-  swapTerrainFluxTextures,
-  swapBilateralFilterTextures,
-  resizeScreenTextures,
-  read_lava_tex,
-  write_lava_tex,
-  read_lava_flux_tex,
-  write_lava_flux_tex,
-  render_buffer,
-  swapLavaTextures,
-  swapLavaFluxTextures,
-} from '../../simulation/texture-management';
-import {
-  simres,
-  shadowMapResolution,
-  simFrameCount,
-  TerrainGeometryDirty,
-  PauseGeneration,
-  heightMapCpuBuf,
-  heightMapBufCounter,
-  maxHeightMapBufCounter,
-  shouldReadHeightmap,
-  setSimRes,
-  incrementSimFrameCount,
-  setTerrainGeometryDirty,
-  incrementHeightMapBufCounter,
-  resetHeightMapBufCounter,
-  terrainGeometry,
-  terrainBVH,
-  setTerrainGeometry,
-  setTerrainBVH,
-  terrainBVHBuildInProgress,
-  setTerrainBVHBuildInProgress,
-  heightMapBufIsFresh,
-  setHeightMapBufIsFresh,
-  geometryUpdateCounter,
-  geometryNeedsUpdate,
-  geometryUpdateInterval,
-  enableBVHUpdates,
-  incrementGeometryUpdateCounter,
-  resetGeometryUpdateCounter,
-  setGeometryNeedsUpdate,
-  shouldUpdateGeometry,
-  resizeHeightMapCpuBuf,
-} from '../../simulation/simulation-state';
 import { getCachedUniformLocation } from '../../utils/uniform-cache';
 import { rayCast } from '../../utils/raycast';
 import { rayCastBVH } from '../../utils/bvh-raycast';
@@ -100,8 +20,6 @@ import { LoadProgressTracker, LoadPhase } from '../../utils/load-progress';
 import { MAX_WATER_SOURCES, waterSources, getWaterSourceCount } from '../../utils/water-sources';
 import { MAX_LAVA_SOURCES, lavaSources, getLavaSourceCount } from '../../utils/lava-sources';
 import { updateBrushState, BrushContext, BrushControls } from '../../brush-handler';
-import { resizeTextures4Simulation } from '../../simulation/texture-management';
-
 /**
  * Legacy runner result
  */
@@ -121,6 +39,7 @@ export interface LegacyRunnerConfig {
   glContext: WebGL2RenderingContext;
   renderer: OpenGLRenderer;
   camera: Camera;
+  pool: import('../../simulation/LegacyTexturePool').LegacyTexturePool;
   shaders: {
     lambert: ShaderProgram;
     flat: ShaderProgram;
@@ -178,6 +97,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     glContext,
     renderer,
     camera,
+    pool,
     shaders,
     geometries,
     terrainRandom,
@@ -251,30 +171,31 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
   let timer = 0;
   let animationFrameId: number | null = null;
   let isRunning = false;
+  let simres = appContext.simulationState.simres;
 
   // Clean up textures function
   function cleanUpTextures() {
-    Render2Texture(renderer, glContext, camera, clean, read_terrain_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, read_vel_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, read_flux_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, read_terrain_flux_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_terrain_flux_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, read_maxslippage_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_maxslippage_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, read_sediment_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_terrain_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_vel_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_flux_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_sediment_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, terrain_nor, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, read_sediment_blend, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_sediment_blend, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, sediment_advect_a, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, sediment_advect_b, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, read_lava_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_lava_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, read_lava_flux_tex, square, noiseterrain, appContext.simulationState);
-    Render2Texture(renderer, glContext, camera, clean, write_lava_flux_tex, square, noiseterrain, appContext.simulationState);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadTerrainTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadVelTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadFluxTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadTerrainFluxTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteTerrainFluxTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadMaxslippageTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteMaxslippageTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadSedimentTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteTerrainTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteVelTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteFluxTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteSedimentTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getTerrainNor(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadSedimentBlend(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteSedimentBlend(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getSedimentAdvectA(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getSedimentAdvectB(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadLavaTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteLavaTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getReadLavaFluxTex(), square, noiseterrain, pool);
+    Render2Texture(renderer, glContext, camera, clean, pool.getWriteLavaFluxTex(), square, noiseterrain, pool);
   }
 
   // SimulatePerStep function - executes one simulation step
@@ -311,12 +232,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     //0---use hight map to derive hight map : hight map -----> hight map
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_terrain_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteTerrainTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
@@ -324,13 +245,13 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     rains.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(rains.prog, "readTerrain"), 0);
     gl_context.uniform1f(getCachedUniformLocation(rains.prog, 'raindeg'), controls.RainDegree);
 
@@ -339,19 +260,19 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //swap terrain tex-----------------------------------------------
-    swapTerrainTextures();
+    pool.swapTerrainTextures();
     //swap terrain tex-----------------------------------------------
 
     //////////////////////////////////////////////////////////////////
     //1---use hight map to derive flux map : hight map -----> flux map
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_flux_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteFluxTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
@@ -359,28 +280,28 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     shader.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(shader.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_flux_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadFluxTex());
     gl_context.uniform1i(getCachedUniformLocation(shader.prog, "readFlux"), 1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentTex());
     gl_context.uniform1i(getCachedUniformLocation(shader.prog, "readSedi"), 2);
 
     renderer.render(camera, shader, [square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //-----swap flux ping and pong
-    swapFluxTextures();
+    pool.swapFluxTextures();
     //-----swap flux ping and pong
 
     //////////////////////////////////////////////////////////////////
@@ -388,12 +309,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // hight map + flux map -----> velocity map + hight map
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_terrain_tex, 0);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, write_vel_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteTerrainTex(), 0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, pool.getWriteVelTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1]);
 
@@ -402,33 +323,33 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     waterHeight.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(waterHeight.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_flux_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadFluxTex());
     gl_context.uniform1i(getCachedUniformLocation(waterHeight.prog, "readFlux"), 1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentTex());
     gl_context.uniform1i(getCachedUniformLocation(waterHeight.prog, "readSedi"), 2);
 
     gl_context.activeTexture(gl_context.TEXTURE3);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadVelTex());
     gl_context.uniform1i(getCachedUniformLocation(waterHeight.prog, "readVel"), 3);
 
     renderer.render(camera, waterHeight, [square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //-----swap terrain ping and pong and velocity ping pong
-    swapTerrainTextures();
-    swapVelTextures();
+    pool.swapTerrainTextures();
+    pool.swapVelTextures();
     //-----swap terrain ping and pong and velocity ping pong
 
     //////////////////////////////////////////////////////////////////
@@ -436,12 +357,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // hight map + velocity map + sediment map -----> sediment map + hight map + terrain normal map + velocity map
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_terrain_tex, 0);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, write_sediment_tex, 0);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, terrain_nor, 0);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, write_vel_tex, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteTerrainTex(), 0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, pool.getWriteSedimentTex(), 0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, pool.getTerrainNor(), 0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, pool.getWriteVelTex(), 0);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2, gl_context.COLOR_ATTACHMENT3]);
 
@@ -450,34 +371,34 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     sedi.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(sedi.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadVelTex());
     gl_context.uniform1i(getCachedUniformLocation(sedi.prog, "readVelocity"), 1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentTex());
     gl_context.uniform1i(getCachedUniformLocation(sedi.prog, "readSediment"), 2);
 
     gl_context.activeTexture(gl_context.TEXTURE4);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadLavaTex());
     gl_context.uniform1i(getCachedUniformLocation(sedi.prog, "readLava"), 4);
 
     renderer.render(camera, sedi, [square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //----------swap terrain and sediment map---------
-    swapSedimentTextures();
-    swapTerrainTextures();
-    swapVelTextures();
+    pool.swapSedimentTextures();
+    pool.swapTerrainTextures();
+    pool.swapVelTextures();
     //----------swap terrain and sediment map---------
 
     //////////////////////////////////////////////////////////////////
@@ -488,12 +409,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     if (controls.AdvectionMethod == 1) {
       //4.1  first subpass writing to the intermidiate sediment advection texture a
       {
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, sediment_advect_a, 0);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, write_vel_tex, 0);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, write_sediment_blend, 0);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getSedimentAdvectA(), 0);
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, pool.getWriteVelTex(), 0);
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, pool.getWriteSedimentBlend(), 0);
         gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-        gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+        gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
         gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2]);
 
@@ -502,24 +423,24 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
         gl_context.viewport(0, 0, simres, simres);
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
         renderer.clear();
         advect.use();
         gl_context.activeTexture(gl_context.TEXTURE0);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadVelTex());
         gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
 
         gl_context.activeTexture(gl_context.TEXTURE1);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentTex());
         gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
 
         gl_context.activeTexture(gl_context.TEXTURE2);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_blend);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentBlend());
         gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
 
         gl_context.activeTexture(gl_context.TEXTURE3);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
         gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
 
         advect.setFloat(1, "unif_advectMultiplier");
@@ -529,12 +450,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
       }
       //4.2  second subpass writing to the intermidiate sediment advection texture b using a
       {
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, sediment_advect_b, 0);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, write_vel_tex, 0);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, write_sediment_blend, 0);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getSedimentAdvectB(), 0);
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, pool.getWriteVelTex(), 0);
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, pool.getWriteSedimentBlend(), 0);
         gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-        gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+        gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
         gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2]);
 
@@ -543,24 +464,24 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
         gl_context.viewport(0, 0, simres, simres);
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
         renderer.clear();
         advect.use();
         gl_context.activeTexture(gl_context.TEXTURE0);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadVelTex());
         gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
 
         gl_context.activeTexture(gl_context.TEXTURE1);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, sediment_advect_a);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getSedimentAdvectA());
         gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
 
         gl_context.activeTexture(gl_context.TEXTURE2);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_blend);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentBlend());
         gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
 
         gl_context.activeTexture(gl_context.TEXTURE3);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
         gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
 
         advect.setFloat(-1, "unif_advectMultiplier");
@@ -570,12 +491,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
       }
       //4.3 thrid subpass : mac cormack advection writing to actual sediment using intermidiate advection textures
       {
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_sediment_tex, 0);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteSedimentTex(), 0);
         gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
         gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
         gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-        gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+        gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
         gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2]);
 
@@ -584,36 +505,36 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
         gl_context.viewport(0, 0, simres, simres);
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
         renderer.clear();
         macCormack.use();
         gl_context.activeTexture(gl_context.TEXTURE0);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadVelTex());
         gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "vel"), 0);
 
         gl_context.activeTexture(gl_context.TEXTURE1);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentTex());
         gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sedi"), 1);
 
         gl_context.activeTexture(gl_context.TEXTURE2);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, sediment_advect_a);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getSedimentAdvectA());
         gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sediadvecta"), 2);
 
         gl_context.activeTexture(gl_context.TEXTURE3);
-        gl_context.bindTexture(gl_context.TEXTURE_2D, sediment_advect_b);
+        gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getSedimentAdvectB());
         gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sediadvectb"), 3);
 
         renderer.render(camera, macCormack, [square]);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
       }
     } else {
-      gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-      gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_sediment_tex, 0);
-      gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, write_vel_tex, 0);
-      gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, write_sediment_blend, 0);
+      gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+      gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteSedimentTex(), 0);
+      gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, pool.getWriteVelTex(), 0);
+      gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, pool.getWriteSedimentBlend(), 0);
       gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-      gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+      gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
       gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1, gl_context.COLOR_ATTACHMENT2]);
 
@@ -622,24 +543,24 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
       gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
       gl_context.viewport(0, 0, simres, simres);
-      gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+      gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
       renderer.clear();
       advect.use();
       gl_context.activeTexture(gl_context.TEXTURE0);
-      gl_context.bindTexture(gl_context.TEXTURE_2D, read_vel_tex);
+      gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadVelTex());
       gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
 
       gl_context.activeTexture(gl_context.TEXTURE1);
-      gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
+      gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentTex());
       gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
 
       gl_context.activeTexture(gl_context.TEXTURE2);
-      gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_blend);
+      gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentBlend());
       gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
 
       gl_context.activeTexture(gl_context.TEXTURE3);
-      gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+      gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
       gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
 
       advect.setFloat(1, "unif_advectMultiplier");
@@ -648,9 +569,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
       gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
     }
     //----------swap sediment map---------
-    swapSedimentBlendTextures();
-    swapSedimentTextures();
-    swapVelTextures();
+    pool.swapSedimentBlendTextures();
+    pool.swapSedimentTextures();
+    pool.swapVelTextures();
     //----------swap sediment map---------
 
     //////////////////////////////////////////////////////////////////
@@ -659,12 +580,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // hight map -----> max slippage  map
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_maxslippage_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteMaxslippageTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
@@ -673,12 +594,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     maxslippageheight.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(maxslippageheight.prog, "readTerrain"), 0);
 
     renderer.render(camera, maxslippageheight, [square]);
@@ -686,7 +607,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
 
     //---------------------------------
     //swap maxslippage maps
-    swapMaxSlippageTextures();
+    pool.swapMaxSlippageTextures();
     //--------------------------------
 
     //////////////////////////////////////////////////////////////////
@@ -695,12 +616,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // hight map -----> terrain flux map
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_terrain_flux_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteTerrainFluxTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
@@ -709,16 +630,16 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     thermalterrainflux.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(thermalterrainflux.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_maxslippage_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadMaxslippageTex());
     gl_context.uniform1i(getCachedUniformLocation(thermalterrainflux.prog, "readMaxSlippage"), 1);
 
     renderer.render(camera, thermalterrainflux, [square]);
@@ -726,7 +647,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
 
     //---------------------------------
     //swap terrain flux maps
-    swapTerrainFluxTextures();
+    pool.swapTerrainFluxTextures();
 
     //////////////////////////////////////////////////////////////////
     // thermal erosion apply
@@ -734,12 +655,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // terrain flux map -----> terrain map
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_terrain_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteTerrainTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
@@ -748,35 +669,35 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     thermalapply.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_flux_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainFluxTex());
     gl_context.uniform1i(getCachedUniformLocation(thermalapply.prog, "readTerrainFlux"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(thermalapply.prog, "readTerrain"), 1);
 
     renderer.render(camera, thermalapply, [square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //---------------swap terrain mao----------------------------
-    swapTerrainTextures();
+    pool.swapTerrainTextures();
     //////////////////////////////////////////////////////////////////
     // water level evaporation at end of each iteration
     // 7---use terrain map to derive new terrain map :
     // terrain map -----> terrain map
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_terrain_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteTerrainTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
@@ -785,13 +706,13 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     eva.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(eva.prog, "terrain"), 0);
     gl_context.uniform1f(getCachedUniformLocation(eva.prog, 'evapod'), controls.EvaporationConstant);
 
@@ -799,7 +720,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //---------------swap terrain mao----------------------------
-    swapTerrainTextures();
+    pool.swapTerrainTextures();
     //---------------swap terrain mao----------------------------
 
     //////////////////////////////////////////////////////////////////
@@ -818,12 +739,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.activeTexture(gl_context.TEXTURE3);
     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_lava_flux_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteLavaFluxTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
@@ -831,21 +752,21 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     lavaFlow.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaFlow.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadLavaTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaFlow.prog, "readLava"), 1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_flux_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadLavaFluxTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaFlow.prog, "readLavaFlux"), 2);
 
     lavaFlow.setSimres(simres);
@@ -867,7 +788,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //-----swap lava flux ping and pong
-    swapLavaFluxTextures();
+    pool.swapLavaFluxTextures();
     //-----swap lava flux ping and pong
 
     //////////////////////////////////////////////////////////////////
@@ -876,12 +797,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // lava map + lava flux map -----> lava map (with temperature updates)
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_lava_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteLavaTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
@@ -889,21 +810,21 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     lavaUpdate.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaUpdate.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadLavaTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaUpdate.prog, "readLava"), 1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_flux_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadLavaFluxTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaUpdate.prog, "readLavaFlux"), 2);
 
     lavaUpdate.setSimres(simres);
@@ -939,7 +860,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //-----swap lava ping and pong
-    swapLavaTextures();
+    pool.swapLavaTextures();
     //-----swap lava ping and pong
 
     //////////////////////////////////////////////////////////////////
@@ -949,12 +870,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // Also updates lava map (removes solidified parts)
     //////////////////////////////////////////////////////////////////
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_terrain_tex, 0);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, write_lava_tex, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteTerrainTex(), 0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, pool.getWriteLavaTex(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1]);
 
     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
@@ -962,20 +883,20 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
 
     renderer.clear();
     lavaTerrain.use();
 
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaTerrain.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadLavaTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaTerrain.prog, "readLava"), 1);
     gl_context.activeTexture(gl_context.TEXTURE2);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_lava_flux_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadLavaFluxTex());
     gl_context.uniform1i(getCachedUniformLocation(lavaTerrain.prog, "readLavaFlux"), 2);
 
     lavaTerrain.setSimres(simres);
@@ -996,11 +917,11 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
     //-----swap terrain ping and pong
-    swapTerrainTextures();
+    pool.swapTerrainTextures();
     //-----swap terrain ping and pong
 
     //-----swap lava ping and pong (updated lava with solidified parts removed)
-    swapLavaTextures();
+    pool.swapLavaTextures();
     //-----swap lava ping and pong
 
     //////////////////////////////////////////////////////////////////
@@ -1008,12 +929,12 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // 6---use terrain map to derive new terrain map :
     //  terrain map -----> terrain map
     //////////////////////////////////////////////////////////////////
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, write_terrain_tex, 0);
-    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, terrain_nor, 0);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, pool.getWriteTerrainTex(), 0);
+    gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, pool.getTerrainNor(), 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, pool.getRenderBuffer());
 
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0, gl_context.COLOR_ATTACHMENT1]);
 
@@ -1021,21 +942,21 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, pool.getFrameBuffer());
     renderer.clear();
     ave.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_terrain_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadTerrainTex());
     gl_context.uniform1i(getCachedUniformLocation(ave.prog, "readTerrain"), 0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
-    gl_context.bindTexture(gl_context.TEXTURE_2D, read_sediment_tex);
+    gl_context.bindTexture(gl_context.TEXTURE_2D, pool.getReadSedimentTex());
     gl_context.uniform1i(getCachedUniformLocation(ave.prog, "readSedi"), 1);
 
     renderer.render(camera, ave, [square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
     //---------------swap terrain mao----------------------------
-    swapTerrainTextures();
+    pool.swapTerrainTextures();
     //---------------swap terrain mao----------------------------
   }
 
@@ -1069,7 +990,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     reusableDir: vec3,
     reusablePos: vec2
   ): boolean {
-    if (PauseGeneration) return true;
+    if (appContext.simulationState.pauseGeneration) return true;
     else {
       SimulatePerStep(
         renderer,
@@ -1104,6 +1025,10 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
   }
 
   function tick() {
+    // Sync holder from controls; local simres used for rest of tick
+    simres = Number(controls.SimulationResolution) || appContext.simulationState.simres;
+    appContext.simulationState.simres = simres;
+
     // Update camera before raycasting so matrices are in sync with rendered view
     camera.update(appContext.controlsConfig.camera);
 
@@ -1160,19 +1085,19 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     }
 
 
-    if(TerrainGeometryDirty){
+    if(appContext.simulationState.terrainGeometryDirty){
         const loadingOverlay = document.getElementById('terrain-loading-overlay');
         const progressText = document.getElementById('loading-progress-text');
         const progressBar = document.getElementById('loading-progress-bar');
         
         // Check if a build is already in progress - if so, don't reset the UI
-        const buildInProgress = terrainBVHBuildInProgress || (loadingOverlay && loadingOverlay.classList.contains('visible'));
+        const buildInProgress = appContext.terrainStateHolder.terrainBVHBuildInProgress || (loadingOverlay && loadingOverlay.classList.contains('visible'));
         
         if (buildInProgress) {
             console.log('[Loading] Build already in progress, skipping UI reset');
             // Still need to process the loading, but don't reset UI
         } else {
-            console.log('[Loading] TerrainGeometryDirty=true, starting loading process');
+            console.log('[Loading] appContext.simulationState.terrainGeometryDirty=true, starting loading process');
             console.log('[Loading] UI elements:', {
                 overlay: !!loadingOverlay,
                 progressText: !!progressText,
@@ -1244,23 +1169,25 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                     const oldRes = simres;
                     const newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
                     console.log(`[Loading] Resolution change detected: ${oldRes} -> ${newRes}`);
-                    setSimRes(newRes);
-                    resizeTextures4Simulation(glContext, newRes);
-                    resizeHeightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
+                    appContext.simulationState.simres = newRes;
+                    pool.resizeTextures4Simulation(newRes);
+                    appContext.terrainStateHolder.resizeHeightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
                     
                     // Clear old BVH and geometry when resolution changes (they're invalid for new resolution)
-                    if (terrainBVH) {
+                    if (appContext.terrainStateHolder.terrainBVH) {
                         console.log('[Loading] Clearing old BVH due to resolution change');
-                        setTerrainBVH(null);
+                        appContext.terrainStateHolder.terrainBVH = null;
+                        appContext.terrainStateHolder.terrainBVH = null;
                     }
-                    if (terrainGeometry) {
+                    if (appContext.terrainStateHolder.terrainGeometry) {
                         console.log('[Loading] Disposing old geometry due to resolution change');
-                        terrainGeometry.dispose();
-                        setTerrainGeometry(null);
+                        appContext.terrainStateHolder.terrainGeometry.dispose();
+                        appContext.terrainStateHolder.terrainGeometry = null;
+                        appContext.terrainStateHolder.terrainGeometry = null;
                     }
-                    if (terrainBVHBuildInProgress) {
+                    if (appContext.terrainStateHolder.terrainBVHBuildInProgress) {
                         console.log('[Loading] Clearing in-progress flag due to resolution change');
-                        setTerrainBVHBuildInProgress(false);
+                        appContext.terrainStateHolder.terrainBVHBuildInProgress = false;
                     }
                 } else {
                     console.log(`[Loading] No resolution change (current: ${simres})`);
@@ -1273,22 +1200,22 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                     // GPU upload phase (rendering textures)
                     progressTracker.startPhase(LoadPhase.GPU_UPLOAD);
                     progressTracker.updateSubPhaseProgress(0.0);
-                    Render2Texture(renderer,glContext,camera,noiseterrain,read_terrain_tex,square,noiseterrain);
+                    Render2Texture(renderer,glContext,camera,noiseterrain,pool.getReadTerrainTex(),square,noiseterrain,pool);
                     progressTracker.updateSubPhaseProgress(0.5);
-                    Render2Texture(renderer,glContext,camera,noiseterrain,write_terrain_tex,square,noiseterrain);
+                    Render2Texture(renderer,glContext,camera,noiseterrain,pool.getWriteTerrainTex(),square,noiseterrain,pool);
                     progressTracker.updateSubPhaseProgress(1.0);
                     progressTracker.endPhase(LoadPhase.GPU_UPLOAD);
                     
                     // Readback phase
                     progressTracker.startPhase(LoadPhase.READBACK);
                     progressTracker.updateSubPhaseProgress(0.0);
-                    glContext.bindFramebuffer(glContext.FRAMEBUFFER, frame_buffer);
-                    glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, read_terrain_tex, 0);
+                    glContext.bindFramebuffer(glContext.FRAMEBUFFER, pool.getFrameBuffer());
+                    glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, pool.getReadTerrainTex(), 0);
                     glContext.readBuffer(glContext.COLOR_ATTACHMENT0);
                     progressTracker.updateSubPhaseProgress(0.5);
-                    glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, heightMapCpuBuf);
+                    glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, appContext.terrainStateHolder.heightMapCpuBuf);
                     glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
-                    setHeightMapBufIsFresh(true); // Mark buffer as fresh
+                    appContext.terrainStateHolder.heightMapBufIsFresh = true; // Mark buffer as fresh
                     progressTracker.updateSubPhaseProgress(1.0);
                     progressTracker.endPhase(LoadPhase.READBACK);
                 }
@@ -1297,42 +1224,42 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                 // Guard: Don't rebuild if BVH build is already in progress (prevents duplicate builds)
                 // But allow rebuild if resolution changed (old BVH was cleared above)
                 console.log('[BVH] Checking build conditions:', {
-                    terrainBVH: !!terrainBVH,
-                    terrainBVHBuildInProgress,
-                    terrainGeometry: !!terrainGeometry,
-                    heightMapBufIsFresh,
-                    bufferLength: heightMapCpuBuf?.length,
+                    terrainBVH: !!appContext.terrainStateHolder.terrainBVH,
+                    terrainBVHBuildInProgress: appContext.terrainStateHolder.terrainBVHBuildInProgress,
+                    terrainGeometry: !!appContext.terrainStateHolder.terrainGeometry,
+                    heightMapBufIsFresh: appContext.terrainStateHolder.heightMapBufIsFresh,
+                    bufferLength: appContext.terrainStateHolder.heightMapCpuBuf?.length,
                     requiredLength: simres * simres * 4
                 });
                 
-                if (terrainBVHBuildInProgress) {
+                if (appContext.terrainStateHolder.terrainBVHBuildInProgress) {
                     console.log('[BVH] BVH build already in progress, skipping duplicate build');
-                    // Don't set TerrainGeometryDirty to false yet - wait for build to complete
+                    // Don't set appContext.simulationState.terrainGeometryDirty to false yet - wait for build to complete
                     // Don't hide overlay - it should stay visible until build completes
                     return;
                 }
                 
                 // Dispose old geometry and BVH if they exist (needed for rebuilds after reset/resolution change)
-                if (terrainGeometry) {
+                if (appContext.terrainStateHolder.terrainGeometry) {
                     console.log('[BVH] Disposing old terrain geometry');
-                    terrainGeometry.dispose();
-                    setTerrainGeometry(null);
+                    appContext.terrainStateHolder.terrainGeometry.dispose();
+                    appContext.terrainStateHolder.terrainGeometry = null;
                 }
-                if (terrainBVH) {
+                if (appContext.terrainStateHolder.terrainBVH) {
                     console.log('[BVH] Clearing old BVH');
-                    setTerrainBVH(null);
+                    appContext.terrainStateHolder.terrainBVH = null;
                 }
-                
+
                 // Create new terrain geometry from heightmap
                 // Only build BVH if buffer is fresh (just read after terrain generation)
                 // This prevents building BVH with stale data
-                if (heightMapBufIsFresh && heightMapCpuBuf && heightMapCpuBuf.length >= simres * simres * 4) {
+                if (appContext.terrainStateHolder.heightMapBufIsFresh && appContext.terrainStateHolder.heightMapCpuBuf && appContext.terrainStateHolder.heightMapCpuBuf.length >= simres * simres * 4) {
                     // Verify buffer has actual data (not all zeros)
                     let hasData = false;
                     const sampleCount = Math.min(100, simres * simres);
                     for (let i = 0; i < sampleCount; i++) {
                         const idx = Math.floor(Math.random() * simres * simres) * 4;
-                        if (heightMapCpuBuf[idx] !== 0) {
+                        if (appContext.terrainStateHolder.heightMapCpuBuf[idx] !== 0) {
                             hasData = true;
                             break;
                         }
@@ -1342,11 +1269,11 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                         console.log('[BVH] Heightmap buffer has valid data, starting geometry and BVH build');
                         try {
                             // Mark BVH build as in progress to prevent duplicates
-                            setTerrainBVHBuildInProgress(true);
-                            // Set TerrainGeometryDirty to false NOW (synchronously) to prevent duplicate builds
+                            appContext.terrainStateHolder.terrainBVHBuildInProgress = true;
+                            // Set appContext.simulationState.terrainGeometryDirty to false NOW (synchronously) to prevent duplicate builds
                             // This must happen before async operations start
-                            setTerrainGeometryDirty(false);
-                            console.log('[BVH] Build marked as in progress, TerrainGeometryDirty set to false');
+                            appContext.simulationState.terrainGeometryDirty = false;
+                            console.log('[BVH] Build marked as in progress, appContext.simulationState.terrainGeometryDirty set to false');
                             
                             // Geometry phase with progress callbacks
                             progressTracker.startPhase(LoadPhase.GEOMETRY);
@@ -1366,7 +1293,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                                 console.log('[Loading] Starting geometry creation');
                                 const newGeometry = createTerrainGeometry(
                                     simres, 
-                                    heightMapCpuBuf, 
+                                    appContext.terrainStateHolder.heightMapCpuBuf, 
                                     1.0,
                                     (progress) => {
                                         const overallProgress = progressTracker.getProgress().progress;
@@ -1379,7 +1306,8 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                                         }
                                     }
                                 );
-                                setTerrainGeometry(newGeometry);
+                                appContext.terrainStateHolder.terrainGeometry = newGeometry;
+                                appContext.terrainStateHolder.terrainGeometry = newGeometry;
                                 progressTracker.endPhase(LoadPhase.GEOMETRY);
                                 console.log('[Loading] Geometry creation complete');
                             
@@ -1449,10 +1377,11 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                                         const bvhDuration = performance.now() - bvhStartTime;
                                         console.log(`[BVH] BVH construction complete in ${bvhDuration.toFixed(2)}ms`);
                                         
-                                        setTerrainBVH(bvh); // This will clear terrainBVHBuildInProgress
+                                        appContext.terrainStateHolder.terrainBVH = bvh; // This will clear appContext.terrainStateHolder.terrainBVHBuildInProgress
+                                        appContext.terrainStateHolder.terrainBVH = bvh;
                                         progressTracker.updateSubPhaseProgress(1.0);
                                         progressTracker.endPhase(LoadPhase.BVH);
-                                        setHeightMapBufIsFresh(false); // Mark as consumed
+                                        appContext.terrainStateHolder.heightMapBufIsFresh = false; // Mark as consumed
                                         
                                         // Log timing information
                                         const timings = progressTracker.getAllTimings();
@@ -1473,7 +1402,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                                             console.warn('[Loading] Overlay element not found when trying to hide!');
                                         }
                                         
-                                        // TerrainGeometryDirty was already set to false before async operations started
+                                        // appContext.simulationState.terrainGeometryDirty was already set to false before async operations started
                                         // No need to set it again here
                                         console.log('[Loading] BVH build complete, overlay hidden');
                                     });
@@ -1484,9 +1413,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                             });
                         } catch (error) {
                             console.error('[BVH] Failed to build BVH:', error);
-                            setTerrainBVHBuildInProgress(false); // Clear flag on error
-                            setHeightMapBufIsFresh(false); // Mark as consumed even on error
-                            setTerrainGeometryDirty(false);
+                            appContext.terrainStateHolder.terrainBVHBuildInProgress = false; // Clear flag on error
+                            appContext.terrainStateHolder.heightMapBufIsFresh = false; // Mark as consumed even on error
+                            appContext.simulationState.terrainGeometryDirty = false;
                             if (loadingOverlay) {
                                 loadingOverlay.classList.remove('visible');
                                 console.log('[Loading] Overlay hidden (error)');
@@ -1494,8 +1423,8 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                         }
                     } else {
                         console.log('[BVH] Heightmap buffer has no valid data');
-                        setHeightMapBufIsFresh(false); // Mark as consumed
-                        setTerrainGeometryDirty(false);
+                        appContext.terrainStateHolder.heightMapBufIsFresh = false; // Mark as consumed
+                        appContext.simulationState.terrainGeometryDirty = false;
                         if (loadingOverlay) {
                             loadingOverlay.classList.remove('visible');
                             console.log('[Loading] Overlay hidden (no data)');
@@ -1503,7 +1432,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                     }
                 } else {
                     console.log('[BVH] Heightmap buffer not fresh yet, will build when available');
-                    setTerrainGeometryDirty(false);
+                    appContext.simulationState.terrainGeometryDirty = false;
                     if (loadingOverlay) {
                         loadingOverlay.classList.remove('visible');
                         console.log('[Loading] Overlay hidden (buffer not fresh)');
@@ -1520,19 +1449,19 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     
     
     // Toggle between heightmap and BVH raycast methods for A/B testing
-    if (controls.raycastMethod === 'bvh' && terrainBVH && terrainGeometry) {
+    if (controls.raycastMethod === 'bvh' && appContext.terrainStateHolder.terrainBVH && appContext.terrainStateHolder.terrainGeometry) {
         // Use BVH raycast
-        const hit = rayCastBVH(reusableRo, reusableDir, terrainBVH, terrainGeometry, reusablePos);
+        const hit = rayCastBVH(reusableRo, reusableDir, appContext.terrainStateHolder.terrainBVH, appContext.terrainStateHolder.terrainGeometry, reusablePos);
         if (!hit) {
             // Fallback to heightmap if BVH misses
             const heightmapPos = vec2.create();
-            rayCast(reusableRo, reusableDir, simres, heightMapCpuBuf, heightmapPos);
+            rayCast(reusableRo, reusableDir, simres, appContext.terrainStateHolder.heightMapCpuBuf, heightmapPos);
             reusablePos[0] = heightmapPos[0];
             reusablePos[1] = heightmapPos[1];
         }
     } else {
         // Use heightmap raycast (default)
-        rayCast(reusableRo, reusableDir, simres, heightMapCpuBuf, reusablePos);
+        rayCast(reusableRo, reusableDir, simres, appContext.terrainStateHolder.heightMapCpuBuf, reusablePos);
     }
     
     
@@ -1635,12 +1564,15 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     rains.setSimres(simres);
     
     // Update brush state (flatten target height, slope end points, etc.)
+        // heightMapCpuBuf lives in holder; updateBrushState reads from brushContext.terrainState.heightMapCpuBuf
         const brushContext: BrushContext = {
             controls: controls as BrushControls,
             controlsConfig: appContext.controlsConfig,
-            simres: Number(simres), // Ensure it's a number, not a string
-            heightMapCpuBuf: heightMapCpuBuf,
-            camera: camera
+            simres: appContext.simulationState.simres,
+            heightMapCpuBuf: appContext.terrainStateHolder.heightMapCpuBuf,
+            camera: camera,
+            simulationState: appContext.simulationState,
+            terrainState: appContext.terrainStateHolder,
         };
     updateBrushState(reusablePos, brushContext);
     
@@ -1796,44 +1728,44 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     const brushVisible = Number(controls.brushType) !== 0;
     const justPressed = brushPressed && lastBrushPressed === 0;
     const justReleased = !brushPressed && lastBrushPressed === 1; // Brush was just released
-    incrementHeightMapBufCounter();
+    appContext.terrainStateHolder.incrementHeightMapBufCounter();
     stats.begin();
 
       //==========================  we begin simulation from now ===========================================
 
     for(let i = 0;i<controls.SimulationSpeed;i++) {
-        SimulationStep(simFrameCount, flow, waterHeight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, lavaFlow, lavaUpdate, lavaTerrain, reusableLavaSourcePositions, reusableLavaSourceSizes, reusableLavaSourceStrengths, getLavaSourceCount(), controls, renderer, glContext, camera, reusableMousePoint, reusableDir, reusablePos);
-        incrementSimFrameCount();
+        SimulationStep(appContext.simulationState.simFrameCount, flow, waterHeight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, lavaFlow, lavaUpdate, lavaTerrain, reusableLavaSourcePositions, reusableLavaSourceSizes, reusableLavaSourceStrengths, getLavaSourceCount(), controls, renderer, glContext, camera, reusableMousePoint, reusableDir, reusablePos);
+        appContext.simulationState.incrementSimFrameCount();
     }
     
     // Only track update counter if BVH updates are enabled
     // This avoids unnecessary overhead when updates are disabled
-    if (enableBVHUpdates && controls.SimulationSpeed > 0 && !PauseGeneration) {
-        incrementGeometryUpdateCounter();
+    if (appContext.terrainStateHolder.enableBVHUpdates && controls.SimulationSpeed > 0 && !appContext.simulationState.pauseGeneration) {
+        appContext.terrainStateHolder.incrementGeometryUpdateCounter();
     }
 
     const mouseMoved = (lastReadMouseX < 0 || lastReadMouseY < 0) ||
         (Math.abs(appContext.clientState.lastX - lastReadMouseX) + Math.abs(appContext.clientState.lastY - lastReadMouseY) > 1);
     
     // Trigger heightmap read for brush raycasting (and BVH updates)
-    const shouldRead = (justPressed || mouseMoved) && shouldReadHeightmap(brushPressed, brushVisible, simres);
+    const shouldRead = (justPressed || mouseMoved) && appContext.terrainStateHolder.shouldReadHeightmap(brushPressed, brushVisible, simres);
     // Also read when brush is released to update BVH after brush stroke
-    const shouldReadForBVH = enableBVHUpdates && justReleased && terrainGeometry && terrainBVH;
+    const shouldReadForBVH = appContext.terrainStateHolder.enableBVHUpdates && justReleased && appContext.terrainStateHolder.terrainGeometry && appContext.terrainStateHolder.terrainBVH;
     
     if (shouldRead || shouldReadForBVH) {
         // Read full resolution for accurate raycasting
         // Note: This is throttled by shouldReadHeightmap to avoid blocking
-        glContext.bindFramebuffer(glContext.FRAMEBUFFER, frame_buffer);
-        glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, read_terrain_tex, 0);
+        glContext.bindFramebuffer(glContext.FRAMEBUFFER, pool.getFrameBuffer());
+        glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, pool.getReadTerrainTex(), 0);
         glContext.readBuffer(glContext.COLOR_ATTACHMENT0);
-        glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, heightMapCpuBuf);
+        glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, appContext.terrainStateHolder.heightMapCpuBuf);
         glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
         // Mark as fresh so BVH updates can piggyback on this read (no extra readPixels cost)
-        setHeightMapBufIsFresh(true);
+        appContext.terrainStateHolder.heightMapBufIsFresh = true;
         lastReadMouseX = appContext.clientState.lastX;
         lastReadMouseY = appContext.clientState.lastY;
-        if (!brushPressed && !brushVisible && heightMapBufCounter >= maxHeightMapBufCounter) {
-            resetHeightMapBufCounter();
+        if (!brushPressed && !brushVisible && appContext.terrainStateHolder.heightMapBufCounter >= appContext.terrainStateHolder.MaxHeightMapBufCounter) {
+            appContext.terrainStateHolder.resetHeightMapBufCounter();
         }
     }
 
@@ -1844,9 +1776,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     // This avoids expensive readPixels calls - we piggyback on existing heightmap reads
     // Also triggers immediately on brush release to update after terrain modifications
     // IMPORTANT: Updates are deferred to avoid blocking the render loop (BVH is not visible)
-    const shouldUpdateNow = enableBVHUpdates && terrainGeometry && terrainBVH && !terrainBVHBuildInProgress && heightMapBufIsFresh;
+    const shouldUpdateNow = appContext.terrainStateHolder.enableBVHUpdates && appContext.terrainStateHolder.terrainGeometry && appContext.terrainStateHolder.terrainBVH && !appContext.terrainStateHolder.terrainBVHBuildInProgress && appContext.terrainStateHolder.heightMapBufIsFresh;
     const updateTriggeredByBrush = justReleased; // Immediate update after brush stroke
-    const updateTriggeredByInterval = shouldUpdateGeometry(); // Periodic update during erosion
+    const updateTriggeredByInterval = appContext.terrainStateHolder.shouldUpdateGeometry(); // Periodic update during erosion
     
     if (shouldUpdateNow && (updateTriggeredByBrush || updateTriggeredByInterval)) {
         // Terraforming is now GPU-based (rain shader modifies heightmap texture)
@@ -1854,29 +1786,29 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         // BVH updates can proceed normally
         
         // Copy heightmap data to avoid race conditions (heightmap buffer might be overwritten)
-        const heightmapCopy = new Float32Array(heightMapCpuBuf);
+        const heightmapCopy = new Float32Array(appContext.terrainStateHolder.heightMapCpuBuf);
         
         // Clear fresh flag immediately (before async work) to prevent duplicate updates
-        setHeightMapBufIsFresh(false);
+        appContext.terrainStateHolder.heightMapBufIsFresh = false;
         
         // Defer the actual update work to avoid blocking the render loop
         // Since BVH is only used for raycasting (not rendering), we can update it asynchronously
         const performAsyncUpdate = () => {
-            if (!terrainGeometry || !terrainBVH || terrainBVHBuildInProgress) {
+            if (!appContext.terrainStateHolder.terrainGeometry || !appContext.terrainStateHolder.terrainBVH || appContext.terrainStateHolder.terrainBVHBuildInProgress) {
                 return; // Safety check in case BVH was cleared during async delay
             }
             
             // Update geometry positions with copied heightmap (for BVH raycasting)
             // Note: Rendering uses VTF displacement, so geometry update is only for BVH
-            updateTerrainGeometry(terrainGeometry, simres, heightmapCopy, 1.0);
+            updateTerrainGeometry(appContext.terrainStateHolder.terrainGeometry, simres, heightmapCopy, 1.0);
             
             // Refit BVH bounding volumes to match updated geometry
             // This is much faster than a full rebuild (~50ms vs 2000-5000ms)
-            terrainBVH.refit();
+            appContext.terrainStateHolder.terrainBVH.refit();
             
             // Reset update tracking
-            resetGeometryUpdateCounter();
-            setGeometryNeedsUpdate(false);
+            appContext.terrainStateHolder.resetGeometryUpdateCounter();
+            appContext.terrainStateHolder.geometryNeedsUpdate = false;
         };
         
         // Use requestIdleCallback if available (runs when browser is idle)
@@ -1894,13 +1826,13 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     const ENABLE_BVH_ACCURACY_TEST = false; // Set to true to enable test
     const BVH_TEST_INTERVAL = 1000; // Test every N simulation frames
     
-    if (ENABLE_BVH_ACCURACY_TEST && terrainGeometry && terrainBVH && simFrameCount % BVH_TEST_INTERVAL === 0 && simFrameCount > 0) {
+    if (ENABLE_BVH_ACCURACY_TEST && appContext.terrainStateHolder.terrainGeometry && appContext.terrainStateHolder.terrainBVH && appContext.simulationState.simFrameCount % BVH_TEST_INTERVAL === 0 && appContext.simulationState.simFrameCount > 0) {
         // Read heightmap if not already fresh
-        if (!heightMapBufIsFresh) {
-            glContext.bindFramebuffer(glContext.FRAMEBUFFER, frame_buffer);
-            glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, read_terrain_tex, 0);
+        if (!appContext.terrainStateHolder.heightMapBufIsFresh) {
+            glContext.bindFramebuffer(glContext.FRAMEBUFFER, pool.getFrameBuffer());
+            glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, pool.getReadTerrainTex(), 0);
             glContext.readBuffer(glContext.COLOR_ATTACHMENT0);
-            glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, heightMapCpuBuf);
+            glContext.readPixels(0, 0, simres, simres, glContext.RGBA, glContext.FLOAT, appContext.terrainStateHolder.heightMapCpuBuf);
             glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
         }
         
@@ -1909,29 +1841,29 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         const testRayDir = vec3.fromValues(0, -1, 0); // Ray pointing down
         const bvhPosBefore = vec2.create();
         const heightmapPosBefore = vec2.create();
-        const bvhHitBefore = rayCastBVH(testRayOrigin, testRayDir, terrainBVH, terrainGeometry, bvhPosBefore);
-        rayCast(testRayOrigin, testRayDir, simres, heightMapCpuBuf, heightmapPosBefore);
+        const bvhHitBefore = rayCastBVH(testRayOrigin, testRayDir, appContext.terrainStateHolder.terrainBVH, appContext.terrainStateHolder.terrainGeometry, bvhPosBefore);
+        rayCast(testRayOrigin, testRayDir, simres, appContext.terrainStateHolder.heightMapCpuBuf, heightmapPosBefore);
         
         // Measure performance: Update + Refit
         const updateStartTime = performance.now();
-        updateTerrainGeometry(terrainGeometry, simres, heightMapCpuBuf, 1.0);
+        updateTerrainGeometry(appContext.terrainStateHolder.terrainGeometry, simres, appContext.terrainStateHolder.heightMapCpuBuf, 1.0);
         const updateTime = performance.now() - updateStartTime;
         
         const refitStartTime = performance.now();
         // Refit BVH to update bounding volumes after geometry changes
         // Note: BVH stores references to geometry position buffer, so refit() recalculates bounding volumes
-        terrainBVH.refit();
+        appContext.terrainStateHolder.terrainBVH.refit();
         const refitTime = performance.now() - refitStartTime;
         
         // Measure performance: Full rebuild (for comparison, but don't actually rebuild)
-        // This would be: const rebuildStartTime = performance.now(); new MeshBVH(terrainGeometry); const rebuildTime = performance.now() - rebuildStartTime;
+        // This would be: const rebuildStartTime = performance.now(); new MeshBVH(appContext.terrainStateHolder.terrainGeometry); const rebuildTime = performance.now() - rebuildStartTime;
         // Skipping actual rebuild to avoid blocking, but documenting expected time
         
         // Test BVH raycast AFTER geometry update and refit
         const bvhPosAfter = vec2.create();
         const heightmapPosAfter = vec2.create();
-        const bvhHitAfter = rayCastBVH(testRayOrigin, testRayDir, terrainBVH, terrainGeometry, bvhPosAfter);
-        rayCast(testRayOrigin, testRayDir, simres, heightMapCpuBuf, heightmapPosAfter);
+        const bvhHitAfter = rayCastBVH(testRayOrigin, testRayDir, appContext.terrainStateHolder.terrainBVH, appContext.terrainStateHolder.terrainGeometry, bvhPosAfter);
+        rayCast(testRayOrigin, testRayDir, simres, appContext.terrainStateHolder.heightMapCpuBuf, heightmapPosAfter);
         
         // Calculate differences
         const diffBefore = vec2.distance(bvhPosBefore, heightmapPosBefore);
@@ -1952,8 +1884,8 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
         for (const testRay of testRays) {
             const bvhPos = vec2.create();
             const heightmapPos = vec2.create();
-            const bvhHit = rayCastBVH(testRay.origin, testRay.dir, terrainBVH, terrainGeometry, bvhPos);
-            rayCast(testRay.origin, testRay.dir, simres, heightMapCpuBuf, heightmapPos);
+            const bvhHit = rayCastBVH(testRay.origin, testRay.dir, appContext.terrainStateHolder.terrainBVH, appContext.terrainStateHolder.terrainGeometry, bvhPos);
+            rayCast(testRay.origin, testRay.dir, simres, appContext.terrainStateHolder.heightMapCpuBuf, heightmapPos);
             
             if (bvhHit && heightmapPos[0] >= 0 && heightmapPos[0] <= 1) {
                 const diff = vec2.distance(bvhPos, heightmapPos);
@@ -1967,9 +1899,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
             avgDiff /= testCount;
         }
         
-        console.log('[BVH Accuracy Test] Frame:', simFrameCount, 'Resolution:', simres);
-        console.log('  Steps since last update:', geometryUpdateCounter);
-        console.log('  Update interval:', geometryUpdateInterval);
+        console.log('[BVH Accuracy Test] Frame:', appContext.simulationState.simFrameCount, 'Resolution:', simres);
+        console.log('  Steps since last update:', appContext.terrainStateHolder.geometryUpdateCounter);
+        console.log('  Update interval:', appContext.terrainStateHolder.geometryUpdateInterval);
         console.log('  Max BVH vs Heightmap diff:', maxDiff.toFixed(6));
         console.log('  Avg BVH vs Heightmap diff:', avgDiff.toFixed(6));
         console.log('  Accuracy:', maxDiff < 0.01 ? 'EXCELLENT' : maxDiff < 0.05 ? 'GOOD' : maxDiff < 0.1 ? 'ACCEPTABLE' : 'POOR');
@@ -1995,9 +1927,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     //========================== pass 1 : render shadow map pass=====================================
 
 
-      glContext.bindFramebuffer(glContext.FRAMEBUFFER,shadowMap_frame_buffer);
-      glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT0,glContext.TEXTURE_2D,shadowMap_tex,0);
-      glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER,glContext.DEPTH_ATTACHMENT,glContext.RENDERBUFFER,shadowMap_render_buffer);
+      glContext.bindFramebuffer(glContext.FRAMEBUFFER,pool.getShadowMapFrameBuffer());
+      glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT0,glContext.TEXTURE_2D,pool.getShadowMapTex(),0);
+      glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER,glContext.DEPTH_ATTACHMENT,glContext.RENDERBUFFER,pool.getShadowMapRenderBuffer());
 
       glContext.drawBuffers([glContext.COLOR_ATTACHMENT0]);
 
@@ -2005,17 +1937,17 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
       glContext.bindFramebuffer(glContext.FRAMEBUFFER,null);
       glContext.bindRenderbuffer(glContext.RENDERBUFFER,null);
 
-      glContext.viewport(0,0,shadowMapResolution,shadowMapResolution);
-      glContext.bindFramebuffer(glContext.FRAMEBUFFER,shadowMap_frame_buffer);
+      glContext.viewport(0,0,pool.getShadowMapResolution(),pool.getShadowMapResolution());
+      glContext.bindFramebuffer(glContext.FRAMEBUFFER,pool.getShadowMapFrameBuffer());
       renderer.clear();// clear when attached to shadow map
       shadowMapShader.use();
 
       glContext.activeTexture(glContext.TEXTURE0);
-      glContext.bindTexture(glContext.TEXTURE_2D,read_terrain_tex);
+      glContext.bindTexture(glContext.TEXTURE_2D,pool.getReadTerrainTex());
       glContext.uniform1i(getCachedUniformLocation(shadowMapShader.prog,"heightmap"),0);
 
       glContext.activeTexture(glContext.TEXTURE1);
-      glContext.bindTexture(glContext.TEXTURE_2D, read_sediment_tex);
+      glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadSedimentTex());
       glContext.uniform1i(getCachedUniformLocation(shadowMapShader.prog, "sedimap"), 1);
 
       mat4.ortho(reusableLightProjMat, -1.6, 1.6, -1.6, 1.6, 0, 100);
@@ -2034,9 +1966,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
 
       //=========================== pass 2 :  render scene depth tex ================================
       sceneDepthShader.use();
-      glContext.bindFramebuffer(glContext.FRAMEBUFFER,deferred_frame_buffer);
-      glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT0,glContext.TEXTURE_2D,scene_depth_tex,0);
-      glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER,glContext.DEPTH_ATTACHMENT,glContext.RENDERBUFFER,deferred_render_buffer);
+      glContext.bindFramebuffer(glContext.FRAMEBUFFER,pool.getDeferredFrameBuffer());
+      glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT0,glContext.TEXTURE_2D,pool.getSceneDepthTex(),0);
+      glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER,glContext.DEPTH_ATTACHMENT,glContext.RENDERBUFFER,pool.getDeferredRenderBuffer());
 
       glContext.drawBuffers([glContext.COLOR_ATTACHMENT0]);
 
@@ -2044,15 +1976,15 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
       glContext.viewport(0,0,window.innerWidth, window.innerHeight);
       // Bind terrain textures for the depth pass so vertex displacement matches terrain render.
       glContext.activeTexture(glContext.TEXTURE0);
-      glContext.bindTexture(glContext.TEXTURE_2D, read_terrain_tex);
+      glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadTerrainTex());
       glContext.uniform1i(getCachedUniformLocation(sceneDepthShader.prog, "heightmap"), 0);
 
       glContext.activeTexture(glContext.TEXTURE1);
-      glContext.bindTexture(glContext.TEXTURE_2D, read_sediment_tex);
+      glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadSedimentTex());
       glContext.uniform1i(getCachedUniformLocation(sceneDepthShader.prog, "sedimap"), 1);
 
       glContext.activeTexture(glContext.TEXTURE2);
-      glContext.bindTexture(glContext.TEXTURE_2D, read_lava_tex);
+      glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadLavaTex());
       glContext.uniform1i(getCachedUniformLocation(sceneDepthShader.prog, "lavamap"), 2);
       renderer.render(camera, sceneDepthShader, [
           plane,
@@ -2061,10 +1993,10 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
 
     //============================= pass 3 : render terrain and water geometry ================================================
     //============ terrain geometry =========
-    glContext.bindFramebuffer(glContext.FRAMEBUFFER,deferred_frame_buffer);
-    glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT0,glContext.TEXTURE_2D,color_pass_tex,0);
-    glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT1,glContext.TEXTURE_2D,color_pass_reflection_tex,0);
-    glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER,glContext.DEPTH_ATTACHMENT,glContext.RENDERBUFFER,deferred_render_buffer);
+    glContext.bindFramebuffer(glContext.FRAMEBUFFER,pool.getDeferredFrameBuffer());
+    glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT0,glContext.TEXTURE_2D,pool.getColorPassTex(),0);
+    glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT1,glContext.TEXTURE_2D,pool.getColorPassReflectionTex(),0);
+    glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER,glContext.DEPTH_ATTACHMENT,glContext.RENDERBUFFER,pool.getDeferredRenderBuffer());
 
     glContext.drawBuffers([glContext.COLOR_ATTACHMENT0, glContext.COLOR_ATTACHMENT1]);
 
@@ -2074,59 +2006,59 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     glContext.viewport(0,0,window.innerWidth, window.innerHeight);
     //plane.setDrawMode(glContext.LINE_STRIP);
     glContext.activeTexture(glContext.TEXTURE0);
-    glContext.bindTexture(glContext.TEXTURE_2D,read_terrain_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D,pool.getReadTerrainTex());
     let PingUniform = getCachedUniformLocation(lambert.prog,"heightmap");
     glContext.uniform1i(PingUniform,0);
 
     glContext.activeTexture(glContext.TEXTURE1);
-    glContext.bindTexture(glContext.TEXTURE_2D,terrain_nor);
+    glContext.bindTexture(glContext.TEXTURE_2D,pool.getTerrainNor());
     let norUniform = getCachedUniformLocation(lambert.prog,"normap");
     glContext.uniform1i(norUniform,1);
 
     glContext.activeTexture(glContext.TEXTURE2);
-    glContext.bindTexture(glContext.TEXTURE_2D, read_sediment_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadSedimentTex());
     let sediUniform = getCachedUniformLocation(lambert.prog, "sedimap");
     glContext.uniform1i(sediUniform, 2);
 
     glContext.activeTexture(glContext.TEXTURE3);
-    glContext.bindTexture(glContext.TEXTURE_2D, read_vel_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadVelTex());
     let velUniform = getCachedUniformLocation(lambert.prog, "velmap");
     glContext.uniform1i(velUniform, 3);
 
     glContext.activeTexture(glContext.TEXTURE4);
-    glContext.bindTexture(glContext.TEXTURE_2D, read_flux_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadFluxTex());
     let fluxUniform = getCachedUniformLocation(lambert.prog, "fluxmap");
     glContext.uniform1i(fluxUniform, 4);
 
     glContext.activeTexture(glContext.TEXTURE5);
-    glContext.bindTexture(glContext.TEXTURE_2D, read_terrain_flux_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadTerrainFluxTex());
     let terrainfluxUniform = getCachedUniformLocation(lambert.prog, "terrainfluxmap");
     glContext.uniform1i(terrainfluxUniform, 5);
 
     glContext.activeTexture(glContext.TEXTURE6);
-    glContext.bindTexture(glContext.TEXTURE_2D, read_maxslippage_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadMaxslippageTex());
     let terrainslippageUniform = getCachedUniformLocation(lambert.prog, "maxslippagemap");
     glContext.uniform1i(terrainslippageUniform, 6);
 
     glContext.activeTexture(glContext.TEXTURE7);
-    glContext.bindTexture(glContext.TEXTURE_2D, read_sediment_blend);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadSedimentBlend());
     glContext.uniform1i(getCachedUniformLocation(lambert.prog, "sediBlend"), 7);
 
 
     glContext.activeTexture(glContext.TEXTURE0 + 8);
-    glContext.bindTexture(glContext.TEXTURE_2D, shadowMap_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getShadowMapTex());
     const shadowMapUniformLoc = getCachedUniformLocation(lambert.prog, "shadowMap");
     glContext.uniform1i(shadowMapUniformLoc, 8);
 
     glContext.activeTexture(glContext.TEXTURE9);
-    glContext.bindTexture(glContext.TEXTURE_2D, scene_depth_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getSceneDepthTex());
     glContext.uniform1i(getCachedUniformLocation(lambert.prog, "sceneDepth"), 9);
 
     // Bind lava texture for vertex shader pooling (like water)
     // CRITICAL: Use TEXTURE11 to avoid conflicts with TEXTURE10 (used for heightmap)
     // Must bind to a texture unit that's not used by fragment shader
     glContext.activeTexture(glContext.TEXTURE0 + 11);
-    glContext.bindTexture(glContext.TEXTURE_2D, read_lava_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadLavaTex());
     const lavamapUniformLoc = getCachedUniformLocation(lambert.prog, "lavamap");
     if (lavamapUniformLoc) {
         glContext.uniform1i(lavamapUniformLoc, 11);
@@ -2144,26 +2076,26 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     glContext.blendFunc(glContext.SRC_ALPHA, glContext.ONE_MINUS_SRC_ALPHA);
     water.use();
     glContext.activeTexture(glContext.TEXTURE0);
-    glContext.bindTexture(glContext.TEXTURE_2D,read_terrain_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D,pool.getReadTerrainTex());
     PingUniform = getCachedUniformLocation(water.prog,"heightmap");
     glContext.uniform1i(PingUniform,0);
 
     glContext.activeTexture(glContext.TEXTURE1);
-    glContext.bindTexture(glContext.TEXTURE_2D,terrain_nor);
+    glContext.bindTexture(glContext.TEXTURE_2D,pool.getTerrainNor());
     norUniform = getCachedUniformLocation(water.prog,"normap");
     glContext.uniform1i(norUniform,1);
 
     glContext.activeTexture(glContext.TEXTURE2);
-    glContext.bindTexture(glContext.TEXTURE_2D,read_sediment_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D,pool.getReadSedimentTex());
     sediUniform = getCachedUniformLocation(water.prog,"sedimap");
     glContext.uniform1i(sediUniform,2);
 
     glContext.activeTexture(glContext.TEXTURE3);
-    glContext.bindTexture(glContext.TEXTURE_2D,scene_depth_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D,pool.getSceneDepthTex());
     glContext.uniform1i(getCachedUniformLocation(water.prog,"sceneDepth"),3);
 
     glContext.activeTexture(glContext.TEXTURE4);
-    glContext.bindTexture(glContext.TEXTURE_2D,color_pass_reflection_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D,pool.getColorPassReflectionTex());
     glContext.uniform1i(getCachedUniformLocation(water.prog,"colorReflection"),4);
 
 
@@ -2178,9 +2110,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
 
     // ======================== pass 4 : back ground & post processing & rayleigh mie scattering ==================================
 
-    glContext.bindFramebuffer(glContext.FRAMEBUFFER,deferred_frame_buffer);
-    glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT0,glContext.TEXTURE_2D,scatter_pass_tex,0);
-    glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER,glContext.DEPTH_ATTACHMENT,glContext.RENDERBUFFER,deferred_render_buffer);
+    glContext.bindFramebuffer(glContext.FRAMEBUFFER,pool.getDeferredFrameBuffer());
+    glContext.framebufferTexture2D(glContext.FRAMEBUFFER,glContext.COLOR_ATTACHMENT0,glContext.TEXTURE_2D,pool.getScatterPassTex(),0);
+    glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER,glContext.DEPTH_ATTACHMENT,glContext.RENDERBUFFER,pool.getDeferredRenderBuffer());
 
     glContext.drawBuffers([glContext.COLOR_ATTACHMENT0]);
 
@@ -2195,15 +2127,15 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     glContext.blendFunc(glContext.SRC_ALPHA, glContext.ONE_MINUS_SRC_ALPHA);
 
     glContext.activeTexture(glContext.TEXTURE0);
-    glContext.bindTexture(glContext.TEXTURE_2D, read_sediment_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getReadSedimentTex());
     glContext.uniform1i(getCachedUniformLocation(flat.prog,"heightmap"),0);
 
     glContext.activeTexture(glContext.TEXTURE1);
-    glContext.bindTexture(glContext.TEXTURE_2D, scene_depth_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getSceneDepthTex());
     glContext.uniform1i(getCachedUniformLocation(flat.prog,"sceneDepth"),1);
 
     glContext.activeTexture(glContext.TEXTURE2);
-    glContext.bindTexture(glContext.TEXTURE_2D, shadowMap_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getShadowMapTex());
     glContext.uniform1i(getCachedUniformLocation(flat.prog,"shadowMap"),2);
 
     glContext.uniformMatrix4fv(getCachedUniformLocation(flat.prog,'u_sproj'),false,reusableLightProjMat);
@@ -2221,9 +2153,9 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
           let NumBlurPass = 4;
           for (let i = 0; i < NumBlurPass; ++i) {
 
-              glContext.bindFramebuffer(glContext.FRAMEBUFFER, deferred_frame_buffer);
-              glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, bilateral_filter_horizontal_tex, 0);
-              glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER, glContext.DEPTH_ATTACHMENT, glContext.RENDERBUFFER, deferred_render_buffer);
+              glContext.bindFramebuffer(glContext.FRAMEBUFFER, pool.getDeferredFrameBuffer());
+              glContext.framebufferTexture2D(glContext.FRAMEBUFFER, glContext.COLOR_ATTACHMENT0, glContext.TEXTURE_2D, pool.getBilateralFilterHorizontalTex(), 0);
+              glContext.framebufferRenderbuffer(glContext.FRAMEBUFFER, glContext.DEPTH_ATTACHMENT, glContext.RENDERBUFFER, pool.getDeferredRenderBuffer());
 
               glContext.drawBuffers([glContext.COLOR_ATTACHMENT0]);
 
@@ -2232,14 +2164,14 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
               bilateralBlur.use();
               glContext.activeTexture(glContext.TEXTURE0);
               if (i == 0) {
-                  glContext.bindTexture(glContext.TEXTURE_2D, scatter_pass_tex);
+                  glContext.bindTexture(glContext.TEXTURE_2D, pool.getScatterPassTex());
               } else {
-                  glContext.bindTexture(glContext.TEXTURE_2D, bilateral_filter_vertical_tex);
+                  glContext.bindTexture(glContext.TEXTURE_2D, pool.getBilateralFilterVerticalTex());
               }
               glContext.uniform1i(getCachedUniformLocation(bilateralBlur.prog, "scatter_tex"), 0);
 
               glContext.activeTexture(glContext.TEXTURE1);
-              glContext.bindTexture(glContext.TEXTURE_2D, scene_depth_tex);
+              glContext.bindTexture(glContext.TEXTURE_2D, pool.getSceneDepthTex());
               glContext.uniform1i(getCachedUniformLocation(bilateralBlur.prog, "scene_depth"), 1);
 
               glContext.uniform1f(getCachedUniformLocation(bilateralBlur.prog, "u_far"), camera.far);
@@ -2252,7 +2184,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
                   square,
               ]);
 
-              swapBilateralFilterTextures();
+              pool.swapBilateralFilterTextures();
 
               glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
           }
@@ -2262,18 +2194,18 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
     combinedShader.use();
 
     glContext.activeTexture(glContext.TEXTURE0);
-    glContext.bindTexture(glContext.TEXTURE_2D, color_pass_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getColorPassTex());
     glContext.uniform1i(getCachedUniformLocation(combinedShader.prog,"color_tex"),0);
 
     glContext.activeTexture(glContext.TEXTURE1);
     if(controls.enableBilateralBlur)
-        glContext.bindTexture(glContext.TEXTURE_2D, bilateral_filter_horizontal_tex);
+        glContext.bindTexture(glContext.TEXTURE_2D, pool.getBilateralFilterHorizontalTex());
     else
-        glContext.bindTexture(glContext.TEXTURE_2D, scatter_pass_tex);
+        glContext.bindTexture(glContext.TEXTURE_2D, pool.getScatterPassTex());
     glContext.uniform1i(getCachedUniformLocation(combinedShader.prog,"bi_tex"),1);
 
     glContext.activeTexture(glContext.TEXTURE2);
-    glContext.bindTexture(glContext.TEXTURE_2D, scene_depth_tex);
+    glContext.bindTexture(glContext.TEXTURE_2D, pool.getSceneDepthTex());
     glContext.uniform1i(getCachedUniformLocation(combinedShader.prog,"sceneDepth_tex"),2);
 
     renderer.clear();
@@ -2293,7 +2225,7 @@ export function createLegacyRunner(config: LegacyRunnerConfig): LegacyRunnerResu
 
   // Set up resize handler
   const resizeHandler = () => {
-    resizeScreenTextures();
+    pool.resizeScreenTextures();
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.setAspectRatio(window.innerWidth / window.innerHeight);
     camera.updateProjectionMatrix();

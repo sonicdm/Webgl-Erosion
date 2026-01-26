@@ -1,11 +1,17 @@
 ---
-description: Use test:ci when running tests from the Cursor agent to avoid spawn EPERM
+description: Use test:ci and PowerShell syntax when running terminal commands from the Cursor agent
 alwaysApply: true
 ---
 
 # Running Tests and Build from the Cursor Agent
 
-When running tests from the Cursor agent (run_terminal_cmd / Shell), use:
+When running terminal commands from the Cursor agent (run_terminal_cmd / Shell), use:
+
+- **Shell:** **PowerShell syntax only.** This environment uses PowerShell on Windows. Prefer PowerShell over Bash/Unix-style.
+  - Env: `$env:VAR = "value"` not `export VAR=value`
+  - Remove: `Remove-Item -Recurse -Force path` or `rm -r -fo path`; not `rm -rf path`
+  - Chain: `;` or `&&` (PowerShell 7+). Prefer `;` for compatibility
+  - Paths: `/` and `\` both work; use `\` or `Join-Path` when scripting
 
 - **Tests:** `npm run test:ci` (not `npm test`)
 

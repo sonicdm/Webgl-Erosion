@@ -187,6 +187,20 @@ describe('bootstrap services (Workstream A)', () => {
     );
   });
 
+  it('DI smoke: createApp returns AppContext with holder-based state only', () => {
+    const app = createApp({
+      canvas,
+      glContext: glMock,
+      initialSimres: 64,
+    });
+
+    expect(app.simulationState).toBeDefined();
+    expect(app.terrainStateHolder).toBeDefined();
+    expect(app.simulationState.simres).toBe(64);
+    expect(app.terrainStateHolder.heightMapCpuBuf.length).toBe(64 * 64 * 4);
+    // Bootstrap does not import simulation-state; state comes only from holders.
+  });
+
   it('RaycasterService falls back to heightmap when BVH is missing and uses rayCast output', () => {
     const app = createApp({
       canvas,

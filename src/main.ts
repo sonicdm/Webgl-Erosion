@@ -11,25 +11,17 @@ import { createEventHandlers, EventHandlerDependencies } from './events/event-ha
 import { getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
 import { updatePaletteSelection } from './brush-palette';
 // Removed unused imports: MAX_WATER_SOURCES, waterSources, getWaterSourceCount, MAX_LAVA_SOURCES, lavaSources, getLavaSourceCount, rayCast, rayCastBVH, createTerrainGeometry, MeshBVH, SAH
-import { createHeightMapLoader } from './utils/heightmap-loader';
 // Removed unused imports: getCachedUniformLocation, LoadProgressTracker, LoadPhase
-import { 
-    simres, PauseGeneration,
-    heightMapCpuBuf, setGlContext, 
-    setLastMousePosition,
-    setPauseGeneration, setSimFrameCount, setTerrainGeometryDirty,
-    terrainGeometry
-} from './simulation/simulation-state';
 // Removed unused texture-management imports (all textures/framebuffers now used in legacy-runner.ts)
 // Removed unused Render2Texture import (only in comment)
 // Removed unused createShaders, Shaders imports (shaders created in initializeLegacyPipeline)
 import { THREEJS_CONFIG } from './three/config';
 import { ThreeJSSimulationRuntime } from './three/integration';
 // Removed unused createTerrainIO import
-import { createApp, createAppContextSetup, setupAppGUI, createThreeRunner, createLegacyRunner, initializeLegacyPipeline, createControls, type AppContext } from './app';
+import { createApp, createAppContextSetup, setupAppGUI, createThreeRuntime, createThreeRunner, createLegacyRunner, initializeLegacyPipeline, createControls, type AppContext } from './app';
+import { DEFAULT_SIMRES } from './app/constants';
+import { LegacyTexturePool } from './simulation/LegacyTexturePool';
 import { setTerrainRandom, type TerrainRandomParams } from './utils/terrain-random';
-
-// Note: Most state variables are now imported from simulation-state.ts
 // Removed unused variables: speed, enableBilateralBlur (now handled in legacy-runner.ts)
 var gl_context : WebGL2RenderingContext;
 
@@ -54,31 +46,9 @@ const terrainRandom = {
     canyonDepth: 0.7
 };
 
-// Helper functions - will be updated in main() to use AppContext
-// These are placeholders that will be replaced with AppContext-aware versions
-function StartGeneration(){
-    setPauseGeneration(!PauseGeneration);
-}
-
-// Reset function - receives threeRuntime via closure from main()
-// This is set up after threeRuntime is created
-// Note: resetWithThreeRuntime is declared at module level (line 1322)
-function Reset(){
-    setSimFrameCount(0);
-    setTerrainRandom(terrainRandom);
-    setTerrainGeometryDirty(true);
-    // Resolution change will be handled in the TerrainGeometryDirty block
-    //PauseGeneration = true;
-    
-    // Call the injected reset handler if available
-    if (resetWithThreeRuntime) {
-        resetWithThreeRuntime(threeRuntime);
-    }
-}
-
 // setTerrainRandom extracted to utils/terrain-random.ts
 
-// Heightmap loading functions are now created via createHeightMapLoader in main()
+// Heightmap loading functions are created via createHeightMapLoader in initializeLegacyPipeline
 
 
 // Render2Texture is now imported from rendering/render-utils.ts
@@ -118,17 +88,17 @@ function main() {
     throw new Error('WebGL 2 not supported!');
   }
   setGL(gl_context);
-  setGlContext(gl_context);
 
   // Load settings (from localStorage or defaults)
   controlsConfig = loadSettings();
   
   // Create controls object using factory function
-  // Callbacks will be set up after helpers are created
+  // Callbacks will be set up after helpers are created; start/reset are placeholders until overwritten by AppContext helpers
   controls = createControls({
+    initialSimres: DEFAULT_SIMRES,
     callbacks: {
-      startGeneration: StartGeneration,
-      resetTerrain: Reset,
+      startGeneration: () => {},
+      resetTerrain: () => {},
       setTerrainRandom: () => setTerrainRandom(terrainRandom),
       // Heightmap loader functions will be set later in main()
     },
@@ -141,15 +111,15 @@ function main() {
   const appContext = createApp({
     canvas,
     glContext: gl_context,
-    initialSimres: simres,
+    initialSimres: DEFAULT_SIMRES,
     controlsConfig,
     getTerrainGeometry: () => {
       // For Three.js path, get geometry from threeRuntime
       if (threeRuntime) {
         return threeRuntime.getTerrainGeometry();
       }
-      // For legacy path, get from terrainGeometry global
-      return terrainGeometry;
+      // For legacy path, get from holder
+      return appContext.terrainStateHolder.terrainGeometry;
     },
     onHeightmapChange: async (heightmap) => {
       // Handle heightmap changes
@@ -177,32 +147,19 @@ function main() {
     // Update StartGeneration to use AppContext
     const startGenerationWrapper = () => {
       appContext.simulationState.pauseGeneration = !appContext.simulationState.pauseGeneration;
-      // Also update global state for backward compatibility (legacy code still uses it)
-      setPauseGeneration(appContext.simulationState.pauseGeneration);
     };
     
     // Update Reset to use AppContext
     const resetWrapper = () => {
       appContext.simulationState.simFrameCount = 0;
-      setSimFrameCount(0); // Also update global for backward compatibility
-      
-      // Update terrain random
-      setTerrainRandom(terrainRandom);
-      
-      appContext.simulationState.terrainGeometryDirty = true;
-      setTerrainGeometryDirty(true); // Also update global for backward compatibility
-      
-      // Call the injected reset handler if available
+      setTerrainRandom(terrainRandom, appContext.simulationState);
       if (resetWithThreeRuntime) {
         resetWithThreeRuntime(threeRuntime);
       }
     };
-    
-    // Update setTerrainRandom to use AppContext
+
     const setTerrainRandomWrapper = () => {
-      setTerrainRandom(terrainRandom);
-      appContext.simulationState.terrainGeometryDirty = true;
-      setTerrainGeometryDirty(true); // Also update global for backward compatibility
+      setTerrainRandom(terrainRandom, appContext.simulationState);
     };
     
     return {
@@ -243,13 +200,12 @@ function main() {
     
     // Create dependency object for event handlers (dependency injection)
     const eventHandlerDeps: EventHandlerDependencies = {
-      heightMapBuffer: threeRuntime?.getHeightMapCpuBuffer() || heightMapCpuBuf, // Fallback for WebGL
+      heightMapBuffer: threeRuntime?.getHeightMapCpuBuffer() ?? appContext.terrainStateHolder.heightMapCpuBuf,
       threeRuntime: threeRuntime,
       camera: camera,
       controls: controls,
       controlsConfig: controlsConfig,
-      simres: simres,
-      // Pass state holders for new code paths
+      simres: appContext.simulationState.simres,
       simulationState: appContext.simulationState,
       terrainState: appContext.terrainStateHolder,
     };
@@ -281,7 +237,6 @@ function main() {
       const isCanvas = target === canvas || target.id === 'canvas' || target.closest('#canvas') === canvas;
       if (isCanvas) {
         // Always update mouse position when clicking on canvas (needed for accurate brush positioning)
-        setLastMousePosition(e.clientX, e.clientY);
         appContext.clientState.setLastMousePosition(e.clientX, e.clientY);
         
         // Check if this is a brush action BEFORE calling handler
@@ -317,7 +272,6 @@ function main() {
       if (isCanvas) {
         // Always update mouse position for ray casting (needed for brush preview circle)
         // Store client coordinates directly
-        setLastMousePosition(e.clientX, e.clientY);
         appContext.clientState.setLastMousePosition(e.clientX, e.clientY);
         
         // Only check modifier state when brush is actively pressed
@@ -366,8 +320,8 @@ function main() {
   
   if (THREEJS_CONFIG.USE_THREEJS_RUNTIME) {
     try {
-      // Create Three.js runtime
-      threeRuntime = new ThreeJSSimulationRuntime(canvas, gl_context, simres);
+      // Create Three.js runtime (all deps injected from appContext)
+      threeRuntime = createThreeRuntime(appContext, canvas, gl_context);
       threeRuntime.initializeSimulation();
       threeRuntime.setControlsConfig(controlsConfig, brushUsesLeftClickForCamera);
       
@@ -432,15 +386,10 @@ function main() {
   brushOperationController = controllers.brushOperationController;
   
   // Legacy WebGL pipeline path
-  // TODO: Extract this to createLegacyRunner() once full extraction is complete
-  // For now, legacy initialization code continues below
-  
-  // Create heightmap loader functions
-  const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(gl_context, simres, controls);
-  controls['Import Height Map'] = loadHeightMap;
-  controls['Clear Height Map'] = clearHeightMap;
-  controls['Export Height Map'] = exportHeightMap;
-  
+  // Create texture pool and wire into context for resize handler; pass to init and runner
+  const legacyPool = new LegacyTexturePool(gl_context, appContext.simulationState.simres, 4096);
+  appContext.legacyTexturePool = legacyPool;
+
   // Use Three.js runtime camera if available, otherwise create WebGL camera
   let camera: Camera;
   if (typeof threeRuntime !== 'undefined' && threeRuntime) {
@@ -510,7 +459,8 @@ function main() {
     canvas,
     controls,
     controlsConfig,
-    camera
+    camera,
+    legacyPool
   );
 
   // Store terrainRandom for helper functions (Reset, setTerrainRandom)

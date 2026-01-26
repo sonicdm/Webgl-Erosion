@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { simres } from '../simulation/simulation-state'; // @deprecated - not used, will be removed
 
 // Ensure THREE is available globally for THREE.Terrain and other UMD modules
 if (typeof window !== 'undefined') {

@@ -284,6 +284,9 @@ export interface AppContext {
 
   // Initial values
   initialSimres: number;
+
+  /** Set in legacy path only; used by resize handler for pool.resizeScreenTextures(). */
+  legacyTexturePool?: { resizeScreenTextures(): void };
 }
 
 export interface BootstrapConfig {

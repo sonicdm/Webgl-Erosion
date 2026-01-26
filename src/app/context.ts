@@ -1,5 +1,4 @@
 import { AppContext } from './bootstrap';
-import { resizeScreenTextures } from '../simulation/texture-management';
 
 /**
  * Application context for canvas and WebGL setup
@@ -35,7 +34,7 @@ export function createAppContextSetup(appContext: AppContext): AppContextSetup {
 
   // Set up resize handler
   const resizeHandler = () => {
-    resizeScreenTextures();
+    appContext.legacyTexturePool?.resizeScreenTextures();
     
     // Update client state
     appContext.clientState.setClientDimensions(canvas.clientWidth, canvas.clientHeight);

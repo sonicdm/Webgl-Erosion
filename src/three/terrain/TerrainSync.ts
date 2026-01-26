@@ -6,11 +6,12 @@ import { createTerrainGeometry, updateTerrainGeometry } from '../../utils/terrai
 import { createTerrainProceduralMaterial, updateTerrainProceduralMaterial } from '../materials/terrain-procedural-material';
 import { createHeightmapTexture } from '../utils/terrain-heightmap-converter';
 import { MeshBVH, SAH } from 'three-mesh-bvh';
-import { setTerrainGeometry, setTerrainBVH, setTerrainBVHBuildInProgress, terrainBVHBuildInProgress } from '../../simulation/simulation-state';
+import { TerrainStateHolder } from '../../app/state/TerrainStateHolder';
 
 /**
  * Terrain synchronization service
- * Handles terrain geometry creation, BVH building, and material management
+ * Handles terrain geometry creation, BVH building, and material management.
+ * All geometry/BVH state is published via TerrainStateHolder (no simulation-state).
  */
 export class TerrainSync {
   private terrainMesh: THREE.Mesh | null = null;
@@ -21,7 +22,8 @@ export class TerrainSync {
     private runtime: ThreeJSRuntime,
     private simres: number,
     private passManager: SimulationPassManager | null,
-    private controls: SimulationParams | any // SimulationParams preferred, but accept legacy controls for backward compatibility
+    private controls: SimulationParams | any,
+    private terrainStateHolder: TerrainStateHolder
   ) {}
 
   /**
@@ -264,14 +266,12 @@ export class TerrainSync {
         scene.add(this.terrainMesh);
         
         
-        // Store geometry in simulation-state for BVH raycasting
+        // Store geometry for BVH raycasting
         if (this.terrainGeometry) {
-          setTerrainGeometry(this.terrainGeometry);
-          
-          // Build BVH for raycasting (async, non-blocking)
+          this.terrainStateHolder.terrainGeometry = this.terrainGeometry;
           this.buildBVHForRaycasting(this.terrainGeometry);
         }
-        
+
         console.log('[Terrain Update] THREE.Terrain mesh added to scene');
         console.log('[Terrain Update] Mesh details:', {
           visible: this.terrainMesh.visible,
@@ -344,16 +344,14 @@ export class TerrainSync {
         this.terrainMesh.frustumCulled = false;
         this.terrainMesh.updateMatrixWorld(true);
         
-        // Store geometry in simulation-state for BVH raycasting
-        setTerrainGeometry(this.terrainGeometry);
-        
-        // Build BVH for raycasting (async, non-blocking)
+        // Store geometry for BVH raycasting
+        this.terrainStateHolder.terrainGeometry = this.terrainGeometry;
         this.buildBVHForRaycasting(this.terrainGeometry);
-        
+
         // Add to scene
         const scene = this.runtime.getScene();
         scene.add(this.terrainMesh);
-        
+
         console.log('[Terrain Update] Terrain mesh created and added to scene using createTerrainGeometry');
         console.log('[Terrain Update] Mesh details:', {
           visible: this.terrainMesh.visible,
@@ -396,9 +394,9 @@ export class TerrainSync {
         mesh.geometry.attributes.normal.needsUpdate = true;
       }
       
-      // Update geometry in simulation-state (for BVH raycasting)
-      setTerrainGeometry(geometry);
-      
+      // Update geometry for BVH raycasting
+      this.terrainStateHolder.terrainGeometry = geometry;
+
       // Rebuild BVH periodically (throttled to avoid performance issues)
       // Only rebuild if geometry actually changed significantly
       // This is handled by the caller (main.ts) based on geometryUpdateCounter
@@ -509,8 +507,7 @@ export class TerrainSync {
    * Stores the BVH in simulation-state for brush system access
    */
   private buildBVHForRaycasting(geometry: THREE.BufferGeometry): void {
-    // Don't build if already in progress
-    if (terrainBVHBuildInProgress) {
+    if (this.terrainStateHolder.terrainBVHBuildInProgress) {
       console.log('[BVH] Build already in progress, skipping');
       return;
     }
@@ -521,7 +518,7 @@ export class TerrainSync {
     }
     
     // Mark as in progress
-    setTerrainBVHBuildInProgress(true);
+    this.terrainStateHolder.terrainBVHBuildInProgress = true;
     console.log('[BVH] Starting BVH build from terrain geometry');
     
     // Build BVH asynchronously to avoid blocking
@@ -540,12 +537,12 @@ export class TerrainSync {
           const bvhDuration = performance.now() - bvhStartTime;
           console.log(`[BVH] BVH construction complete in ${bvhDuration.toFixed(2)}ms`);
           
-          // Store in simulation-state for brush system access
-          setTerrainBVH(bvh); // This will clear terrainBVHBuildInProgress flag
-          console.log('[BVH] BVH stored in simulation-state for brush raycasting');
+          // Store for brush system access (holder setter clears terrainBVHBuildInProgress)
+          this.terrainStateHolder.terrainBVH = bvh;
+          console.log('[BVH] BVH stored for brush raycasting');
         } catch (error) {
           console.error('[BVH] Failed to build BVH:', error);
-          setTerrainBVHBuildInProgress(false); // Clear flag on error
+          this.terrainStateHolder.terrainBVHBuildInProgress = false;
         }
       });
     });
@@ -559,9 +556,7 @@ export class TerrainSync {
     if (!this.terrainGeometry) {
       return;
     }
-    
-    // Don't rebuild if already in progress
-    if (terrainBVHBuildInProgress) {
+    if (this.terrainStateHolder.terrainBVHBuildInProgress) {
       return;
     }
     

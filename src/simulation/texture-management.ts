@@ -1,3 +1,8 @@
+/**
+ * @deprecated Superseded by LegacyTexturePool. Legacy code paths now receive an injectable pool
+ * from the composition root (see simulation/LegacyTexturePool.ts). This module is kept for any
+ * external/custom builds that may still import it; new code should use LegacyTexturePool.
+ */
 import { simres, shadowMapResolution } from './simulation-state'; // @deprecated - will be replaced with state holders
 import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 

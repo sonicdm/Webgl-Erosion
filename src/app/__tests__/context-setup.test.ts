@@ -1,13 +1,8 @@
 import { createAppContextSetup } from '../context';
 import { AppContext } from '../bootstrap';
 
-jest.mock('../../simulation/texture-management', () => ({
-  resizeScreenTextures: jest.fn(),
-}));
-
 describe('createAppContextSetup (Workstream A)', () => {
-  const resizeScreenTextures = require('../../simulation/texture-management')
-    .resizeScreenTextures as jest.Mock;
+  const resizeScreenTexturesMock = jest.fn();
 
   let canvas: HTMLCanvasElement;
   let glMock: WebGL2RenderingContext;
@@ -41,6 +36,7 @@ describe('createAppContextSetup (Workstream A)', () => {
     appContext = {
       clientState: clientStateMock,
       cameraService: { getCamera: () => cameraMock },
+      legacyTexturePool: { resizeScreenTextures: resizeScreenTexturesMock },
     } as unknown as AppContext;
   });
 
@@ -56,7 +52,7 @@ describe('createAppContextSetup (Workstream A)', () => {
     Object.defineProperty(canvas, 'clientHeight', { value: 600, configurable: true });
     window.dispatchEvent(new Event('resize'));
 
-    expect(resizeScreenTextures).toHaveBeenCalled();
+    expect(resizeScreenTexturesMock).toHaveBeenCalled();
     expect(clientStateMock.setClientDimensions).toHaveBeenCalledWith(800, 600);
     expect(cameraMock.setAspectRatio).toHaveBeenCalledWith(800 / 600);
     expect(cameraMock.updateProjectionMatrix).toHaveBeenCalled();

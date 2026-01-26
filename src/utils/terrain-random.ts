@@ -1,5 +1,5 @@
 import { vec2 } from 'gl-matrix';
-import { setTerrainGeometryDirty } from '../simulation/simulation-state';
+import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 
 /**
  * Terrain random parameters
@@ -14,10 +14,11 @@ export interface TerrainRandomParams {
 /**
  * Set random terrain parameters
  * Generates random values for terrain generation
- * 
+ *
  * @param terrainRandom - Terrain random parameters object to update
+ * @param simulationStateHolder - Optional; when provided, sets holder.terrainGeometryDirty = true.
  */
-export function setTerrainRandom(terrainRandom: TerrainRandomParams): void {
+export function setTerrainRandom(terrainRandom: TerrainRandomParams, simulationStateHolder?: SimulationStateHolder): void {
   const angle = Math.random() * Math.PI * 2.0;
   terrainRandom.duneDir[0] = Math.cos(angle);
   terrainRandom.duneDir[1] = Math.sin(angle);
@@ -27,5 +28,7 @@ export function setTerrainRandom(terrainRandom: TerrainRandomParams): void {
   terrainRandom.seedOffset[0] = Math.random() * 256.0;
   terrainRandom.seedOffset[1] = Math.random() * 256.0;
 
-  setTerrainGeometryDirty(true);
+  if (simulationStateHolder) {
+    simulationStateHolder.terrainGeometryDirty = true;
+  }
 }

@@ -4,8 +4,7 @@ import { Controls } from '../../gui/gui-setup';
 import { AppContext } from '../bootstrap';
 import { createHeightMapLoader } from '../../utils/heightmap-loader';
 import { createShaders, Shaders } from '../../rendering/shader-factory';
-import { setupFramebufferandtextures } from '../../simulation/texture-management';
-import { simres } from '../../simulation/simulation-state';
+import type { LegacyTexturePool } from '../../simulation/LegacyTexturePool';
 import { setTerrainRandom, type TerrainRandomParams } from '../../utils/terrain-random';
 import Square from '../../geometry/Square';
 import Plane from '../../geometry/Plane';
@@ -25,13 +24,15 @@ export interface LegacyInitializationResult {
 /**
  * Initialize the legacy WebGL pipeline
  * Handles WebGL context setup, shader creation, texture setup, geometry creation, etc.
- * 
+ * Pool must be constructed (and setup run in its ctor) by the caller before calling.
+ *
  * @param appContext - Application context
  * @param glContext - WebGL2 rendering context
  * @param canvas - Canvas element
  * @param controls - Controls object
  * @param controlsConfig - Controls configuration
  * @param camera - Camera instance
+ * @param pool - Legacy texture pool (already set up)
  * @returns Initialization result with config for createLegacyRunner
  */
 export function initializeLegacyPipeline(
@@ -40,7 +41,8 @@ export function initializeLegacyPipeline(
   canvas: HTMLCanvasElement,
   controls: Controls,
   controlsConfig: ControlsConfig,
-  camera: Camera
+  camera: Camera,
+  pool: LegacyTexturePool
 ): LegacyInitializationResult {
   // Validate WebGL extensions
   const extensions = glContext.getSupportedExtensions();
@@ -68,8 +70,7 @@ export function initializeLegacyPipeline(
   renderer.setClearColor(0.0, 0.0, 0.0, 0);
   glContext.enable(glContext.DEPTH_TEST);
 
-  // Setup framebuffers and textures
-  setupFramebufferandtextures(glContext, simres);
+  // Framebuffers and textures are already set up in pool (caller constructs pool before init)
 
   // Create all shaders
   const shaders = createShaders(glContext);
@@ -110,7 +111,7 @@ export function initializeLegacyPipeline(
   setTerrainRandom(terrainRandom);
 
   // Create heightmap loader functions
-  const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(glContext, simres, controls);
+  const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(glContext, appContext.simulationState.simres, controls, appContext.simulationState, pool);
   controls['Import Height Map'] = loadHeightMap;
   controls['Clear Height Map'] = clearHeightMap;
   controls['Export Height Map'] = exportHeightMap;
@@ -123,6 +124,7 @@ export function initializeLegacyPipeline(
     glContext,
     renderer,
     camera,
+    pool,
     shaders: {
       lambert,
       flat,

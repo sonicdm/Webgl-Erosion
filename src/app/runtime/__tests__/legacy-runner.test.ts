@@ -138,6 +138,7 @@ describe('LegacyRunner', () => {
         glContext: mockGL,
         renderer: {} as any,
         camera: {} as any,
+        pool: {} as any, // LegacyTexturePool – full impl needs WebGL; interface test only
         shaders: { waterHeight: {} as any } as any,
         geometries: {} as any,
         terrainRandom: {

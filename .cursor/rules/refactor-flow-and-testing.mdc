@@ -1,0 +1,34 @@
+---
+description: Flow, structure, and testing from REFACTOR_PLAN — composition, module layout, when/how to test
+alwaysApply: true
+---
+
+# Refactor Flow, Structure & Testing
+
+Follow `docs/REFACTOR_PLAN.md`. Focus: **flow**, **structure**, **testing**.
+
+## Flow
+
+- **Composition root** (`src/app/bootstrap.ts`) wires all services; constructor/parameter injection only, no IoC.
+- **Immutable inputs per frame**; long-lived services hold resources, not mutable control. Pass typed DTOs (`SimulationParams`, `BrushInput`, `SourceArrays`, `RenderTargetsSnapshot`) at boundaries — no `any` or ad-hoc controls.
+- **State** via injected holders (`SimulationStateHolder`, `TerrainStateHolder`, `ClientStateHolder`); avoid globals.
+- **Thin orchestrators**: `main.ts`, `ThreeJSSimulationRuntime`, `SimulationPassManager` delegate to services/domain passes; keep them small.
+
+## Structure
+
+- **Module layout** (by domain, one responsibility per module):
+  - `app/` — bootstrap, UI, input, runtime, context, state, DTOs
+  - `three/camera/` — CameraService
+  - `three/terrain/` — TerrainSync, geometry
+  - `three/simulation/` — StepRunner, pass manager, domain passes (`water/`, `sediment/`, `thermal/`, `lava/`, `post/`), RenderTargets, TerrainReadbackService
+  - `three/io/` — HeightmapBridge, terrain readback
+  - `shaders/` — domain folders (`water/`, `sediment/`, `thermal/`, `lava/`, `terrain/`, `common/`), `ShaderManifest`
+- Prefer **domain folders** over grab-bag files. **Barrel files** only where they cut import noise; avoid deep wildcard exports.
+
+## Testing
+
+- **Unit**: DTO validators, `SourceArrays` packing, services, domain passes, render targets, state holders, `HeightmapUniforms` / `HeightmapContract`. Add/update when adding or changing DTOs, services, or pass logic.
+- **Integration**: Pass registry dry run on headless WebGL2 mock; shader-imports / terrain-material-wiring sanity.
+- **Headless/regression**: HeightmapSource → upload → render target → CPU readback → assert min/max (e.g. `heightmap-vtf-regression.test.ts`); synthetic heightmap fixtures (e.g. `heightmap-4x4.ts`) for encode/decode and material wiring.
+- **Colocate**: `__tests__/` next to source; `__fixtures__` for shared test data.
+- **Run**: Use `npm run test:ci` when running tests from the Cursor agent (per `.cursor/rules/test-and-run.mdc`).
