@@ -21,8 +21,8 @@ import {
     clearAllWaterSources,
     getWaterSourceCount
 } from '../utils/water-sources';
-import { simres, HightMapCpuBuf } from '../simulation/simulation-state';
 import Camera from '../Camera';
+import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 
 export interface Controls {
     [key: string]: any;
@@ -49,7 +49,8 @@ export interface EventHandlers {
 export function createEventHandlers(
     controls: Controls,
     controlsConfig: ControlsConfig,
-    camera: Camera
+    camera: Camera,
+    simulationState: SimulationStateHolder
 ): EventHandlers {
     function onKeyDown(event: KeyboardEvent) {
         const key = event.key.toLowerCase();
@@ -189,8 +190,8 @@ export function createEventHandlers(
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
-                simres: Number(simres), // Ensure it's a number, not a string
-                HightMapCpuBuf: HightMapCpuBuf,
+                simulationState: simulationState,
+                terrainState: (controls as any).terrainState, // Passed from main
                 camera: camera
             };
             
@@ -219,8 +220,8 @@ export function createEventHandlers(
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
-                simres: Number(simres), // Ensure it's a number, not a string
-                HightMapCpuBuf: HightMapCpuBuf,
+                simulationState: simulationState,
+                terrainState: (controls as any).terrainState, // Passed from main
                 camera: camera
             };
             

@@ -6,7 +6,9 @@
     "preview": "vite preview",
     "start": "npm run build && http-server -p 8080 -o",
     "build:webpack": "webpack",
-    "dev:webpack": "concurrently \"webpack --watch\" \"browser-sync start --server --files 'dist/*.js' --port 8080 --open\""
+    "dev:webpack": "concurrently \"webpack --watch\" \"browser-sync start --server --files 'dist/*.js' --port 8080 --open\"",
+    "test": "jest",
+    "test:ci": "jest --runInBand"
   },
   "devDependencies": {
     "@types/dat-gui": "^0.6.3",

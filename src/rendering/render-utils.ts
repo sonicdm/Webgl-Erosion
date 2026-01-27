@@ -3,8 +3,7 @@ import Square from '../geometry/Square';
 import OpenGLRenderer from './gl/OpenGLRenderer';
 import Camera from '../Camera';
 import ShaderProgram from './gl/ShaderProgram';
-import { frame_buffer, render_buffer, getHeightMapTexture } from '../simulation/texture-management';
-import { simres } from '../simulation/simulation-state';
+import { LegacyTexturePool } from '../simulation/LegacyTexturePool';
 
 export function Render2Texture(
     renderer: OpenGLRenderer,
@@ -13,18 +12,20 @@ export function Render2Texture(
     shader: ShaderProgram,
     cur_texture: WebGLTexture,
     square: Square,
-    noiseterrain: ShaderProgram | null
+    noiseterrain: ShaderProgram | null,
+    simres: number,
+    texturePool: LegacyTexturePool
 ): void {
-    gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, render_buffer);
+    gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, texturePool.render_buffer);
     gl_context.renderbufferStorage(gl_context.RENDERBUFFER, gl_context.DEPTH_COMPONENT16,
         simres, simres);
 
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, texturePool.frame_buffer);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, cur_texture, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT1, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT2, gl_context.TEXTURE_2D, null, 0);
     gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT3, gl_context.TEXTURE_2D, null, 0);
-    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, render_buffer);
+    gl_context.framebufferRenderbuffer(gl_context.FRAMEBUFFER, gl_context.DEPTH_ATTACHMENT, gl_context.RENDERBUFFER, texturePool.render_buffer);
     gl_context.drawBuffers([gl_context.COLOR_ATTACHMENT0]);
 
     // Removed expensive checkFramebufferStatus call for performance
@@ -39,12 +40,12 @@ export function Render2Texture(
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
     gl_context.viewport(0, 0, simres, simres);
-    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
+    gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, texturePool.frame_buffer);
     renderer.clear();
     shader.use();
 
     // Set height map texture if this is the initial terrain shader and height map exists
-    const heightmap_tex = getHeightMapTexture();
+    const heightmap_tex = texturePool.getHeightMapTexture();
     if (noiseterrain && shader === noiseterrain && heightmap_tex) {
         const useHeightMap = 1;
         gl_context.uniform1i(gl_context.getUniformLocation(shader.prog, "u_UseHeightMap"), useHeightMap);

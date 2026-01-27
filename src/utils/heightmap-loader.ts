@@ -1,6 +1,5 @@
-import { getHeightMapTexture, setHeightMapTexture, read_terrain_tex, frame_buffer } from '../simulation/texture-management';
-import { setTerrainGeometryDirty } from '../simulation/simulation-state';
-import * as simulationState from '../simulation/simulation-state';
+import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
+import { LegacyTexturePool } from '../simulation/LegacyTexturePool';
 
 export interface Controls {
     TerrainHeight: number;
@@ -13,7 +12,8 @@ let reusableCanvasContext: CanvasRenderingContext2D | null = null;
 
 export function createHeightMapLoader(
     gl_context: WebGL2RenderingContext,
-    simres: number,
+    simulationState: SimulationStateHolder,
+    texturePool: LegacyTexturePool,
     controls: Controls
 ) {
     function loadHeightMap() {
@@ -29,21 +29,21 @@ export function createHeightMapLoader(
                 const img = new Image();
                 img.onload = () => {
                     // Reuse canvas if available, create new one only if needed or size changed
-                    if (!reusableCanvas || reusableCanvas.width !== simres || reusableCanvas.height !== simres) {
+                    if (!reusableCanvas || reusableCanvas.width !== simulationState.simres || reusableCanvas.height !== simulationState.simres) {
                         reusableCanvas = document.createElement('canvas');
-                        reusableCanvas.width = simres;
-                        reusableCanvas.height = simres;
+                        reusableCanvas.width = simulationState.simres;
+                        reusableCanvas.height = simulationState.simres;
                         reusableCanvasContext = reusableCanvas.getContext('2d');
                     }
                     const ctx = reusableCanvasContext;
                     if (!ctx) return;
                     
                     // Draw and scale the image to match simulation resolution
-                    ctx.drawImage(img, 0, 0, simres, simres);
-                    const imageData = ctx.getImageData(0, 0, simres, simres);
+                    ctx.drawImage(img, 0, 0, simulationState.simres, simulationState.simres);
+                    const imageData = ctx.getImageData(0, 0, simulationState.simres, simulationState.simres);
                     
                     // Reuse or create heightData buffer (only reallocate if size changed)
-                    const bufferSize = simres * simres * 4;
+                    const bufferSize = simulationState.simres * simulationState.simres * 4;
                     if (!reusableHeightDataBuffer || reusableHeightDataBuffer.length !== bufferSize) {
                         reusableHeightDataBuffer = new Float32Array(bufferSize);
                     }
@@ -53,7 +53,7 @@ export function createHeightMapLoader(
                     // Use grayscale (red channel) as height, scale to terrain height range
                     const maxHeight = controls.TerrainHeight * 120.0;
                     
-                    for (let i = 0; i < simres * simres; i++) {
+                    for (let i = 0; i < simulationState.simres * simulationState.simres; i++) {
                         const r = imageData.data[i * 4];
                         const g = imageData.data[i * 4 + 1];
                         const b = imageData.data[i * 4 + 2];
@@ -68,14 +68,14 @@ export function createHeightMapLoader(
                     }
                     
                     // Create or update height map texture
-                    let heightmap_tex = getHeightMapTexture();
+                    let heightmap_tex = texturePool.getHeightMapTexture();
                     if (!heightmap_tex) {
                         heightmap_tex = gl_context.createTexture();
                     }
                     
                     gl_context.bindTexture(gl_context.TEXTURE_2D, heightmap_tex);
                     gl_context.texImage2D(gl_context.TEXTURE_2D, 0, gl_context.RGBA32F, 
-                        simres, simres, 0, gl_context.RGBA, gl_context.FLOAT, heightData);
+                        simulationState.simres, simulationState.simres, 0, gl_context.RGBA, gl_context.FLOAT, heightData);
                     gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.LINEAR);
                     gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MAG_FILTER, gl_context.LINEAR);
                     gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.CLAMP_TO_EDGE);
@@ -83,10 +83,10 @@ export function createHeightMapLoader(
                     gl_context.bindTexture(gl_context.TEXTURE_2D, null);
                     
                     // Store the height map texture
-                    setHeightMapTexture(heightmap_tex);
+                    texturePool.setHeightMapTexture(heightmap_tex);
                     
                     // Mark terrain as dirty to regenerate
-                    setTerrainGeometryDirty(true);
+                    simulationState.setTerrainGeometryDirty(true);
                     console.log('Height map loaded successfully');
                 };
                 img.src = event.target?.result as string;
@@ -97,31 +97,31 @@ export function createHeightMapLoader(
     }
 
     function clearHeightMap() {
-        const heightmap_tex = getHeightMapTexture();
+        const heightmap_tex = texturePool.getHeightMapTexture();
         if (heightmap_tex) {
             gl_context.deleteTexture(heightmap_tex);
-            setHeightMapTexture(null);
-            setTerrainGeometryDirty(true);
+            texturePool.setHeightMapTexture(null);
+            simulationState.setTerrainGeometryDirty(true);
             console.log('Height map cleared, using procedural generation');
         }
     }
 
     function exportHeightMapPNG() {
-        if (!read_terrain_tex || !frame_buffer) {
+        if (!texturePool.read_terrain_tex || !texturePool.frame_buffer) {
             console.error('Terrain texture or framebuffer not available for export');
             return;
         }
 
-        // Get current resolution from controls (this is the source of truth for current resolution)
-        const currentRes = Number(controls.SimulationResolution) || simulationState.simres;
+        // Get current resolution from simulation state
+        const currentRes = simulationState.simres;
 
         // Create temporary buffer for reading heightmap data
         const bufferSize = currentRes * currentRes * 4;
         const heightData = new Float32Array(bufferSize);
 
         // Read terrain texture from GPU
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, read_terrain_tex, 0);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, texturePool.frame_buffer);
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, texturePool.read_terrain_tex, 0);
         gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
         gl_context.readPixels(0, 0, currentRes, currentRes, gl_context.RGBA, gl_context.FLOAT, heightData);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
@@ -197,21 +197,21 @@ export function createHeightMapLoader(
     }
 
     function exportHeightMapRaw() {
-        if (!read_terrain_tex || !frame_buffer) {
+        if (!texturePool.read_terrain_tex || !texturePool.frame_buffer) {
             console.error('Terrain texture or framebuffer not available for export');
             return;
         }
 
-        // Get current resolution from controls (this is the source of truth for current resolution)
-        const currentRes = Number(controls.SimulationResolution) || simulationState.simres;
+        // Get current resolution from simulation state
+        const currentRes = simulationState.simres;
 
         // Create temporary buffer for reading heightmap data
         const bufferSize = currentRes * currentRes * 4;
         const heightData = new Float32Array(bufferSize);
 
         // Read terrain texture from GPU
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, frame_buffer);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, read_terrain_tex, 0);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, texturePool.frame_buffer);
+        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, texturePool.read_terrain_tex, 0);
         gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
         gl_context.readPixels(0, 0, currentRes, currentRes, gl_context.RGBA, gl_context.FLOAT, heightData);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);

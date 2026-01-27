@@ -1,3 +1,15 @@
+/**
+ * @deprecated This module is deprecated. Use LegacyTexturePool instead.
+ * 
+ * This module will be removed in a future version. All texture management
+ * should be done through the LegacyTexturePool class which provides proper
+ * dependency injection and eliminates module-level singletons.
+ * 
+ * Migration guide:
+ * - Instead of importing from this module, create a LegacyTexturePool instance
+ * - Pass the pool instance to functions that need texture access
+ * - Use pool methods instead of module-level exports
+ */
 import { simres, shadowMapResolution } from './simulation-state';
 
 // We need to get gl_context from the caller, so we'll pass it as a parameter
