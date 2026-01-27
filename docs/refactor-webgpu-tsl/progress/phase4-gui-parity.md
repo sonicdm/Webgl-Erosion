@@ -139,6 +139,16 @@
   (e.g., GaussianBoxBlur, SmoothConservative, SmoothMedian).
 - Ensure edge direction mapping matches THREE.Terrain expectations.
 
+### F) Source of Truth for Features (Local Reference)
+- Use the local THREE.Terrain source under:
+  - `E:\Scripts\Webgl-Erosion\research\THREE.Terrain`
+- Primary reference files:
+  - `research/THREE.Terrain/src/*.js` (core generators, filters, edges, smoothing)
+  - `research/THREE.Terrain/demo/index.js` (demo defaults and UI behavior)
+- When adding a feature, link it to:
+  - the specific function in `src/` (e.g., filters.js for edges/smoothing)
+  - and the demo usage in `demo/index.js` if applicable
+
 ## Git Procedures
 1) Branch from pipeline:
    ```powershell
