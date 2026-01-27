@@ -12,3 +12,13 @@ alwaysApply: true
 - Update `docs/refactor-webgpu-tsl/PROGRESS.md` (and phase files) for changes.
 - Run tests with `npm run test:ci`.
 - Use MCP browser tools for UI automation and screenshots.
+
+# PowerShell + Commands
+
+- Shell commands must be PowerShell syntax (Windows):
+  - Env: `$env:VAR = "value"` (not `export VAR=value`)
+  - Remove: `Remove-Item -Recurse -Force path` (not `rm -rf`)
+  - Chain: `;` or `&&` (PowerShell 7+)
+- Tests: use `npm run test:ci` (not `npm test`).
+- Build: `npm run build`.
+- TS/TSX typecheck: `npx tsc -p tsconfig.json --noEmit`.
