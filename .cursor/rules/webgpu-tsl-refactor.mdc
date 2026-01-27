@@ -12,6 +12,7 @@ alwaysApply: true
 - Update `docs/refactor-webgpu-tsl/PROGRESS.md` (and phase files) for changes.
 - Run tests with `npm run test:ci`.
 - Use MCP browser tools for UI automation and screenshots.
+- Use MCP tools to run browser-based testing (navigation, clicks, screenshots).
 
 # PowerShell + Commands
 
