@@ -15,6 +15,7 @@ frozen branch.
 ## Principles (DI/Class Single Truth)
 - Constructor injection only; no hidden globals.
 - Composition root builds all services and state holders.
+- AppContext is the single entry point for state/services (no module-level globals).
 - State holders are the single source of mutable state.
 - No production imports of simulation-state in master.
 - Render targets owned by injectable pools/services.

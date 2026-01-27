@@ -6,6 +6,7 @@
 - Carry DI/class-based single truth fixes into the WebGPU pipeline branch.
 - Remove simulation-state imports in master.
 - Ensure holders and injected services are the only state access.
+- Require AppContext for all state/service access (no module globals).
 
 ## Tasks
 - [x] Port DI adoption changes from refactor/base-terrain-architecture.
