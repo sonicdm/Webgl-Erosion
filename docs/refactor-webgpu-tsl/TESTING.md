@@ -34,3 +34,15 @@ This plan assumes `npm run test:ci` for automated tests (single-process).
 - NodeMaterial pipeline runs without errors.
 - Terrain generate and GUI controls respond.
 - Raycast mesh aligns with rendered terrain.
+
+## MCP Browser Automation
+
+Use MCP browser tools to automate UI validation:
+- Launch the app in a browser via MCP.
+- Navigate the GUI to trigger terrain generation.
+- Capture screenshots for baseline comparisons.
+- Verify UI states (status line, error banner, debug overlays).
+
+Recommended artifacts:
+- Screenshot set per phase milestone.
+- Minimal click-through script description stored alongside results.
