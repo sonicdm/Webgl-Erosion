@@ -31,6 +31,8 @@ import { createApp, AppContext } from './app/bootstrap';
 import { LegacyTexturePool } from './simulation/LegacyTexturePool';
 import { Render2Texture } from './rendering/render-utils';
 import { createShaders, Shaders } from './rendering/shader-factory';
+import { checkWebGPUSupport } from './rendering/webgpu/capability-check';
+import { WebGPURendererWrapper } from './rendering/webgpu/WebGPURendererWrapper';
 
 // Note: State is now managed through AppContext and state holders
 // Additional local variables
@@ -220,11 +222,17 @@ const terrainRandom = {
 // =============================================================
 
 function loadScene() {
-  square = new Square(vec3.fromValues(0, 0, 0));
+  const glContext = appContext.simulationState.glContext;
+  if (!glContext) {
+    console.warn('[loadScene] WebGL2 context not available - cannot create geometry. WebGPU path should be used instead.');
+    return;
+  }
+  
+  square = new Square(glContext, vec3.fromValues(0, 0, 0));
   square.create();
-  plane = new Plane(vec3.fromValues(0,0,0), vec2.fromValues(1,1), 18);
+  plane = new Plane(glContext, vec3.fromValues(0,0,0), vec2.fromValues(1,1), 18);
   plane.create();
-  waterPlane = new Plane(vec3.fromValues(0,0,0), vec2.fromValues(1,1), 18);
+  waterPlane = new Plane(glContext, vec3.fromValues(0,0,0), vec2.fromValues(1,1), 18);
   waterPlane.create();
 }
 
@@ -311,8 +319,8 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(rains.prog,"readTerrain"),0);
-    gl_context.uniform1f(getCachedUniformLocation(rains.prog,'raindeg'),controls.RainDegree);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,rains.prog,"readTerrain"),0);
+    gl_context.uniform1f(getCachedUniformLocation(gl_context,rains.prog,'raindeg'),controls.RainDegree);
 
     renderer.render(camera,rains,[square]);
 
@@ -357,15 +365,15 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(shader.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,shader.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_flux_tex);
-    gl_context.uniform1i(getCachedUniformLocation(shader.prog,"readFlux"),1);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,shader.prog,"readFlux"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_sediment_tex);
-    gl_context.uniform1i(getCachedUniformLocation(shader.prog,"readSedi"),2);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,shader.prog,"readSedi"),2);
 
     renderer.render(camera,shader,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -410,19 +418,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,waterhight.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_flux_tex);
-    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog,"readFlux"),1);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,waterhight.prog,"readFlux"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_sediment_tex);
-    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog,"readSedi"),2);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,waterhight.prog,"readSedi"),2);
 
     gl_context.activeTexture(gl_context.TEXTURE3);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_vel_tex);
-    gl_context.uniform1i(getCachedUniformLocation(waterhight.prog,"readVel"),3);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,waterhight.prog,"readVel"),3);
 
 
 
@@ -469,7 +477,7 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     //
     // gl_context.activeTexture(gl_context.TEXTURE0);
     // gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_vel_tex);
-    // gl_context.uniform1i(getCachedUniformLocation(veladvect.prog,"readVel"),0);
+    // gl_context.uniform1i(getCachedUniformLocation(gl_context,veladvect.prog,"readVel"),0);
     //
     // renderer.render(camera,veladvect,[square]);
     // gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -515,15 +523,15 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(sedi.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,sedi.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_vel_tex);
-    gl_context.uniform1i(getCachedUniformLocation(sedi.prog,"readVelocity"),1);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,sedi.prog,"readVelocity"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_sediment_tex);
-    gl_context.uniform1i(getCachedUniformLocation(sedi.prog,"readSediment"),2);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,sedi.prog,"readSediment"),2);
 
     renderer.render(camera,sedi,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -572,19 +580,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
             advect.use();
             gl_context.activeTexture(gl_context.TEXTURE0);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_vel_tex);
-            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "vel"), 0);
 
             gl_context.activeTexture(gl_context.TEXTURE1);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_tex);
-            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "sedi"), 1);
 
             gl_context.activeTexture(gl_context.TEXTURE2);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_blend);
-            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "sediBlend"), 2);
 
             gl_context.activeTexture(gl_context.TEXTURE3);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_terrain_tex);
-            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "terrain"), 3);
 
             advect.setFloat(1, "unif_advectMultiplier");
 
@@ -621,19 +629,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
             advect.use();
             gl_context.activeTexture(gl_context.TEXTURE0);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_vel_tex);
-            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "vel"), 0);
 
             gl_context.activeTexture(gl_context.TEXTURE1);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.sediment_advect_a);
-            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "sedi"), 1);
 
             gl_context.activeTexture(gl_context.TEXTURE2);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_blend);
-            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "sediBlend"), 2);
 
             gl_context.activeTexture(gl_context.TEXTURE3);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_terrain_tex);
-            gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "terrain"), 3);
 
             advect.setFloat(-1, "unif_advectMultiplier");
 
@@ -670,19 +678,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
             macCormack.use();
             gl_context.activeTexture(gl_context.TEXTURE0);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_vel_tex);
-            gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "vel"), 0);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,macCormack.prog, "vel"), 0);
 
             gl_context.activeTexture(gl_context.TEXTURE1);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_tex);
-            gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sedi"), 1);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,macCormack.prog, "sedi"), 1);
 
             gl_context.activeTexture(gl_context.TEXTURE2);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.sediment_advect_a);
-            gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sediadvecta"), 2);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,macCormack.prog, "sediadvecta"), 2);
 
             gl_context.activeTexture(gl_context.TEXTURE3);
             gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.sediment_advect_b);
-            gl_context.uniform1i(getCachedUniformLocation(macCormack.prog, "sediadvectb"), 3);
+            gl_context.uniform1i(getCachedUniformLocation(gl_context,macCormack.prog, "sediadvectb"), 3);
 
 
             renderer.render(camera, macCormack, [square]);
@@ -718,19 +726,19 @@ function SimulatePerStep(renderer:OpenGLRenderer,
         advect.use();
         gl_context.activeTexture(gl_context.TEXTURE0);
         gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_vel_tex);
-        gl_context.uniform1i(getCachedUniformLocation(advect.prog, "vel"), 0);
+        gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "vel"), 0);
 
         gl_context.activeTexture(gl_context.TEXTURE1);
         gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_tex);
-        gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sedi"), 1);
+        gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "sedi"), 1);
 
         gl_context.activeTexture(gl_context.TEXTURE2);
         gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_blend);
-        gl_context.uniform1i(getCachedUniformLocation(advect.prog, "sediBlend"), 2);
+        gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "sediBlend"), 2);
 
         gl_context.activeTexture(gl_context.TEXTURE3);
         gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_terrain_tex);
-        gl_context.uniform1i(getCachedUniformLocation(advect.prog, "terrain"), 3);
+        gl_context.uniform1i(getCachedUniformLocation(gl_context,advect.prog, "terrain"), 3);
 
         advect.setFloat(1, "unif_advectMultiplier");
 
@@ -778,7 +786,7 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     maxslippageheight.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(maxslippageheight.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,maxslippageheight.prog,"readTerrain"),0);
 
 
 
@@ -826,11 +834,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     thermalterrainflux.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i( getCachedUniformLocation(thermalterrainflux.prog,"readTerrain"),0);
+    gl_context.uniform1i( getCachedUniformLocation(gl_context,thermalterrainflux.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_maxslippage_tex);
-    gl_context.uniform1i(getCachedUniformLocation(thermalterrainflux.prog,"readMaxSlippage"),1);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,thermalterrainflux.prog,"readMaxSlippage"),1);
 
 
     renderer.render(camera,thermalterrainflux,[square]);
@@ -875,11 +883,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     thermalapply.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_flux_tex);
-    gl_context.uniform1i(getCachedUniformLocation(thermalapply.prog,"readTerrainFlux"),0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,thermalapply.prog,"readTerrainFlux"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(thermalapply.prog,"readTerrain"),1);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,thermalapply.prog,"readTerrain"),1);
 
 
     renderer.render(camera,thermalapply,[square]);
@@ -922,8 +930,8 @@ function SimulatePerStep(renderer:OpenGLRenderer,
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(eva.prog,"terrain"),0);
-    gl_context.uniform1f(getCachedUniformLocation(eva.prog,'evapod'),controls.EvaporationConstant);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,eva.prog,"terrain"),0);
+    gl_context.uniform1f(getCachedUniformLocation(gl_context,eva.prog,'evapod'),controls.EvaporationConstant);
 
     renderer.render(camera,eva,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -963,11 +971,11 @@ function SimulatePerStep(renderer:OpenGLRenderer,
     ave.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    gl_context.uniform1i(getCachedUniformLocation(ave.prog,"readTerrain"),0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,ave.prog,"readTerrain"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_sediment_tex);
-    gl_context.uniform1i(getCachedUniformLocation(ave.prog,"readSedi"),1);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,ave.prog,"readSedi"),1);
 
     renderer.render(camera,ave,[square]);
     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
@@ -1036,7 +1044,7 @@ function handleInteraction (buttons : number, x : number, y : number){
 // controlsConfig will be loaded from settings in main() function
 let controlsConfig: ControlsConfig;
 
-function main() {
+async function main() {
 
   // Create application context with state holders (composition root)
   appContext = createApp(simres);
@@ -1057,21 +1065,74 @@ function main() {
   const { gui, controllers } = setupGUI(controls);
   const { brushTypeController, brushSizeController, brushStrengthController, brushOperationController } = controllers;
 
-  // get canvas and webgl context
+  // get canvas
   const canvas = <HTMLCanvasElement> document.getElementById('canvas');
+  
+  // Check WebGPU capability first
+  const webgpuCapability = await checkWebGPUSupport();
+  let webgpuRenderer: WebGPURendererWrapper | null = null;
+  
+  if (webgpuCapability.supported) {
+    try {
+      webgpuRenderer = new WebGPURendererWrapper(canvas, appContext);
+      await webgpuRenderer.initialize();
+      console.log('[WebGPU] WebGPURenderer initialized successfully');
+    } catch (error) {
+      console.warn('[WebGPU] Failed to initialize WebGPURenderer:', error);
+      console.warn('[WebGPU] Falling back to WebGL renderer');
+      webgpuRenderer = null;
+    }
+  } else {
+    console.warn('[WebGPU] WebGPU not supported:', webgpuCapability.fallbackReason);
+    console.warn('[WebGPU] Using WebGL renderer fallback');
+  }
+  
+  // Try to create WebGL2 context for legacy texture operations
+  // Only needed if WebGPU is not available or if we need legacy features
+  // Note: If WebGPU is available, we can't get WebGL2 from the same canvas, but that's OK for Phase 2
   gl_context = <WebGL2RenderingContext> canvas.getContext('webgl2');
-  appContext.simulationState.setGlContext(gl_context);
+  
+  if (!gl_context) {
+    // Only show alert if WebGPU is also not available
+    if (!webgpuCapability.supported || !webgpuRenderer) {
+      alert('WebGL 2 not supported! WebGPU is also not available. The application cannot run.');
+      return; // Exit early if neither renderer is available
+    } else {
+      // WebGPU is available but WebGL2 is not - this is expected, don't show alert
+      console.warn('[WebGL] WebGL2 not available, but WebGPU is available. Legacy texture operations will not work until Phase 3 migration.');
+    }
+  }
+  
+  // Set client dimensions regardless of context availability
   appContext.simulationState.setClientDimensions(canvas.clientWidth, canvas.clientHeight);
   appContext.clientState.setClientDimensions(canvas.clientWidth, canvas.clientHeight);
   
-  // Update texture pool with gl context
-  texturePool = new LegacyTexturePool(gl_context, appContext.simulationState.simres, shadowMapResolution);
+  if (gl_context) {
+    appContext.simulationState.setGlContext(gl_context);
+    // Update texture pool with gl context
+    texturePool = new LegacyTexturePool(gl_context, appContext.simulationState.simres, shadowMapResolution);
+  } else if (webgpuRenderer) {
+    // WebGPU is available but WebGL2 is not - skip texture pool initialization for now
+    // In Phase 3, we'll migrate texture operations to WebGPU
+    console.warn('[WebGL] WebGL2 context not available - legacy texture operations will not work. WebGPU path should be used instead.');
+    // Create a minimal texture pool placeholder or skip it
+    // For now, we'll need to handle this in Phase 3 when we migrate texture operations
+  }
   
-  // Create heightmap loader functions
-  const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(gl_context, appContext.simulationState, texturePool, controls);
-  controls['Import Height Map'] = loadHeightMap;
-  controls['Clear Height Map'] = clearHeightMap;
-  controls['Export Height Map'] = exportHeightMap;
+  // Create heightmap loader functions (only if WebGL2 context is available)
+  if (gl_context && texturePool) {
+    const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(gl_context, appContext.simulationState, texturePool, controls);
+    controls['Import Height Map'] = loadHeightMap;
+    controls['Clear Height Map'] = clearHeightMap;
+    controls['Export Height Map'] = exportHeightMap;
+  } else if (webgpuRenderer) {
+    // WebGPU is available but WebGL2 is not - disable heightmap operations for now
+    // These will be migrated to WebGPU in Phase 3
+    console.warn('[Heightmap] Heightmap import/export disabled - WebGL2 not available. Will be migrated to WebGPU in Phase 3.');
+    controls['Import Height Map'] = () => { console.warn('Heightmap import not available - WebGL2 required'); };
+    controls['Clear Height Map'] = () => { console.warn('Heightmap clear not available - WebGL2 required'); };
+    controls['Export Height Map'] = () => { console.warn('Heightmap export not available - WebGL2 required'); };
+  }
 
   // Load settings (from localStorage or defaults) - must be done before creating event handlers
   controlsConfig = loadSettings();
@@ -1219,25 +1280,28 @@ function main() {
     // If modifier is not pressed, do nothing - let OrbitControls handle zoom normally
   }, { capture: true, passive: false }); // capture: true to intercept before OrbitControls, passive: false allows preventDefault
 
-    if (!gl_context) {
-    alert('WebGL 2 not supported!');
-  }
+  // Check WebGL2 context availability (already checked above, but verify here)
+  if (!gl_context) {
+    // This should not happen if we got here, but double-check
+    console.error('[WebGL] WebGL2 context is null - some features may not work');
+  } else {
     var extensions = gl_context.getSupportedExtensions();
     for(let e in extensions){
-        console.log(e);
+      console.log(e);
     }
-  if(!gl_context.getExtension('OES_texture_float_linear')){
-        console.log("float texture not supported");
+    if(!gl_context.getExtension('OES_texture_float_linear')){
+      console.log("float texture not supported");
     }
-  if(!gl_context.getExtension('OES_texture_float')){
+    if(!gl_context.getExtension('OES_texture_float')){
       console.log("no float texutre!!!?? y am i here?");
-  }
-  if(!gl_context.getExtension('EXT_color_buffer_float')) {
+    }
+    if(!gl_context.getExtension('EXT_color_buffer_float')) {
       console.log("cant render to float texture ");
+    }
+    // `setGL` is a function imported above which sets the value of `gl_context` in the `globals.ts` module.
+    // Later, we can import `gl_context` from `globals.ts` to access it
+    setGL(gl_context);
   }
-  // `setGL` is a function imported above which sets the value of `gl_context` in the `globals.ts` module.
-  // Later, we can import `gl_context` from `globals.ts` to access it
-  setGL(gl_context);
 
   // Initial call to load scene
   loadScene();
@@ -1245,23 +1309,77 @@ function main() {
   // Camera is already created above, just check brushUsesLeftClick here for reference
   const brushUsesLeftClick = controlsConfig.mouse.brushActivate === 'LEFT' || 
                              (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
-  const renderer = new OpenGLRenderer(canvas);
-  renderer.setClearColor(0.0, 0.0, 0.0, 0);
-  gl_context.enable(gl_context.DEPTH_TEST);
+  
+  // Create renderer - use WebGPU if available, otherwise fall back to OpenGL
+  let renderer: OpenGLRenderer | null = null;
+  let useWebGPU = false;
+  
+  if (!gl_context && webgpuRenderer) {
+    // WebGPU path: WebGL2 not available, but WebGPU is
+    console.log('[main] Using WebGPU renderer (WebGL2 not available)');
+    useWebGPU = true;
+    
+    // Set up WebGPU renderer
+    webgpuRenderer.setClearColor(0.2, 0.2, 0.3, 1.0);
+    webgpuRenderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    
+    // Create a minimal WebGPU scene for Phase 2 acceptance criteria
+    const { Scene, PerspectiveCamera, BoxGeometry, Mesh } = await import('three');
+    const { TerrainMaterialNode } = await import('./rendering/webgpu/materials/TerrainMaterialNode');
+    
+    const webgpuScene = new Scene();
+    const webgpuCamera = new PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+    webgpuCamera.position.z = 5;
+    
+    // Create a simple cube with NodeMaterial
+    const geometry = new BoxGeometry(1, 1, 1);
+    const material = new TerrainMaterialNode();
+    const cube = new Mesh(geometry, material);
+    webgpuScene.add(cube);
+    
+    // Store for render loop
+    (window as any).webgpuScene = webgpuScene;
+    (window as any).webgpuCamera = webgpuCamera;
+    (window as any).webgpuCube = cube;
+  } else if (gl_context) {
+    // WebGL2 path: traditional rendering
+    console.log('[main] Using WebGL2 renderer');
+    renderer = new OpenGLRenderer(canvas, gl_context);
+    renderer.setClearColor(0.0, 0.0, 0.0, 0);
+    gl_context.enable(gl_context.DEPTH_TEST);
+  } else {
+    // Neither available
+    console.error('[main] Neither WebGL2 nor WebGPU available. Cannot render.');
+    return;
+  }
+  
+  // Store webgpuRenderer for future use
+  (window as any).webgpuRenderer = webgpuRenderer;
+  (window as any).useWebGPU = useWebGPU;
 
+  // WebGL2-specific setup (texture pool, shaders)
+  let lambert: any, flat: any, flow: any, waterhight: any, sediment: any, sediadvect: any, macCormack: any;
+  let rains: any, evaporation: any, average: any, clean: any, water: any, thermalterrainflux: any;
+  let thermalapply: any, maxslippageheight: any, shadowMapShader: any, sceneDepthShader: any;
+  let combinedShader: any, bilateralBlur: any, veladvect: any;
+  
+  if (renderer && gl_context) {
     texturePool.setup();
     
     // Create all shaders
     const shaders = createShaders(gl_context);
-    const {
+    ({
         lambert, flat, flow, waterhight, sediment, sediadvect, macCormack,
         rains, evaporation, average, clean, water, thermalterrainflux,
         thermalapply, maxslippageheight, shadowMapShader, sceneDepthShader,
         combinedShader, bilateralBlur, veladvect
-    } = shaders;
+    } = shaders);
     noiseterrain = shaders.noiseterrain;
     setTerrainRandom();
-
+  } else if (useWebGPU) {
+    // WebGPU path: minimal setup for Phase 2
+    console.log('[main] WebGPU path: skipping WebGL2 texture pool and shader setup');
+  }
 
     let timer = 0;
     function cleanUpTextures(){
@@ -1310,6 +1428,34 @@ function main() {
   let lastReadMouseY = -1;
 
   function tick() {
+    stats.begin();
+    
+    // WebGPU render path (Phase 2 acceptance: WebGPURenderer renders a basic scene)
+    if (useWebGPU && webgpuRenderer) {
+      const webgpuScene = (window as any).webgpuScene;
+      const webgpuCamera = (window as any).webgpuCamera;
+      const webgpuCube = (window as any).webgpuCube;
+      
+      if (webgpuScene && webgpuCamera) {
+        // Rotate the cube for visual feedback
+        if (webgpuCube) {
+          webgpuCube.rotation.x += 0.01;
+          webgpuCube.rotation.y += 0.01;
+        }
+        
+        // Render with WebGPU
+        webgpuRenderer.render(webgpuScene, webgpuCamera);
+        stats.end();
+        requestAnimationFrame(tick);
+        return;
+      }
+    }
+
+    // WebGL2 render path (existing code)
+    if (!renderer || !gl_context) {
+      requestAnimationFrame(tick);
+      return;
+    }
 
     // Update camera before raycasting so matrices are in sync with rendered view
     camera.update(controlsConfig.camera);
@@ -1359,11 +1505,11 @@ function main() {
         noiseterrain.setTerrainHeight(controls.TerrainHeight);
         noiseterrain.setTerrainScale(controls.TerrainScale);
         noiseterrain.setInt(controls.TerrainMask,"u_TerrainMask");
-        gl_context.uniform1i(getCachedUniformLocation(noiseterrain.prog,"u_terrainBaseType"),controls.TerrainBaseType);
-        gl_context.uniform2fv(getCachedUniformLocation(noiseterrain.prog,"u_TerrainSeedOffset"), terrainRandom.seedOffset);
-        gl_context.uniform2fv(getCachedUniformLocation(noiseterrain.prog,"u_DuneDir"), terrainRandom.duneDir);
-        gl_context.uniform1f(getCachedUniformLocation(noiseterrain.prog,"u_CraterDensity"), terrainRandom.craterDensity);
-        gl_context.uniform1f(getCachedUniformLocation(noiseterrain.prog,"u_CanyonDepth"), terrainRandom.canyonDepth);
+        gl_context.uniform1i(getCachedUniformLocation(gl_context,noiseterrain.prog,"u_terrainBaseType"),controls.TerrainBaseType);
+        gl_context.uniform2fv(getCachedUniformLocation(gl_context,noiseterrain.prog,"u_TerrainSeedOffset"), terrainRandom.seedOffset);
+        gl_context.uniform2fv(getCachedUniformLocation(gl_context,noiseterrain.prog,"u_DuneDir"), terrainRandom.duneDir);
+        gl_context.uniform1f(getCachedUniformLocation(gl_context,noiseterrain.prog,"u_CraterDensity"), terrainRandom.craterDensity);
+        gl_context.uniform1f(getCachedUniformLocation(gl_context,noiseterrain.prog,"u_CanyonDepth"), terrainRandom.canyonDepth);
     }
 
 
@@ -1738,18 +1884,18 @@ function main() {
 
     flat.setTime(timer);
 
-    gl_context.uniform1f(getCachedUniformLocation(flat.prog,"u_far"),camera.far);
-    gl_context.uniform1f(getCachedUniformLocation(flat.prog,"u_near"),camera.near);
+    gl_context.uniform1f(getCachedUniformLocation(gl_context,flat.prog,"u_far"),camera.far);
+    gl_context.uniform1f(getCachedUniformLocation(gl_context,flat.prog,"u_near"),camera.near);
     reusableLightPos[0] = controls.lightPosX;
     reusableLightPos[1] = controls.lightPosY;
     reusableLightPos[2] = controls.lightPosZ;
-    gl_context.uniform3fv(getCachedUniformLocation(flat.prog,"unif_LightPos"), reusableLightPos);
+    gl_context.uniform3fv(getCachedUniformLocation(gl_context,flat.prog,"unif_LightPos"), reusableLightPos);
 
     water.setWaterTransparency(controls.WaterTransparency);
     water.setSimres(appContext.simulationState.simres);
-    gl_context.uniform1f(getCachedUniformLocation(water.prog,"u_far"),camera.far);
-    gl_context.uniform1f(getCachedUniformLocation(water.prog,"u_near"),camera.near);
-    gl_context.uniform3fv(getCachedUniformLocation(water.prog,"unif_LightPos"), reusableLightPos);
+    gl_context.uniform1f(getCachedUniformLocation(gl_context,water.prog,"u_far"),camera.far);
+    gl_context.uniform1f(getCachedUniformLocation(gl_context,water.prog,"u_near"),camera.near);
+    gl_context.uniform3fv(getCachedUniformLocation(gl_context,water.prog,"unif_LightPos"), reusableLightPos);
 
     lambert.setTerrainDebug(controls.TerrainDebug);
     lambert.setMouseWorldPos(reusableMousePoint);
@@ -1786,7 +1932,7 @@ function main() {
     reusableLightPos[0] = controls.lightPosX;
     reusableLightPos[1] = controls.lightPosY;
     reusableLightPos[2] = controls.lightPosZ;
-    gl_context.uniform3fv(getCachedUniformLocation(lambert.prog,"unif_LightPos"), reusableLightPos);
+    gl_context.uniform3fv(getCachedUniformLocation(gl_context,lambert.prog,"unif_LightPos"), reusableLightPos);
 
     sceneDepthShader.setSimres(appContext.simulationState.simres);
 
@@ -1825,7 +1971,7 @@ function main() {
     reusableSpawnPos[1] = controls.spawnposy;
     rains.setSpawnPos(reusableSpawnPos);
     rains.setTime(timer);
-    gl_context.uniform1i(getCachedUniformLocation(rains.prog,"u_RainErosion"),controls.RainErosion ? 1 : 0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,rains.prog,"u_RainErosion"),controls.RainErosion ? 1 : 0);
     rains.setFloat(controls.RainErosionStrength,'u_RainErosionStrength');
     rains.setFloat(controls.RainErosionDropSize,'u_RainErosionDropSize');
 
@@ -1878,13 +2024,13 @@ function main() {
     thermalterrainflux.setPipeLen(controls.pipelen);
     thermalterrainflux.setTimestep(controls.timestep);
     thermalterrainflux.setPipeArea(controls.pipeAra);
-    gl_context.uniform1f(getCachedUniformLocation(thermalterrainflux.prog,"unif_thermalRate"),controls.thermalRate);
+    gl_context.uniform1f(getCachedUniformLocation(gl_context,thermalterrainflux.prog,"unif_thermalRate"),controls.thermalRate);
 
     thermalapply.setSimres(appContext.simulationState.simres);
     thermalapply.setPipeLen(controls.pipelen);
     thermalapply.setTimestep(controls.timestep);
     thermalapply.setPipeArea(controls.pipeAra);
-    gl_context.uniform1f(getCachedUniformLocation(thermalapply.prog,"unif_thermalErosionScale"),controls.thermalErosionScale);
+    gl_context.uniform1f(getCachedUniformLocation(gl_context,thermalapply.prog,"unif_thermalErosionScale"),controls.thermalErosionScale);
 
     maxslippageheight.setSimres(appContext.simulationState.simres);
     maxslippageheight.setPipeLen(controls.pipelen);
@@ -2126,11 +2272,11 @@ function main() {
 
       gl_context.activeTexture(gl_context.TEXTURE0);
       gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-      gl_context.uniform1i(getCachedUniformLocation(shadowMapShader.prog,"hightmap"),0);
+      gl_context.uniform1i(getCachedUniformLocation(gl_context,shadowMapShader.prog,"hightmap"),0);
 
       gl_context.activeTexture(gl_context.TEXTURE1);
       gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_tex);
-      gl_context.uniform1i(getCachedUniformLocation(shadowMapShader.prog, "sedimap"), 1);
+      gl_context.uniform1i(getCachedUniformLocation(gl_context,shadowMapShader.prog, "sedimap"), 1);
 
       mat4.ortho(reusableLightProjMat, -1.6, 1.6, -1.6, 1.6, 0, 100);
       reusableLightPos[0] = controls.lightPosX;
@@ -2138,8 +2284,8 @@ function main() {
       reusableLightPos[2] = controls.lightPosZ;
       mat4.lookAt(reusableLightViewMat, reusableLightPos, [0,0,0], [0,1,0]);
 
-      gl_context.uniformMatrix4fv(getCachedUniformLocation(shadowMapShader.prog,'u_proj'),false,reusableLightProjMat);
-      gl_context.uniformMatrix4fv(getCachedUniformLocation(shadowMapShader.prog,'u_view'),false,reusableLightViewMat);
+      gl_context.uniformMatrix4fv(getCachedUniformLocation(gl_context,shadowMapShader.prog,'u_proj'),false,reusableLightProjMat);
+      gl_context.uniformMatrix4fv(getCachedUniformLocation(gl_context,shadowMapShader.prog,'u_view'),false,reusableLightViewMat);
       shadowMapShader.setSimres(appContext.simulationState.simres);
 
       renderer.render(camera,shadowMapShader,[plane]);
@@ -2188,54 +2334,54 @@ function main() {
     //plane.setDrawMode(gl_context.LINE_STRIP);
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    let PingUniform = getCachedUniformLocation(lambert.prog,"hightmap");
+    let PingUniform = getCachedUniformLocation(gl_context,lambert.prog,"hightmap");
     gl_context.uniform1i(PingUniform,0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.terrain_nor);
-    let norUniform = getCachedUniformLocation(lambert.prog,"normap");
+    let norUniform = getCachedUniformLocation(gl_context,lambert.prog,"normap");
     gl_context.uniform1i(norUniform,1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_tex);
-    let sediUniform = getCachedUniformLocation(lambert.prog, "sedimap");
+    let sediUniform = getCachedUniformLocation(gl_context,lambert.prog, "sedimap");
     gl_context.uniform1i(sediUniform, 2);
 
     gl_context.activeTexture(gl_context.TEXTURE3);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_vel_tex);
-    let velUniform = getCachedUniformLocation(lambert.prog, "velmap");
+    let velUniform = getCachedUniformLocation(gl_context,lambert.prog, "velmap");
     gl_context.uniform1i(velUniform, 3);
 
     gl_context.activeTexture(gl_context.TEXTURE4);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_flux_tex);
-    let fluxUniform = getCachedUniformLocation(lambert.prog, "fluxmap");
+    let fluxUniform = getCachedUniformLocation(gl_context,lambert.prog, "fluxmap");
     gl_context.uniform1i(fluxUniform, 4);
 
     gl_context.activeTexture(gl_context.TEXTURE5);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_terrain_flux_tex);
-    let terrainfluxUniform = getCachedUniformLocation(lambert.prog, "terrainfluxmap");
+    let terrainfluxUniform = getCachedUniformLocation(gl_context,lambert.prog, "terrainfluxmap");
     gl_context.uniform1i(terrainfluxUniform, 5);
 
     gl_context.activeTexture(gl_context.TEXTURE6);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_maxslippage_tex);
-    let terrainslippageUniform = getCachedUniformLocation(lambert.prog, "maxslippagemap");
+    let terrainslippageUniform = getCachedUniformLocation(gl_context,lambert.prog, "maxslippagemap");
     gl_context.uniform1i(terrainslippageUniform, 6);
 
     gl_context.activeTexture(gl_context.TEXTURE7);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_blend);
-    gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "sediBlend"), 7);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,lambert.prog, "sediBlend"), 7);
 
 
     gl_context.activeTexture(gl_context.TEXTURE8);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.shadowMap_tex);
-    gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "shadowMap"), 8);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,lambert.prog, "shadowMap"), 8);
 
     gl_context.activeTexture(gl_context.TEXTURE9);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.scene_depth_tex);
-    gl_context.uniform1i(getCachedUniformLocation(lambert.prog, "sceneDepth"), 9);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,lambert.prog, "sceneDepth"), 9);
 
-    gl_context.uniformMatrix4fv(getCachedUniformLocation(lambert.prog,'u_sproj'),false,reusableLightProjMat);
-    gl_context.uniformMatrix4fv(getCachedUniformLocation(lambert.prog,'u_sview'),false,reusableLightViewMat);
+    gl_context.uniformMatrix4fv(getCachedUniformLocation(gl_context,lambert.prog,'u_sproj'),false,reusableLightProjMat);
+    gl_context.uniformMatrix4fv(getCachedUniformLocation(gl_context,lambert.prog,'u_sview'),false,reusableLightViewMat);
 
 
       renderer.render(camera, lambert, [
@@ -2248,26 +2394,26 @@ function main() {
     water.use();
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_terrain_tex);
-    PingUniform = getCachedUniformLocation(water.prog,"hightmap");
+    PingUniform = getCachedUniformLocation(gl_context,water.prog,"hightmap");
     gl_context.uniform1i(PingUniform,0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.terrain_nor);
-    norUniform = getCachedUniformLocation(water.prog,"normap");
+    norUniform = getCachedUniformLocation(gl_context,water.prog,"normap");
     gl_context.uniform1i(norUniform,1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.read_sediment_tex);
-    sediUniform = getCachedUniformLocation(water.prog,"sedimap");
+    sediUniform = getCachedUniformLocation(gl_context,water.prog,"sedimap");
     gl_context.uniform1i(sediUniform,2);
 
     gl_context.activeTexture(gl_context.TEXTURE3);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.scene_depth_tex);
-    gl_context.uniform1i(getCachedUniformLocation(water.prog,"sceneDepth"),3);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,water.prog,"sceneDepth"),3);
 
     gl_context.activeTexture(gl_context.TEXTURE4);
     gl_context.bindTexture(gl_context.TEXTURE_2D,texturePool.color_pass_reflection_tex);
-    gl_context.uniform1i(getCachedUniformLocation(water.prog,"colorReflection"),4);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,water.prog,"colorReflection"),4);
 
 
       renderer.render(camera, water, [
@@ -2305,19 +2451,19 @@ function main() {
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.read_sediment_tex);
-    gl_context.uniform1i(getCachedUniformLocation(flat.prog,"hightmap"),0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,flat.prog,"hightmap"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.scene_depth_tex);
-    gl_context.uniform1i(getCachedUniformLocation(flat.prog,"sceneDepth"),1);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,flat.prog,"sceneDepth"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.shadowMap_tex);
-    gl_context.uniform1i(getCachedUniformLocation(flat.prog,"shadowMap"),2);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,flat.prog,"shadowMap"),2);
 
-    gl_context.uniformMatrix4fv(getCachedUniformLocation(flat.prog,'u_sproj'),false,reusableLightProjMat);
-    gl_context.uniformMatrix4fv(getCachedUniformLocation(flat.prog,'u_sview'),false,reusableLightViewMat);
-    gl_context.uniform1i(getCachedUniformLocation(flat.prog,"u_showScattering"),controls.showScattering ? 1 : 0);
+    gl_context.uniformMatrix4fv(getCachedUniformLocation(gl_context,flat.prog,'u_sproj'),false,reusableLightProjMat);
+    gl_context.uniformMatrix4fv(getCachedUniformLocation(gl_context,flat.prog,'u_sview'),false,reusableLightViewMat);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,flat.prog,"u_showScattering"),controls.showScattering ? 1 : 0);
 
     renderer.render(camera, flat, [
       square,
@@ -2351,16 +2497,16 @@ function main() {
               } else {
                   gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.bilateral_filter_vertical_tex);
               }
-              gl_context.uniform1i(getCachedUniformLocation(bilateralBlur.prog, "scatter_tex"), 0);
+              gl_context.uniform1i(getCachedUniformLocation(gl_context,bilateralBlur.prog, "scatter_tex"), 0);
 
               gl_context.activeTexture(gl_context.TEXTURE1);
               gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.scene_depth_tex);
-              gl_context.uniform1i(getCachedUniformLocation(bilateralBlur.prog, "scene_depth"), 1);
+              gl_context.uniform1i(getCachedUniformLocation(gl_context,bilateralBlur.prog, "scene_depth"), 1);
 
-              gl_context.uniform1f(getCachedUniformLocation(bilateralBlur.prog, "u_far"), camera.far);
-              gl_context.uniform1f(getCachedUniformLocation(bilateralBlur.prog, "u_near"), camera.near);
+              gl_context.uniform1f(getCachedUniformLocation(gl_context,bilateralBlur.prog, "u_far"), camera.far);
+              gl_context.uniform1f(getCachedUniformLocation(gl_context,bilateralBlur.prog, "u_near"), camera.near);
 
-              gl_context.uniform1i(getCachedUniformLocation(bilateralBlur.prog, "u_isHorizontal"), i % 2);
+              gl_context.uniform1i(getCachedUniformLocation(gl_context,bilateralBlur.prog, "u_isHorizontal"), i % 2);
 
 
               renderer.render(camera, bilateralBlur, [
@@ -2378,18 +2524,18 @@ function main() {
 
     gl_context.activeTexture(gl_context.TEXTURE0);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.color_pass_tex);
-    gl_context.uniform1i(getCachedUniformLocation(combinedShader.prog,"color_tex"),0);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,combinedShader.prog,"color_tex"),0);
 
     gl_context.activeTexture(gl_context.TEXTURE1);
     if(controls.enableBilateralBlur)
         gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.bilateral_filter_horizontal_tex);
     else
         gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.scatter_pass_tex);
-    gl_context.uniform1i(getCachedUniformLocation(combinedShader.prog,"bi_tex"),1);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,combinedShader.prog,"bi_tex"),1);
 
     gl_context.activeTexture(gl_context.TEXTURE2);
     gl_context.bindTexture(gl_context.TEXTURE_2D, texturePool.scene_depth_tex);
-    gl_context.uniform1i(getCachedUniformLocation(combinedShader.prog,"sceneDepth_tex"),2);
+    gl_context.uniform1i(getCachedUniformLocation(gl_context,combinedShader.prog,"sceneDepth_tex"),2);
 
     renderer.clear();
     renderer.render(camera, combinedShader, [
@@ -2405,18 +2551,33 @@ function main() {
   }
 
   window.addEventListener('resize', function() {
-
-    texturePool.resizeScreenTextures();
-
-    renderer.setSize(window.innerWidth, window.innerHeight);
-
-    camera.setAspectRatio(window.innerWidth / window.innerHeight);
-    camera.updateProjectionMatrix();
+    if (useWebGPU && webgpuRenderer) {
+      webgpuRenderer.setSize(window.innerWidth, window.innerHeight);
+      const webgpuCamera = (window as any).webgpuCamera;
+      if (webgpuCamera) {
+        webgpuCamera.aspect = window.innerWidth / window.innerHeight;
+        webgpuCamera.updateProjectionMatrix();
+      }
+    } else if (renderer) {
+      texturePool.resizeScreenTextures();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.setAspectRatio(window.innerWidth / window.innerHeight);
+      camera.updateProjectionMatrix();
+    }
   }, false);
 
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.setAspectRatio(window.innerWidth / window.innerHeight);
-  camera.updateProjectionMatrix();
+  if (useWebGPU && webgpuRenderer) {
+    webgpuRenderer.setSize(window.innerWidth, window.innerHeight);
+    const webgpuCamera = (window as any).webgpuCamera;
+    if (webgpuCamera) {
+      webgpuCamera.aspect = window.innerWidth / window.innerHeight;
+      webgpuCamera.updateProjectionMatrix();
+    }
+  } else if (renderer) {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.setAspectRatio(window.innerWidth / window.innerHeight);
+    camera.updateProjectionMatrix();
+  }
 
   // Start the render loop
   tick();

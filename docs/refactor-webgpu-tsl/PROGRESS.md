@@ -20,8 +20,8 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 - Notes: DI/class-based architecture ported to WebGPU pipeline. All state holders created, composition root established, LegacyTexturePool extracted. All production code uses holders instead of simulation-state imports.
 
 ### Phase 2 — WebGPU + TSL Foundation
-- Status: Pending
-- Notes: WebGPURenderer base, NodeMaterial scaffolding.
+- Status: Complete ✅
+- Notes: Three.js upgraded to r171, WebGPURendererWrapper created, capability checks implemented, NodeMaterial scaffolding established, ComputeNodePipeline skeleton created. All following TDD approach. **Acceptance criteria met**: WebGPURenderer renders a basic scene (red cube visible), NodeMaterial renders with WebGPU backend. Browser validation confirms functional rendering. Refactored all WebGL classes to use state holder instead of global `gl`.
 
 ### Phase 3 — Simulation Pipeline Port
 - Status: Pending
@@ -55,6 +55,17 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
   - Updated all production files to use holders instead of simulation-state imports
   - Added DI smoke test
   - Marked texture-management.ts as deprecated
+- Phase 2 — WebGPU + TSL Foundation (January 27, 2026)
+  - Upgraded Three.js from ^0.159.0 to ^0.171.0 (r171)
+  - Created WebGPU capability check service with tests (TDD)
+  - Created WebGPURendererWrapper with tests (TDD)
+  - Updated main.ts with WebGPU capability check and conditional renderer creation
+  - Created TerrainMaterialNode and WaterMaterialNode scaffolding with tests (TDD)
+  - Created ComputeNodePipeline skeleton with tests (TDD)
+  - **Acceptance criteria met**: WebGPURenderer renders basic scene, NodeMaterial renders with WebGPU backend
+  - Browser validation confirmed functional rendering (red cube visible in canvas)
+  - Refactored all WebGL classes to use state holder (`appContext.simulationState.glContext`) instead of global `gl`
+  - Eliminated global `gl` dependency: Drawable, Square, Plane, OpenGLRenderer, ShaderProgram, uniform helpers all use DI pattern
 
 ## Detailed Progress Files
 

@@ -1,6 +1,10 @@
 import {vec2, vec3, vec4} from 'gl-matrix';
 import Drawable from '../rendering/gl/Drawable';
-import {gl} from '../globals';
+
+// WebGL constants
+const GL_ELEMENT_ARRAY_BUFFER = 0x8893;
+const GL_ARRAY_BUFFER = 0x8892;
+const GL_STATIC_DRAW = 0x88E4;
 
 class Plane extends Drawable {
   indices: Uint32Array;
@@ -11,8 +15,8 @@ class Plane extends Drawable {
   scale: vec2;
   subdivs: number; // 2^subdivs is how many squares will compose the plane; must be even.
 
-  constructor(center: vec3, scale: vec2, subdivs: number) {
-    super(); // Call the constructor of the super class. This is required.
+  constructor(gl: WebGL2RenderingContext, center: vec3, scale: vec2, subdivs: number) {
+    super(gl); // Pass GL context to parent
     this.center = vec3.fromValues(center[0], center[1], center[2]);
     this.scale = scale;
     this.subdivs = subdivs + subdivs % 2; // Ensures the number is even, rounds up.
@@ -71,17 +75,17 @@ class Plane extends Drawable {
     this.generateNor();
 
     this.count = this.indices.length;
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.bufIdx);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.indices, gl.STATIC_DRAW);
+    this.gl.bindBuffer(GL_ELEMENT_ARRAY_BUFFER, this.bufIdx);
+    this.gl.bufferData(GL_ELEMENT_ARRAY_BUFFER, this.indices, GL_STATIC_DRAW);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufNor);
-    gl.bufferData(gl.ARRAY_BUFFER, this.normals, gl.STATIC_DRAW);
+    this.gl.bindBuffer(GL_ARRAY_BUFFER, this.bufNor);
+    this.gl.bufferData(GL_ARRAY_BUFFER, this.normals, GL_STATIC_DRAW);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
-    gl.bufferData(gl.ARRAY_BUFFER, this.positions, gl.STATIC_DRAW);
+    this.gl.bindBuffer(GL_ARRAY_BUFFER, this.bufPos);
+    this.gl.bufferData(GL_ARRAY_BUFFER, this.positions, GL_STATIC_DRAW);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER,this.bufUv);
-    gl.bufferData(gl.ARRAY_BUFFER,this.uvs,gl.STATIC_DRAW);
+    this.gl.bindBuffer(GL_ARRAY_BUFFER, this.bufUv);
+    this.gl.bufferData(GL_ARRAY_BUFFER, this.uvs, GL_STATIC_DRAW);
 
     console.log(`Created plane`);
   }
