@@ -1,18 +1,24 @@
 import {mat4, vec4} from 'gl-matrix';
 import Drawable from './Drawable';
 import Camera from '../../Camera';
-import {gl} from '../../globals';
 import ShaderProgram from './ShaderProgram';
 import {isNumber} from "util";
 
-// In this file, `gl` is accessible because it is imported above
-class OpenGLRenderer {    counter : number;
-  constructor(public canvas: HTMLCanvasElement) {
-  this.counter = 0;
+// WebGL constants
+const GL_COLOR_BUFFER_BIT = 0x00004000;
+const GL_DEPTH_BUFFER_BIT = 0x00000100;
+
+class OpenGLRenderer {
+  counter : number;
+  private gl: WebGL2RenderingContext;
+
+  constructor(public canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) {
+    this.gl = gl;
+    this.counter = 0;
   }
 
   setClearColor(r: number, g: number, b: number, a: number) {
-    gl.clearColor(r, g, b, a);
+    this.gl.clearColor(r, g, b, a);
   }
 
   setSize(width: number, height: number) {
@@ -21,7 +27,7 @@ class OpenGLRenderer {    counter : number;
   }
 
   clear() {
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    this.gl.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   }
 
   render(camera: Camera, prog: ShaderProgram, drawables: Array<Drawable>) {
