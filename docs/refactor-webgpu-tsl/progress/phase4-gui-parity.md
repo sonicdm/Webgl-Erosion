@@ -48,6 +48,78 @@
 - ThreeTerrainWrapper types implement getDefaultParams() and pass through all
   advanced options to THREE.Terrain methods.
 
+#### Class Implementation Details (Specific)
+
+**1) BaseTerrainType (interface + common helpers)**
+- File: `src/three/terrain/BaseTerrainType.ts`
+- Keep it abstract, but add **small helper utilities** in a `TerrainTypeUtils`
+  module to avoid copy/paste in each subclass:
+  - `applyEasing(z: number, easing?: (t:number)=>number): number`
+  - `applyEdges(zs: Float32Array, options: TerrainGenerationOptions, edges: EdgeOptions): void`
+  - `applySmoothing(zs: Float32Array, options: TerrainGenerationOptions, smoothing: string): void`
+- `generateHeightmap()` should *only* fill `zs`; all post-process steps (edges,
+  smoothing, easing) should run in a **shared post-process pipeline** called by
+  the generator wrapper, not repeated in every subclass.
+
+**2) TerrainGenerationOptions (single payload)**
+- File: `src/three/terrain/TerrainGenerationOptions.ts`
+- Ensure it contains:
+  - `xSegments`, `ySegments`, `xSize`, `ySize`
+  - `terrainSteps`, `terrainTurbulent`, `easing`
+  - `terrainSmoothing`, `terrainEdgeType`, `terrainEdgeDirection`,
+    `terrainEdgeCurve`, `terrainEdgeDistance`
+- Ensure this object is the *only* options input to all terrain types.
+
+**3) Legacy Shader Types (0–11)**
+- Files: `src/three/terrain/types/*.ts`
+- Pattern for each class:
+  1. Read `xSegments/ySegments` and compute `xl = xSegments + 1` once.
+  2. Compute `scaleX = xSize / 1024.0`, `scaleY = ySize / 1024.0`.
+  3. Compute base noise using `terrainSteps` for octave count.
+  4. If `terrainTurbulent`, add domain warp (reuse existing warp helpers).
+  5. Write raw heights into `zs` (no edges/smoothing here).
+  6. Return; caller applies post-process pipeline.
+
+**4) THREE.Terrain Wrapper Classes**
+- File: `src/three/terrain/ThreeTerrainWrapper.ts`
+- For each wrapper:
+  - Build `threeTerrainOptions` using `xSegments`, `ySegments`, `xSize`, `ySize`,
+    `steps`, `turbulent`, `frequency`, `easing`, `after`.
+  - `after` should chain edges + smoothing **once** using a shared callback:
+    - `after(vertices, options)` -> edges -> smoothing -> clamp.
+
+**5) Terrain Type Registry**
+- File: `src/three/terrain/terrain-type-registry.ts`
+- Ensure registry resolves both:
+  - numeric IDs (0–11) for legacy shader types
+  - string names for THREE.Terrain methods
+- Provide `getDefaultParams()` access for GUI.
+
+**6) Terrain Masks**
+- File: `src/three/terrain/mask-registry.ts` + `MaskApplicator`
+- `MaskApplicator.applyMask()` must accept:
+  - `zs` (Float32Array)
+  - mask id
+  - `TerrainGenerationOptions`
+- Apply mask after generator output and before upload.
+
+**7) Heightmap Pipeline (Single Post-Process)**
+- Create a dedicated function:
+  - `runTerrainPostProcess(zs, options)`:
+    - easing (per-sample, if needed)
+    - edges (box/radial)
+    - smoothing (conservative/gaussian/mean/median)
+    - mask (if TerrainMask > 0)
+- Call it in **one place** (TerrainReadbackService).
+
+**8) Edge + Smoothing Mapping**
+- Map GUI strings to actual THREE.Terrain filter names:
+  - GaussianBox -> GaussianBoxBlur
+  - Conservative -> SmoothConservative
+  - Median -> SmoothMedian
+- Map edge direction to THREE.Terrain signature (boolean):
+  - Up -> true, Down/Normal -> false.
+
 ### C) Terrain Mask Classes
 - Mask registry provides display names and IDs.
 - Mask applicator supports applying masks to generated heightmaps for both
