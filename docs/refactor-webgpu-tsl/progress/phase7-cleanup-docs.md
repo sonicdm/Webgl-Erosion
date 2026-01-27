@@ -11,6 +11,7 @@
 - [ ] Remove legacy WebGL/VTF docs from master branch.
 - [ ] Update README with WebGPU/TSL usage.
 - [ ] Add migration notes and API changes.
+- [ ] Archive replaced GLSL shaders into legacy branch `legacy/shaders/`.
 
 ## Verification
 - [ ] `npm run test:ci`

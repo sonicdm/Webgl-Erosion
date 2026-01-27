@@ -105,6 +105,7 @@ Acceptance:
 - Remove old WebGL/VTF docs from master.
 - Document WebGPU + TSL pipeline.
 - Update README for new GUI, controls, workflows.
+- Archive replaced GLSL shaders in legacy branch under `legacy/shaders/`.
 
 ## Definition of Done
 - WebGPU + TSL pipeline is the only render path in master.
@@ -112,6 +113,11 @@ Acceptance:
 - Terrain GUI parity complete and documented.
 - CPU BVH interaction mesh stable with refit.
 - All tests and validation scripts pass.
+
+## Legacy Shader Backup
+
+When GLSL shaders are replaced by TSL, archive the GLSL versions in the legacy
+branch under `legacy/shaders/`.
 
 ## MCP Browser Testing
 
