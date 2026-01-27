@@ -1,6 +1,7 @@
 # Progress Log
 
 This is the rolling progress tracker for the WebGPU + TSL refactor.
+Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 
 ## Status Legend
 - Pending
@@ -45,3 +46,13 @@ This is the rolling progress tracker for the WebGPU + TSL refactor.
 ## Completed Items
 - None yet.
 
+## Detailed Progress Files
+
+- progress/phase0-legacy-freeze.md
+- progress/phase1-di-parity.md
+- progress/phase2-webgpu-tsl-foundation.md
+- progress/phase3-sim-pipeline-port.md
+- progress/phase4-gui-parity.md
+- progress/phase5-hybrid-bvh.md
+- progress/phase6-validation-tooling.md
+- progress/phase7-cleanup-docs.md
