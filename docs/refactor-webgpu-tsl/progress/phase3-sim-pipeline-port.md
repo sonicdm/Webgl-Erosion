@@ -20,3 +20,8 @@
 ## Tests
 - [ ] One sim step produces non-flat heightmap.
 - [ ] Readback health checks pass.
+
+## Verification
+- [ ] `npm run test:ci`
+- [ ] `npm run build`
+- [ ] `npx tsc -p tsconfig.json --noEmit` (TS/TSX typecheck)

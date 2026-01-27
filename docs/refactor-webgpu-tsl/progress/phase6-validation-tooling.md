@@ -16,3 +16,8 @@
 ## Tests
 - [ ] npm run test:ci passes.
 - [ ] validate:height-parity passes.
+
+## Verification
+- [ ] `npm run test:ci`
+- [ ] `npm run build`
+- [ ] `npx tsc -p tsconfig.json --noEmit` (TS/TSX typecheck)

@@ -17,3 +17,8 @@
 ## Tests
 - [ ] WebGPURenderer renders a basic scene.
 - [ ] NodeMaterial renders with WebGPU backend.
+
+## Verification
+- [ ] `npm run test:ci`
+- [ ] `npm run build`
+- [ ] `npx tsc -p tsconfig.json --noEmit` (TS/TSX typecheck)

@@ -1,6 +1,6 @@
 # Phase 0 — Legacy Freeze
 
-## Status: Pending
+## Status: Complete
 
 ## Goals
 - Create a legacy branch (legacy-webgl).
@@ -8,9 +8,23 @@
 - Lock legacy branch for hotfix-only.
 
 ## Tasks
-- [ ] Create legacy branch from current known-good state.
-- [ ] Tag release (e.g., legacy-webgl-1).
-- [ ] Document legacy maintenance rules.
+- [x] Create legacy branch from current known-good state.
+- [x] Tag release (v1.0.0-legacy).
+- [x] Document legacy maintenance rules.
+
+## Completion Notes
+- **Branch Created**: `legacy-webgl` (from master branch)
+- **Tag Created**: `v1.0.0-legacy`
+- **Documentation**: `LEGACY_MAINTENANCE.md` created with hotfix-only policy
+- **Date**: January 26, 2026
+- Legacy branch contains complete WebGL/GLSL pipeline and has been pushed to remote.
 
 ## Notes
 - Legacy branch should retain GLSL/WebGL pipeline and shaders.
+
+## Verification
+- [ ] `npm run test:ci`
+- [ ] `npm run build`
+- [ ] `npx tsc -p tsconfig.json --noEmit` (TS/TSX typecheck)
+- Branch is frozen for hotfix-only maintenance (security fixes and critical bugs only).
+- See `LEGACY_MAINTENANCE.md` for detailed maintenance policy.

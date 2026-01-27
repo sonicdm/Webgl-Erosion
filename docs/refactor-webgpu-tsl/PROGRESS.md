@@ -12,12 +12,12 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 ## Phase Status
 
 ### Phase 0 — Legacy Freeze
-- Status: Pending
-- Notes: Create legacy branch and tag stable baseline.
+- Status: Complete
+- Notes: Legacy branch `legacy-webgl` created and tagged as `v1.0.0-legacy`. Maintenance policy documented.
 
 ### Phase 1 — DI/Class-Based Parity
-- Status: Pending
-- Notes: Port DI adoption changes from feature branch into WebGPU pipeline.
+- Status: Complete
+- Notes: DI/class-based architecture ported to WebGPU pipeline. All state holders created, composition root established, LegacyTexturePool extracted. All production code uses holders instead of simulation-state imports.
 
 ### Phase 2 — WebGPU + TSL Foundation
 - Status: Pending
@@ -44,7 +44,17 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 - Notes: update README and remove legacy docs from master.
 
 ## Completed Items
-- None yet.
+- Phase 0 — Legacy Freeze (January 26, 2026)
+  - Created `legacy-webgl` branch from master
+  - Tagged baseline as `v1.0.0-legacy`
+  - Documented maintenance policy in `LEGACY_MAINTENANCE.md`
+- Phase 1 — DI/Class-Based Parity (January 26, 2026)
+  - Created state holders (SimulationStateHolder, TerrainStateHolder, ClientStateHolder)
+  - Created composition root (bootstrap.ts) and AppContext
+  - Extracted LegacyTexturePool for texture management
+  - Updated all production files to use holders instead of simulation-state imports
+  - Added DI smoke test
+  - Marked texture-management.ts as deprecated
 
 ## Detailed Progress Files
 

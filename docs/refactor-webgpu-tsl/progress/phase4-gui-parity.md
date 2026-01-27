@@ -19,3 +19,8 @@
 ## Tests
 - [ ] GUI changes update terrain only on Generate.
 - [ ] Type defaults apply on selection.
+
+## Verification
+- [ ] `npm run test:ci`
+- [ ] `npm run build`
+- [ ] `npx tsc -p tsconfig.json --noEmit` (TS/TSX typecheck)
