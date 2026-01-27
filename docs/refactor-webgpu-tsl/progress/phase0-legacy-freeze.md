@@ -26,5 +26,6 @@
 - [ ] `npm run test:ci`
 - [ ] `npm run build`
 - [ ] `npx tsc -p tsconfig.json --noEmit` (TS/TSX typecheck)
+- [ ] MCP browser test (launch + screenshot baseline)
 - Branch is frozen for hotfix-only maintenance (security fixes and critical bugs only).
 - See `LEGACY_MAINTENANCE.md` for detailed maintenance policy.

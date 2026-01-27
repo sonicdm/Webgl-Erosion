@@ -57,3 +57,4 @@ Phase 1 successfully ports the DI/class-based architecture to the WebGPU pipelin
 - [ ] `npm run test:ci`
 - [ ] `npm run build`
 - [ ] `npx tsc -p tsconfig.json --noEmit` (TS/TSX typecheck)
+- [ ] MCP browser test (smoke UI)

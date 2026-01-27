@@ -111,3 +111,11 @@ Acceptance:
 - Terrain GUI parity complete and documented.
 - CPU BVH interaction mesh stable with refit.
 - All tests and validation scripts pass.
+
+## MCP Browser Testing
+
+All phases must include MCP-driven browser validation when UI or rendering
+changes are introduced:
+- Use MCP tools to launch the app and drive the UI.
+- Capture screenshots for baseline comparisons.
+- Record a short step list in the phase progress notes.

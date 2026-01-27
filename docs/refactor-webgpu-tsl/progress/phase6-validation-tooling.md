@@ -21,3 +21,4 @@
 - [ ] `npm run test:ci`
 - [ ] `npm run build`
 - [ ] `npx tsc -p tsconfig.json --noEmit` (TS/TSX typecheck)
+- [ ] MCP browser test (validation HUD)
