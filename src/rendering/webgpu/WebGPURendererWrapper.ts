@@ -105,6 +105,22 @@ export class WebGPURendererWrapper {
     }
 
     /**
+     * Get the WebGPU device from the renderer.
+     * Required for creating textures and compute pipelines.
+     */
+    getDevice(): GPUDevice | null {
+        if (!this.initialized || !this.renderer) {
+            return null;
+        }
+        // Access the device through Three.js renderer's backend
+        const backend = (this.renderer as any).backend;
+        if (backend && backend.device) {
+            return backend.device;
+        }
+        return null;
+    }
+
+    /**
      * Dispose of the renderer and clean up resources.
      */
     dispose(): void {

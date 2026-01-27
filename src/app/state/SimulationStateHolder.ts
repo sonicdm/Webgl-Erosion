@@ -1,4 +1,5 @@
 import { BufferGeometry } from 'three';
+import { readHeightmapFromTexture } from '../../utils/webgpu-terrain-readback';
 
 /**
  * Holds mutable simulation state.
@@ -127,5 +128,16 @@ export class SimulationStateHolder {
     
     shouldUpdateGeometry(): boolean {
         return this.enableBVHUpdates && (this.geometryNeedsUpdate || this.geometryUpdateCounter >= this.geometryUpdateInterval);
+    }
+
+    /**
+     * Read heightmap from WebGPU texture (async).
+     * @param device - GPU device
+     * @param texture - Source texture
+     * @returns Promise that resolves when readback is complete
+     */
+    async readHeightmapFromWebGPU(device: GPUDevice, texture: GPUTexture): Promise<void> {
+        await readHeightmapFromTexture(device, texture, this.heightMapCpuBuf);
+        this.setHeightMapBufIsFresh(true);
     }
 }

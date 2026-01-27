@@ -33,6 +33,11 @@ import { Render2Texture } from './rendering/render-utils';
 import { createShaders, Shaders } from './rendering/shader-factory';
 import { checkWebGPUSupport } from './rendering/webgpu/capability-check';
 import { WebGPURendererWrapper } from './rendering/webgpu/WebGPURendererWrapper';
+import { ComputeNodePipeline } from './rendering/webgpu/compute/ComputeNodePipeline';
+import { WebGPUTexturePool } from './simulation/WebGPUTexturePool';
+import { SimulatePerStepWebGPU } from './simulation/SimulatePerStepWebGPU';
+import { readHeightmapFromTexture } from './utils/webgpu-terrain-readback';
+import { copyWebGPUTerrainToWebGL } from './utils/webgpu-to-webgl-texture-copy';
 
 // Note: State is now managed through AppContext and state holders
 // Additional local variables
@@ -1068,40 +1073,23 @@ async function main() {
   // get canvas
   const canvas = <HTMLCanvasElement> document.getElementById('canvas');
   
-  // Check WebGPU capability first
-  const webgpuCapability = await checkWebGPUSupport();
-  let webgpuRenderer: WebGPURendererWrapper | null = null;
-  
-  if (webgpuCapability.supported) {
-    try {
-      webgpuRenderer = new WebGPURendererWrapper(canvas, appContext);
-      await webgpuRenderer.initialize();
-      console.log('[WebGPU] WebGPURenderer initialized successfully');
-    } catch (error) {
-      console.warn('[WebGPU] Failed to initialize WebGPURenderer:', error);
-      console.warn('[WebGPU] Falling back to WebGL renderer');
-      webgpuRenderer = null;
-    }
-  } else {
-    console.warn('[WebGPU] WebGPU not supported:', webgpuCapability.fallbackReason);
-    console.warn('[WebGPU] Using WebGL renderer fallback');
-  }
-  
-  // Try to create WebGL2 context for legacy texture operations
-  // Only needed if WebGPU is not available or if we need legacy features
-  // Note: If WebGPU is available, we can't get WebGL2 from the same canvas, but that's OK for Phase 2
+  // Get WebGL2 context for rendering (Phase 3: rendering still uses WebGL2, simulation uses WebGPU)
   gl_context = <WebGL2RenderingContext> canvas.getContext('webgl2');
   
   if (!gl_context) {
-    // Only show alert if WebGPU is also not available
-    if (!webgpuCapability.supported || !webgpuRenderer) {
-      alert('WebGL 2 not supported! WebGPU is also not available. The application cannot run.');
-      return; // Exit early if neither renderer is available
-    } else {
-      // WebGPU is available but WebGL2 is not - this is expected, don't show alert
-      console.warn('[WebGL] WebGL2 not available, but WebGPU is available. Legacy texture operations will not work until Phase 3 migration.');
-    }
+    alert('WebGL 2 not supported! The application requires WebGL2 for rendering.');
+    return; // Exit early - rendering cannot work without WebGL2
   }
+  
+  // Check WebGPU capability - REQUIRED for simulation (no fallback)
+  const webgpuCapability = await checkWebGPUSupport();
+  
+  if (!webgpuCapability.supported) {
+    alert('WebGPU not supported! The application requires WebGPU for simulation. Reason: ' + (webgpuCapability.fallbackReason || 'Unknown'));
+    return; // Exit early - simulation requires WebGPU
+  }
+  
+  console.log('[WebGPU] WebGPU available - using for simulation compute shaders');
   
   // Set client dimensions regardless of context availability
   appContext.simulationState.setClientDimensions(canvas.clientWidth, canvas.clientHeight);
@@ -1111,12 +1099,35 @@ async function main() {
     appContext.simulationState.setGlContext(gl_context);
     // Update texture pool with gl context
     texturePool = new LegacyTexturePool(gl_context, appContext.simulationState.simres, shadowMapResolution);
-  } else if (webgpuRenderer) {
-    // WebGPU is available but WebGL2 is not - skip texture pool initialization for now
-    // In Phase 3, we'll migrate texture operations to WebGPU
-    console.warn('[WebGL] WebGL2 context not available - legacy texture operations will not work. WebGPU path should be used instead.');
-    // Create a minimal texture pool placeholder or skip it
-    // For now, we'll need to handle this in Phase 3 when we migrate texture operations
+  }
+  
+  // Declare WebGPU variables early (before try block)
+  let webgpuDevice: GPUDevice | null = null;
+  let webgpuComputePipeline: ComputeNodePipeline | null = null;
+  let webgpuTexturePool: WebGPUTexturePool | null = null;
+  
+  // Initialize WebGPU compute pipeline and texture pool (REQUIRED - no fallback)
+  try {
+    // Get WebGPU device directly (not through renderer wrapper)
+    // WebGL2 needs the canvas for rendering, so we get WebGPU device separately for compute
+    const adapter = await navigator.gpu?.requestAdapter();
+    if (!adapter) {
+      throw new Error('Failed to get WebGPU adapter');
+    }
+    
+    webgpuDevice = await adapter.requestDevice();
+    if (!webgpuDevice) {
+      throw new Error('Failed to get WebGPU device');
+    }
+    
+    webgpuComputePipeline = new ComputeNodePipeline(webgpuDevice);
+    webgpuTexturePool = new WebGPUTexturePool(webgpuDevice, appContext.simulationState.simres, shadowMapResolution);
+    webgpuTexturePool.setup();
+    console.log('[WebGPU] Compute pipeline and texture pool initialized');
+  } catch (error) {
+    console.error('[WebGPU] Failed to initialize compute pipeline:', error);
+    alert('Failed to initialize WebGPU compute pipeline. The application cannot run.');
+    return; // Exit early - simulation requires WebGPU
   }
   
   // Create heightmap loader functions (only if WebGL2 context is available)
@@ -1310,38 +1321,12 @@ async function main() {
   const brushUsesLeftClick = controlsConfig.mouse.brushActivate === 'LEFT' || 
                              (controlsConfig.mouse.brushActivate === null && controlsConfig.keys.brushActivate === 'LEFT');
   
-  // Create renderer - use WebGPU if available, otherwise fall back to OpenGL
+  // Create renderer - use WebGL2 for rendering (WebGPU rendering will be Phase 4+)
   let renderer: OpenGLRenderer | null = null;
-  let useWebGPU = false;
   
-  if (!gl_context && webgpuRenderer) {
-    // WebGPU path: WebGL2 not available, but WebGPU is
-    console.log('[main] Using WebGPU renderer (WebGL2 not available)');
-    useWebGPU = true;
-    
-    // Set up WebGPU renderer
-    webgpuRenderer.setClearColor(0.2, 0.2, 0.3, 1.0);
-    webgpuRenderer.setSize(canvas.clientWidth, canvas.clientHeight);
-    
-    // Create a minimal WebGPU scene for Phase 2 acceptance criteria
-    const { Scene, PerspectiveCamera, BoxGeometry, Mesh } = await import('three');
-    const { TerrainMaterialNode } = await import('./rendering/webgpu/materials/TerrainMaterialNode');
-    
-    const webgpuScene = new Scene();
-    const webgpuCamera = new PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
-    webgpuCamera.position.z = 5;
-    
-    // Create a simple cube with NodeMaterial
-    const geometry = new BoxGeometry(1, 1, 1);
-    const material = new TerrainMaterialNode();
-    const cube = new Mesh(geometry, material);
-    webgpuScene.add(cube);
-    
-    // Store for render loop
-    (window as any).webgpuScene = webgpuScene;
-    (window as any).webgpuCamera = webgpuCamera;
-    (window as any).webgpuCube = cube;
-  } else if (gl_context) {
+  // Note: webgpuDevice, webgpuComputePipeline, and webgpuTexturePool are declared above (line 1105-1107)
+  
+  if (gl_context) {
     // WebGL2 path: traditional rendering
     console.log('[main] Using WebGL2 renderer');
     renderer = new OpenGLRenderer(canvas, gl_context);
@@ -1349,13 +1334,9 @@ async function main() {
     gl_context.enable(gl_context.DEPTH_TEST);
   } else {
     // Neither available
-    console.error('[main] Neither WebGL2 nor WebGPU available. Cannot render.');
+    console.error('[main] WebGL2 required for rendering. Cannot proceed.');
     return;
   }
-  
-  // Store webgpuRenderer for future use
-  (window as any).webgpuRenderer = webgpuRenderer;
-  (window as any).useWebGPU = useWebGPU;
 
   // WebGL2-specific setup (texture pool, shaders)
   let lambert: any, flat: any, flow: any, waterhight: any, sediment: any, sediadvect: any, macCormack: any;
@@ -1376,9 +1357,9 @@ async function main() {
     } = shaders);
     noiseterrain = shaders.noiseterrain;
     setTerrainRandom();
-  } else if (useWebGPU) {
-    // WebGPU path: minimal setup for Phase 2
-    console.log('[main] WebGPU path: skipping WebGL2 texture pool and shader setup');
+  } else {
+    // WebGL2 context not available - cannot proceed without it
+    console.error('[main] WebGL2 context required for terrain rendering. WebGPU path will be implemented in Phase 3.');
   }
 
     let timer = 0;
@@ -1430,28 +1411,7 @@ async function main() {
   function tick() {
     stats.begin();
     
-    // WebGPU render path (Phase 2 acceptance: WebGPURenderer renders a basic scene)
-    if (useWebGPU && webgpuRenderer) {
-      const webgpuScene = (window as any).webgpuScene;
-      const webgpuCamera = (window as any).webgpuCamera;
-      const webgpuCube = (window as any).webgpuCube;
-      
-      if (webgpuScene && webgpuCamera) {
-        // Rotate the cube for visual feedback
-        if (webgpuCube) {
-          webgpuCube.rotation.x += 0.01;
-          webgpuCube.rotation.y += 0.01;
-        }
-        
-        // Render with WebGPU
-        webgpuRenderer.render(webgpuScene, webgpuCamera);
-        stats.end();
-        requestAnimationFrame(tick);
-        return;
-      }
-    }
-
-    // WebGL2 render path (existing code)
+    // WebGL2 render path (normal terrain pipeline)
     if (!renderer || !gl_context) {
       requestAnimationFrame(tick);
       return;
@@ -1598,7 +1558,12 @@ async function main() {
                     const newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
                     console.log(`[Loading] Resolution change detected: ${oldRes} -> ${newRes}`);
                     appContext.simulationState.setSimRes(newRes);
-                    texturePool.resizeTextures4Simulation(newRes);
+                    if (texturePool) {
+                        texturePool.resizeTextures4Simulation(newRes);
+                    }
+                    if (webgpuTexturePool) {
+                        webgpuTexturePool.resizeSimulationTextures(newRes);
+                    }
                     appContext.simulationState.resizeHeightMapCpuBuf(newRes); // Resize the CPU buffer to match new resolution
                     
                     // Clear old BVH and geometry when resolution changes (they're invalid for new resolution)
@@ -2060,10 +2025,38 @@ async function main() {
 
       //==========================  we begin simulation from now ===========================================
 
+    // Use WebGPU compute pipeline (required - no WebGL2 fallback)
+    if (!webgpuComputePipeline || !webgpuTexturePool || !webgpuDevice) {
+        console.error('[WebGPU] WebGPU compute pipeline not available. Simulation cannot run.');
+        requestAnimationFrame(tick);
+        return;
+    }
+    
+    if (!gl_context || !texturePool) {
+        console.error('[WebGL] WebGL2 context or texture pool not available. Rendering cannot work.');
+        requestAnimationFrame(tick);
+        return;
+    }
+    
+    // WebGPU simulation path - copy results to WebGL textures for rendering
+    // Prepare brush state for compute passes
+    const brushState = {
+        mouseWorldPos: [reusableMousePoint[0], reusableMousePoint[1], reusableMousePoint[2], reusableMousePoint[3]] as [number, number, number, number],
+        mouseWorldDir: [reusableDir[0], reusableDir[1], reusableDir[2]] as [number, number, number],
+        brushPos: [reusablePos[0], reusablePos[1]] as [number, number],
+    };
+    
     for(let i = 0;i<controls.SimulationSpeed;i++) {
-        SimulationStep(appContext.simulationState.simFrameCount, flow, waterhight, veladvect,sediment, sediadvect, macCormack,rains,evaporation,average,thermalterrainflux, thermalapply, maxslippageheight, renderer, gl_context, camera);
+        SimulatePerStepWebGPU(webgpuComputePipeline, webgpuTexturePool, appContext, controls, timer, brushState);
         appContext.simulationState.incrementSimFrameCount();
     }
+    
+    // Copy WebGPU simulation results to WebGL textures for rendering
+    // This is temporary until rendering is also ported to WebGPU (Phase 4+)
+    copyWebGPUTerrainToWebGL(webgpuDevice, webgpuTexturePool.readTerrainTexture, gl_context, texturePool.read_terrain_tex, appContext.simulationState.simres)
+        .catch((error) => {
+            console.error('[WebGPU] Failed to copy terrain texture to WebGL:', error);
+        });
     
     // Only track update counter if BVH updates are enabled
     // This avoids unnecessary overhead when updates are disabled
@@ -2082,18 +2075,24 @@ async function main() {
     if (shouldRead || shouldReadForBVH) {
         // Read full resolution for accurate raycasting
         // Note: This is throttled by shouldReadHeightmap to avoid blocking
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, texturePool.frame_buffer);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, texturePool.read_terrain_tex, 0);
-        gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
-        gl_context.readPixels(0, 0, appContext.simulationState.simres, appContext.simulationState.simres, gl_context.RGBA, gl_context.FLOAT, appContext.simulationState.heightMapCpuBuf);
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
-        // Mark as fresh so BVH updates can piggyback on this read (no extra readPixels cost)
-        appContext.simulationState.setHeightMapBufIsFresh(true);
-        lastReadMouseX = appContext.simulationState.lastX;
-        lastReadMouseY = appContext.simulationState.lastY;
-        if (!brushPressed && !brushVisible && appContext.simulationState.heightMapBufCounter >= MaxHightMapBufCounter) {
-            appContext.simulationState.resetHeightMapBufCounter();
+        // WebGPU readback path (required - no WebGL2 fallback)
+        if (!webgpuTexturePool || !webgpuDevice) {
+            console.error('[WebGPU] Readback failed - WebGPU texture pool or device not available');
+            return;
         }
+        
+        // Async readback - will mark as fresh when complete
+        appContext.simulationState.readHeightmapFromWebGPU(webgpuDevice, webgpuTexturePool.readTerrainTexture)
+            .then(() => {
+                lastReadMouseX = appContext.simulationState.lastX;
+                lastReadMouseY = appContext.simulationState.lastY;
+                if (!brushPressed && !brushVisible && appContext.simulationState.heightMapBufCounter >= MaxHightMapBufCounter) {
+                    appContext.simulationState.resetHeightMapBufCounter();
+                }
+            })
+            .catch((error) => {
+                console.error('[WebGPU] Readback failed:', error);
+            });
     }
 
     // ========== BVH Geometry Update Mechanism ==========
@@ -2551,14 +2550,7 @@ async function main() {
   }
 
   window.addEventListener('resize', function() {
-    if (useWebGPU && webgpuRenderer) {
-      webgpuRenderer.setSize(window.innerWidth, window.innerHeight);
-      const webgpuCamera = (window as any).webgpuCamera;
-      if (webgpuCamera) {
-        webgpuCamera.aspect = window.innerWidth / window.innerHeight;
-        webgpuCamera.updateProjectionMatrix();
-      }
-    } else if (renderer) {
+    if (renderer && gl_context) {
       texturePool.resizeScreenTextures();
       renderer.setSize(window.innerWidth, window.innerHeight);
       camera.setAspectRatio(window.innerWidth / window.innerHeight);
@@ -2566,14 +2558,7 @@ async function main() {
     }
   }, false);
 
-  if (useWebGPU && webgpuRenderer) {
-    webgpuRenderer.setSize(window.innerWidth, window.innerHeight);
-    const webgpuCamera = (window as any).webgpuCamera;
-    if (webgpuCamera) {
-      webgpuCamera.aspect = window.innerWidth / window.innerHeight;
-      webgpuCamera.updateProjectionMatrix();
-    }
-  } else if (renderer) {
+  if (renderer) {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.setAspectRatio(window.innerWidth / window.innerHeight);
     camera.updateProjectionMatrix();
