@@ -12,6 +12,20 @@
 - [x] Tag release (v1.0.0-legacy).
 - [x] Document legacy maintenance rules.
 
+## Git Procedures
+1) Create legacy branch from master:
+   ```powershell
+   git checkout master
+   git pull
+   git checkout -b legacy-webgl
+   ```
+2) Tag the baseline:
+   ```powershell
+   git tag v1.0.0-legacy
+   git push origin legacy-webgl --tags
+   ```
+3) Record policy in `LEGACY_MAINTENANCE.md`.
+
 ## Completion Notes
 - **Branch Created**: `legacy-webgl` (from master branch)
 - **Tag Created**: `v1.0.0-legacy`

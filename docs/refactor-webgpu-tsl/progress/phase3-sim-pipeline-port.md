@@ -17,6 +17,16 @@
 - [ ] Implement heightmap ping-pong targets in WebGPU path.
 - [ ] Update readback/health checks for WebGPU.
 
+## Git Procedures
+1) Branch from pipeline:
+   ```powershell
+   git checkout feature/webgpu-tsl-pipeline
+   git pull
+   git checkout -b feat/compute-pass-erosion
+   ```
+2) Commit per domain (rain/flow/evap/sediment/thermal/lava).
+3) Merge back into `feature/webgpu-tsl-pipeline` after tests pass.
+
 ## Tests
 - [ ] One sim step produces non-flat heightmap.
 - [ ] Readback health checks pass.

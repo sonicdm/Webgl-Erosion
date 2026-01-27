@@ -16,6 +16,16 @@
 - [ ] Implement heightmap auto-import and caching.
 - [ ] Add status line and error banner.
 
+## Git Procedures
+1) Branch from pipeline:
+   ```powershell
+   git checkout feature/webgpu-tsl-pipeline
+   git pull
+   git checkout -b feat/gui-port
+   ```
+2) Commit GUI changes separately from terrain generation wiring.
+3) Merge back into `feature/webgpu-tsl-pipeline` after MCP browser tests.
+
 ## Tests
 - [ ] GUI changes update terrain only on Generate.
 - [ ] Type defaults apply on selection.

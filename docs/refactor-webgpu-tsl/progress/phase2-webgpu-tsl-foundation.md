@@ -16,6 +16,16 @@
 - [x] Create TerrainMaterialNode and WaterMaterialNode scaffolding.
 - [x] Add ComputeNode pipeline skeleton.
 
+## Git Procedures
+1) Create a feature branch from pipeline:
+   ```powershell
+   git checkout feature/webgpu-tsl-pipeline
+   git pull
+   git checkout -b feat/tsl-materials
+   ```
+2) Commit in slices (renderer wrapper, capability check, NodeMaterial scaffolding).
+3) Merge back into `feature/webgpu-tsl-pipeline`.
+
 ## Tests
 - [x] WebGPU capability check tests (TDD).
 - [x] WebGPURendererWrapper tests (TDD).

@@ -21,6 +21,19 @@
 - [x] Mark texture-management.ts as deprecated.
 - [x] Ensure TerrainStateHolder owns BVH/geometry.
 
+## Git Procedures
+1) Start from pipeline branch:
+   ```powershell
+   git checkout feature/webgpu-tsl-pipeline
+   git pull
+   ```
+2) Cherry-pick or merge DI commits from `refactor/base-terrain-architecture`:
+   ```powershell
+   git cherry-pick <commit-range>
+   ```
+3) Commit in small DI-focused steps (e.g., holders, runtime wiring, texture pool).
+4) Update `docs/refactor-webgpu-tsl/progress/phase1-di-parity.md`.
+
 ## Tests
 - [x] DI smoke test passes (`npm run test:ci`).
 - [x] No production imports of simulation-state (except deprecated texture-management.ts).

@@ -13,6 +13,11 @@
 - [ ] Add migration notes and API changes.
 - [ ] Archive replaced GLSL shaders into legacy branch `legacy/shaders/`.
 
+## Git Procedures
+1) Work directly on `feature/webgpu-tsl-pipeline` for docs cleanup.
+2) Commit doc-only changes separately from code.
+3) Tag milestone after docs are finalized.
+
 ## Verification
 - [ ] `npm run test:ci`
 - [ ] `npm run build`
