@@ -105,7 +105,7 @@
 
 **7) Heightmap Pipeline (Single Post-Process)**
 - Create a dedicated function:
-  - `runTerrainPostProcess(zs, options)`:
+  - `runTerrainPostProcessingPipeline(zs, options)`:
     - easing (per-sample, if needed)
     - edges (box/radial)
     - smoothing (conservative/gaussian/mean/median)
@@ -113,12 +113,15 @@
 - Call it in **one place** (TerrainReadbackService).
 
 **8) Edge + Smoothing Mapping**
-- Map GUI strings to actual THREE.Terrain filter names:
-  - GaussianBox -> GaussianBoxBlur
-  - Conservative -> SmoothConservative
-  - Median -> SmoothMedian
-- Map edge direction to THREE.Terrain signature (boolean):
-  - Up -> true, Down/Normal -> false.
+- Centralize GUI -> internal mappings in a helper:
+  - File: `src/three/terrain/TerrainFilterMapper.ts`
+  - Map GUI strings to actual THREE.Terrain filter names:
+    - GaussianBox -> GaussianBoxBlur
+    - Conservative -> SmoothConservative
+    - Median -> SmoothMedian
+  - Map edge direction to THREE.Terrain signature (boolean):
+    - Up -> true, Down/Normal -> false.
+  - Export a single function used by GUI + TerrainReadbackService.
 
 ### C) Terrain Mask Classes
 - Mask registry provides display names and IDs.
@@ -148,6 +151,27 @@
 - When adding a feature, link it to:
   - the specific function in `src/` (e.g., filters.js for edges/smoothing)
   - and the demo usage in `demo/index.js` if applicable
+
+### G) Error Surface Fields
+- Ensure GUI lastError string includes:
+  - baseType, steps, smoothing, edgeType/Direction/Curve/Distance, mask id
+  - min/max/range after generation
+
+### H) SimRes Lock Tooltip
+- Add a UI hint explaining why `segments + 1 = simRes`.
+
+### I) Mask Import Fallback
+- If selected mask type has no mask data, disable Generate button and show tooltip.
+
+## Pre-Merge Validation Checklist
+
+- [ ] GUI param state updates correctly
+- [ ] Param change does NOT auto-update terrain
+- [ ] Generate Terrain triggers pipeline
+- [ ] All types run without exception
+- [ ] Easing/edges/smoothing applied only once
+- [ ] Legacy filters map correctly
+- [ ] `npm run test:ci`, `npm run build`, `npx tsc -p tsconfig.json --noEmit` pass
 
 ## Git Procedures
 1) Branch from pipeline:
