@@ -1307,6 +1307,8 @@ async function main() {
   let lastBrushPressed = 0;
   let lastReadMouseX = -1;
   let lastReadMouseY = -1;
+  // Request one initial WebGPU readback so heightMapCpuBuf is populated for brush raycasting
+  let initialWebGPUReadbackRequested = false;
 
   function tick() {
     stats.begin();
@@ -1851,7 +1853,22 @@ async function main() {
         requestAnimationFrame(tick);
         return;
     }
-    
+
+    // Request one initial WebGPU readback so heightMapCpuBuf is populated for brush raycasting.
+    // Without this, brushPos stays (-10,-10) until the user moves the mouse (which triggers
+    // shouldRead); by then the same-frame raycast already used stale buffer, so brushes do nothing.
+    if (!initialWebGPUReadbackRequested) {
+        initialWebGPUReadbackRequested = true;
+        appContext.simulationState.readHeightmapFromWebGPU(webgpuDevice, webgpuTexturePool.readTerrainTexture)
+            .then(() => {
+                appContext.simulationState.setHeightMapBufIsFresh(true);
+            })
+            .catch((err) => {
+                console.warn('[WebGPU] Initial heightmap readback failed:', err);
+                initialWebGPUReadbackRequested = false; // allow retry
+            });
+    }
+
     // WebGPU simulation path - copy results to WebGL textures for rendering
     currentBrushState.mouseWorldPos[0] = reusableMousePoint[0];
     currentBrushState.mouseWorldPos[1] = reusableMousePoint[1];

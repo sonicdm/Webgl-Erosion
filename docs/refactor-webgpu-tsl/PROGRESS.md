@@ -24,8 +24,8 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 - Notes: Three.js upgraded to r171, WebGPURendererWrapper created, capability checks implemented, NodeMaterial scaffolding established, ComputeNodePipeline skeleton created. All following TDD approach. **Acceptance criteria met**: WebGPURenderer renders a basic scene (red cube visible), NodeMaterial renders with WebGPU backend. Browser validation confirms functional rendering. Refactored all WebGL classes to use state holder instead of global `gl`.
 
 ### Phase 3 — Simulation Pipeline Port
-- Status: Pending
-- Notes: ComputeNode passes for rain/flow/evap/sediment/thermal/lava.
+- Status: Complete
+- Notes: All simulation compute passes ported to WGSL: rain, flow, water height, sediment, sediment advection (simple + MacCormack), max slippage, thermal flux, thermal apply, evaporation, average smoothing. Wired in SimulatePerStepWebGPU with correct uniforms and texture swaps. Lava pass remains TODO.
 
 ### Phase 4 — Terrain Generation + GUI Parity
 - Status: Pending
@@ -76,6 +76,10 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 - Tests + MCP verification — January 30, 2026
   - CI: `npm run test:ci` — 23 suites, 112 tests passing
   - MCP (user-browser-devtools): navigated to http://localhost:8080 (200 OK), full-page screenshot saved, visible text "Generating Terrain..." confirms app loads and terrain flow runs
+- Phase 3 — Simulation Pipeline Port (January 29, 2026)
+  - Ported water height (alterwaterhight-frag.glsl), sediment (sediment-frag.glsl), sediment advection simple + MacCormack (sediadvect/maccormack), max slippage (maxslippageheight-frag.glsl), thermal flux/apply (thermalterrainflux/thermalapply-frag.glsl), average smoothing (average-frag.glsl) to WGSL compute in ComputeNodePipeline
+  - Wired all passes in SimulatePerStepWebGPU with correct controls (VelocityMultiplier, thermalTalusAngleScale, ErosionMode, etc.) and texture swaps
+  - Brush state flows to rainPass; water height includes velocity advection inline
 
 ## Detailed Progress Files
 

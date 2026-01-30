@@ -428,8 +428,716 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 `;
 
+    // Water height / velocity compute shader (alterwaterhight-frag.glsl)
+    private WATER_HEIGHT_COMPUTE_SHADER = `
+@group(0) @binding(0) var readFlux: texture_2d<f32>;
+@group(0) @binding(1) var readTerrain: texture_2d<f32>;
+@group(0) @binding(2) var readVel: texture_2d<f32>;
+@group(0) @binding(3) var writeTerrain: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(4) var writeVel: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_PipeLen: f32,
+    u_timestep: f32,
+    u_PipeArea: f32,
+    u_VelMult: f32,
+    u_Time: f32,
+    u_VelAdvMag: f32,
+};
+
+@group(0) @binding(5) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let texture_size = textureDimensions(readTerrain);
+    let dim = vec2<f32>(f32(texture_size.x), f32(texture_size.y));
+    let div = 1.0 / uniforms.u_SimRes;
+    let curuv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+
+    let curflux = textureLoad(readFlux, vec2<i32>(global_id.xy), 0);
+    let cur = textureLoad(readTerrain, vec2<i32>(global_id.xy), 0);
+    let curvel = textureLoad(readVel, vec2<i32>(global_id.xy), 0);
+
+    let topflux = textureLoad(readFlux, vec2<i32>(global_id.xy) + vec2<i32>(0, 1), 0);
+    let rightflux = textureLoad(readFlux, vec2<i32>(global_id.xy) + vec2<i32>(1, 0), 0);
+    let bottomflux = textureLoad(readFlux, vec2<i32>(global_id.xy) + vec2<i32>(0, -1), 0);
+    let leftflux = textureLoad(readFlux, vec2<i32>(global_id.xy) + vec2<i32>(-1, 0), 0);
+
+    var ftopout = curflux.x;
+    var frightout = curflux.y;
+    var fbottomout = curflux.z;
+    var fleftout = curflux.w;
+
+    let fin = topflux.z + rightflux.w + bottomflux.x + leftflux.y;
+    let fout = ftopout + frightout + fbottomout + fleftout;
+    let deltavol = uniforms.u_timestep * (fin - fout) / (uniforms.u_PipeLen * uniforms.u_PipeLen);
+
+    let d1 = cur.y;
+    let d2 = max(d1 + deltavol, 0.0);
+    let da = (d1 + d2) / 2.0;
+
+    var veloci = vec2<f32>(
+        leftflux.y - curflux.w + curflux.y - rightflux.w,
+        bottomflux.x - curflux.z + curflux.x - topflux.z
+    ) / 2.0;
+    if (cur.y == 0.0 && deltavol == 0.0) {
+        veloci = vec2<f32>(0.0, 0.0);
+    }
+    if (da <= 0.0001) {
+        veloci = vec2<f32>(0.0);
+    } else {
+        veloci = veloci / (da * uniforms.u_PipeLen);
+    }
+
+    // Velocity advection: back-trace and sample
+    var useVel = curvel / uniforms.u_SimRes;
+    useVel = useVel * 0.5;
+    let oldloc = vec2<f32>(
+        curuv.x - useVel.x * uniforms.u_timestep,
+        curuv.y - useVel.y * uniforms.u_timestep
+    );
+    let vel_dim = vec2<f32>(f32(textureDimensions(readVel).x), f32(textureDimensions(readVel).y));
+    let uv_tex = oldloc * vel_dim - 0.5;
+    let i0 = clamp(i32(floor(uv_tex.x)), 0, i32(vel_dim.x) - 1);
+    let j0 = clamp(i32(floor(uv_tex.y)), 0, i32(vel_dim.y) - 1);
+    let i1 = min(i0 + 1, i32(vel_dim.x) - 1);
+    let j1 = min(j0 + 1, i32(vel_dim.y) - 1);
+    let fx = fract(uv_tex.x);
+    let fy = fract(uv_tex.y);
+    let v00 = textureLoad(readVel, vec2<i32>(i0, j0), 0);
+    let v10 = textureLoad(readVel, vec2<i32>(i1, j0), 0);
+    let v01 = textureLoad(readVel, vec2<i32>(i0, j1), 0);
+    let v11 = textureLoad(readVel, vec2<i32>(i1, j1), 0);
+    let oldvel = mix(mix(v00.xy, v10.xy, fx), mix(v01.xy, v11.xy, fx), fy);
+
+    veloci += oldvel * uniforms.u_VelAdvMag;
+
+    if (cur.y < 0.01) {
+        veloci = vec2<f32>(0.0);
+    }
+
+    textureStore(writeTerrain, vec2<i32>(global_id.xy), vec4<f32>(cur.x, max(cur.y + deltavol, 0.0), cur.z, cur.w));
+    textureStore(writeVel, vec2<i32>(global_id.xy), vec4<f32>(veloci.x * uniforms.u_VelMult, veloci.y * uniforms.u_VelMult, curvel.z, curvel.w));
+}
+`;
+
+    // Sediment compute shader (sediment-frag.glsl) - 4 outputs: terrain, sediment, terrainNormal, velocity
+    private SEDIMENT_COMPUTE_SHADER = `
+@group(0) @binding(0) var readTerrain: texture_2d<f32>;
+@group(0) @binding(1) var readVelocity: texture_2d<f32>;
+@group(0) @binding(2) var readSediment: texture_2d<f32>;
+@group(0) @binding(3) var writeTerrain: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(4) var writeSediment: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(5) var writeTerrainNormal: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(6) var writeVelocity: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_PipeLen: f32,
+    u_Ks: f32,
+    u_Kc: f32,
+    u_Kd: f32,
+    u_timestep: f32,
+    u_Time: f32,
+    u_RockErosionResistance: f32,
+};
+
+@group(0) @binding(7) var<uniform> uniforms: Uniforms;
+
+fn calnor(coord: vec2<i32>) -> vec3<f32> {
+    let r = textureLoad(readTerrain, coord + vec2<i32>(1, 0), 0);
+    let t = textureLoad(readTerrain, coord + vec2<i32>(0, 1), 0);
+    let b = textureLoad(readTerrain, coord + vec2<i32>(0, -1), 0);
+    let l = textureLoad(readTerrain, coord + vec2<i32>(-1, 0), 0);
+    var nor = vec3<f32>(l.x - r.x, 2.0, t.x - b.x);
+    nor = normalize(nor);
+    return nor;
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let div = 1.0 / uniforms.u_SimRes;
+
+    var Kc = uniforms.u_Kc;
+    var Ks = uniforms.u_Ks;
+    var Kd = uniforms.u_Kd;
+
+    let curTerrain = textureLoad(readTerrain, coord, 0);
+    var rockMaterialValue = curTerrain.z;
+    let isRock = rockMaterialValue > 0.1;
+    var baseRockSurfaceHeight = curTerrain.w;
+    if (isRock && baseRockSurfaceHeight < 0.001) {
+        baseRockSurfaceHeight = curTerrain.x;
+    }
+
+    let rockStrength = clamp((rockMaterialValue - 0.1) / 0.9, 0.0, 1.0);
+    var rockFactor = select(1.0, 1.0 - uniforms.u_RockErosionResistance * rockStrength, isRock);
+    let hasSedimentOnRock = isRock && curTerrain.x > baseRockSurfaceHeight + 0.001;
+    var neighborRockFactor = 1.0;
+    var capacityBoost = 1.0;
+    let wasRecentlyRock = curTerrain.z > 0.05;
+
+    if (!isRock && !wasRecentlyRock) {
+        let topTerrain = textureLoad(readTerrain, coord + vec2<i32>(0, 1), 0);
+        let rightTerrain = textureLoad(readTerrain, coord + vec2<i32>(1, 0), 0);
+        let bottomTerrain = textureLoad(readTerrain, coord + vec2<i32>(0, -1), 0);
+        let leftTerrain = textureLoad(readTerrain, coord + vec2<i32>(-1, 0), 0);
+        var rockNeighbors = 0;
+        if (topTerrain.z > 0.1) { rockNeighbors++; }
+        if (rightTerrain.z > 0.1) { rockNeighbors++; }
+        if (bottomTerrain.z > 0.1) { rockNeighbors++; }
+        if (leftTerrain.z > 0.1) { rockNeighbors++; }
+        if (rockNeighbors > 0) {
+            neighborRockFactor = 1.0 + f32(rockNeighbors) * 0.5;
+            capacityBoost = 1.0 + f32(rockNeighbors) * 0.3;
+        }
+    }
+
+    var effectiveCapacityRockFactor = select(rockFactor, 1.0, hasSedimentOnRock);
+    Ks *= neighborRockFactor;
+    Kc *= capacityBoost;
+    Kc *= effectiveCapacityRockFactor;
+
+    let nor = calnor(coord);
+    let slopeSin = abs(sqrt(1.0 - nor.y * nor.y));
+
+    let curvel = textureLoad(readVelocity, coord, 0);
+    let curSediment = textureLoad(readSediment, coord, 0);
+    let velo = length(curvel.xy);
+    let slope = max(0.1, abs(slopeSin));
+    let sedicap = Kc * slope * velo;
+
+    var cursedi = curSediment.x;
+    var hight = curTerrain.x;
+    var outsedi = curSediment.x;
+    var heightChange = 0.0;
+    var originalRockMaterial = curTerrain.z;
+
+    if (sedicap > cursedi) {
+        let erodingSedimentLayer = hasSedimentOnRock && hight > baseRockSurfaceHeight;
+        let effectiveRockFactor = select(rockFactor, 1.0, erodingSedimentLayer);
+        var changesedi = (sedicap - cursedi) * (Ks * effectiveRockFactor);
+        hight = hight - changesedi;
+        heightChange = -changesedi;
+        if (hasSedimentOnRock && hight <= baseRockSurfaceHeight) {
+            baseRockSurfaceHeight = hight;
+        }
+        let sedimentOutputFactor = select(effectiveCapacityRockFactor, 1.0, erodingSedimentLayer);
+        outsedi = outsedi + changesedi * sedimentOutputFactor;
+        if (rockMaterialValue > 0.1 && changesedi > 0.0 && !erodingSedimentLayer) {
+            let conversionRate = min(changesedi * 0.05, originalRockMaterial * 0.01);
+            originalRockMaterial = max(0.0, originalRockMaterial - conversionRate);
+        }
+    } else {
+        var changesedi = (cursedi - sedicap) * Kd;
+        if (isRock && baseRockSurfaceHeight < 0.001) {
+            baseRockSurfaceHeight = curTerrain.x;
+        }
+        hight = hight + changesedi;
+        heightChange = changesedi;
+        outsedi = outsedi - changesedi;
+    }
+
+    var finalRockMaterial = originalRockMaterial;
+    let waterLevel = curTerrain.y;
+    let waterVelocity = length(curvel.xy);
+    let currentTotalHeight = hight + waterLevel;
+    let canSpreadRock = waterLevel < 0.1 && waterVelocity < 0.5;
+
+    if (!isRock && heightChange < 0.0 && canSpreadRock && !wasRecentlyRock) {
+        let topTerrain = textureLoad(readTerrain, coord + vec2<i32>(0, 1), 0);
+        let rightTerrain = textureLoad(readTerrain, coord + vec2<i32>(1, 0), 0);
+        let bottomTerrain = textureLoad(readTerrain, coord + vec2<i32>(0, -1), 0);
+        let leftTerrain = textureLoad(readTerrain, coord + vec2<i32>(-1, 0), 0);
+        var lowestContiguousRockHeight = 999999.0;
+        var bestRockValue = 0.0;
+        var contiguousRockCount = 0u;
+
+        if (topTerrain.z > 0.5) {
+            if (topTerrain.x < lowestContiguousRockHeight) {
+                lowestContiguousRockHeight = topTerrain.x;
+                bestRockValue = topTerrain.z;
+            }
+            contiguousRockCount = contiguousRockCount + 1u;
+        }
+        if (rightTerrain.z > 0.5) {
+            if (rightTerrain.x < lowestContiguousRockHeight) {
+                lowestContiguousRockHeight = rightTerrain.x;
+                bestRockValue = rightTerrain.z;
+            }
+            contiguousRockCount = contiguousRockCount + 1u;
+        }
+        if (bottomTerrain.z > 0.5) {
+            if (bottomTerrain.x < lowestContiguousRockHeight) {
+                lowestContiguousRockHeight = bottomTerrain.x;
+                bestRockValue = bottomTerrain.z;
+            }
+            contiguousRockCount = contiguousRockCount + 1u;
+        }
+        if (leftTerrain.z > 0.5) {
+            if (leftTerrain.x < lowestContiguousRockHeight) {
+                lowestContiguousRockHeight = leftTerrain.x;
+                bestRockValue = leftTerrain.z;
+            }
+            contiguousRockCount = contiguousRockCount + 1u;
+        }
+
+        let originalTerrainHeight = curTerrain.x;
+        if (contiguousRockCount > 0u && originalTerrainHeight > lowestContiguousRockHeight) {
+            let depthBelowContiguousEdge = lowestContiguousRockHeight - hight;
+            var lowestRockTotalHeight = 999999.0;
+            if (topTerrain.z > 0.5) {
+                let rockTotalHeight = topTerrain.x + topTerrain.y;
+                lowestRockTotalHeight = min(lowestRockTotalHeight, rockTotalHeight);
+            }
+            if (rightTerrain.z > 0.5) {
+                let rockTotalHeight = rightTerrain.x + rightTerrain.y;
+                lowestRockTotalHeight = min(lowestRockTotalHeight, rockTotalHeight);
+            }
+            if (bottomTerrain.z > 0.5) {
+                let rockTotalHeight = bottomTerrain.x + bottomTerrain.y;
+                lowestRockTotalHeight = min(lowestRockTotalHeight, rockTotalHeight);
+            }
+            if (leftTerrain.z > 0.5) {
+                let rockTotalHeight = leftTerrain.x + leftTerrain.y;
+                lowestRockTotalHeight = min(lowestRockTotalHeight, rockTotalHeight);
+            }
+            let isBelowWaterSurface = currentTotalHeight < lowestRockTotalHeight + 0.3;
+            if (depthBelowContiguousEdge >= 0.2 && !isBelowWaterSurface) {
+                let erosionAmount = abs(heightChange);
+                let effectiveDepth = depthBelowContiguousEdge - 0.2;
+                let depthFactor = clamp(effectiveDepth * 2.0, 0.0, 1.0);
+                let spreadFactor = min(erosionAmount * 0.5 * (1.0 + depthFactor * 0.2), 0.01);
+                let currentRockValue = curTerrain.z;
+                let newRockValue = max(currentRockValue, mix(currentRockValue, 1.0, spreadFactor));
+                let rockMaterialAdded = newRockValue - currentRockValue;
+                if (rockMaterialAdded > 0.0) {
+                    let sedimentConsumed = rockMaterialAdded * outsedi * 0.5;
+                    outsedi = max(0.0, outsedi - sedimentConsumed);
+                    let heightAdjustment = rockMaterialAdded * effectiveDepth * 0.05 * 1.1;
+                    hight = hight + heightAdjustment;
+                }
+                finalRockMaterial = newRockValue;
+                baseRockSurfaceHeight = hight;
+            }
+        }
+    }
+
+    if (finalRockMaterial > 0.5 && baseRockSurfaceHeight < 0.001) {
+        baseRockSurfaceHeight = hight;
+    }
+
+    textureStore(writeTerrainNormal, coord, vec4<f32>(vec3<f32>(abs(slopeSin)), 1.0));
+    textureStore(writeSediment, coord, vec4<f32>(outsedi, 0.0, 0.0, 1.0));
+    textureStore(writeTerrain, coord, vec4<f32>(hight, curTerrain.y, finalRockMaterial, baseRockSurfaceHeight));
+    textureStore(writeVelocity, coord, curvel);
+}
+`;
+
+    // Sediment advection simple (sediadvect-frag.glsl) - 3 outputs
+    private SEDIMENT_ADVECT_SIMPLE_SHADER = `
+@group(0) @binding(0) var readVel: texture_2d<f32>;
+@group(0) @binding(1) var readSediment: texture_2d<f32>;
+@group(0) @binding(2) var readSedimentBlend: texture_2d<f32>;
+@group(0) @binding(3) var readTerrain: texture_2d<f32>;
+@group(0) @binding(4) var writeSediment: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(5) var writeVel: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(6) var writeSedimentBlend: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_timestep: f32,
+    unif_advectMultiplier: f32,
+};
+
+@group(0) @binding(7) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let dim = vec2<f32>(f32(textureDimensions(readSediment).x), f32(textureDimensions(readSediment).y));
+    let curuv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+
+    let curvel = textureLoad(readVel, coord, 0);
+    let cursedi = textureLoad(readSediment, coord, 0);
+    let curterrain = textureLoad(readTerrain, coord, 0);
+
+    var useVel = curvel / uniforms.u_SimRes;
+    useVel = useVel * uniforms.unif_advectMultiplier * 0.5;
+
+    let oldloc = vec2<f32>(
+        curuv.x - useVel.x * uniforms.u_timestep,
+        curuv.y - useVel.y * uniforms.u_timestep
+    );
+    let uv_tex = oldloc * dim - 0.5;
+    let i0 = clamp(i32(floor(uv_tex.x)), 0, i32(dim.x) - 1);
+    let j0 = clamp(i32(floor(uv_tex.y)), 0, i32(dim.y) - 1);
+    let i1 = min(i0 + 1, i32(dim.x) - 1);
+    let j1 = min(j0 + 1, i32(dim.y) - 1);
+    let fx = fract(uv_tex.x);
+    let fy = fract(uv_tex.y);
+    let v00 = textureLoad(readSediment, vec2<i32>(i0, j0), 0);
+    let v10 = textureLoad(readSediment, vec2<i32>(i1, j0), 0);
+    let v01 = textureLoad(readSediment, vec2<i32>(i0, j1), 0);
+    let v11 = textureLoad(readSediment, vec2<i32>(i1, j1), 0);
+    let oldsedi = mix(mix(v00.x, v10.x, fx), mix(v01.x, v11.x, fx), fy);
+
+    let curSediVal = cursedi.x * curterrain.y * 0.1;
+    let sediBlendVal = textureLoad(readSedimentBlend, coord, 0).x;
+    let newSediBlendVal = (sediBlendVal * 1660.0 + curSediVal) / 1661.0;
+
+    textureStore(writeSediment, coord, vec4<f32>(oldsedi, 0.0, 0.0, 1.0));
+    textureStore(writeVel, coord, curvel);
+    textureStore(writeSedimentBlend, coord, vec4<f32>(newSediBlendVal, 0.0, 0.0, 1.0));
+}
+`;
+
+    // Sediment advection forward (for MacCormack) - writes to sedimentAdvectA only
+    private SEDIMENT_ADVECT_FORWARD_SHADER = `
+@group(0) @binding(0) var readVel: texture_2d<f32>;
+@group(0) @binding(1) var readSediment: texture_2d<f32>;
+@group(0) @binding(2) var writeSedimentAdvectA: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_timestep: f32,
+    unif_advectMultiplier: f32,
+};
+
+@group(0) @binding(3) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let dim = vec2<f32>(f32(textureDimensions(readSediment).x), f32(textureDimensions(readSediment).y));
+    let curuv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+
+    let curvel = textureLoad(readVel, coord, 0);
+    var useVel = curvel / uniforms.u_SimRes;
+    useVel = useVel * uniforms.unif_advectMultiplier * 0.5;
+
+    let oldloc = vec2<f32>(
+        curuv.x - useVel.x * uniforms.u_timestep,
+        curuv.y - useVel.y * uniforms.u_timestep
+    );
+    let uv_tex = oldloc * dim - 0.5;
+    let i0 = clamp(i32(floor(uv_tex.x)), 0, i32(dim.x) - 1);
+    let j0 = clamp(i32(floor(uv_tex.y)), 0, i32(dim.y) - 1);
+    let i1 = min(i0 + 1, i32(dim.x) - 1);
+    let j1 = min(j0 + 1, i32(dim.y) - 1);
+    let fx = fract(uv_tex.x);
+    let fy = fract(uv_tex.y);
+    let v00 = textureLoad(readSediment, vec2<i32>(i0, j0), 0);
+    let v10 = textureLoad(readSediment, vec2<i32>(i1, j0), 0);
+    let v01 = textureLoad(readSediment, vec2<i32>(i0, j1), 0);
+    let v11 = textureLoad(readSediment, vec2<i32>(i1, j1), 0);
+    let oldsedi = mix(mix(v00.x, v10.x, fx), mix(v01.x, v11.x, fx), fy);
+
+    textureStore(writeSedimentAdvectA, coord, vec4<f32>(oldsedi, 0.0, 0.0, 1.0));
+}
+`;
+
+    // Sediment advection backward (for MacCormack) - sample A at backward-traced position, write B
+    private SEDIMENT_ADVECT_BACKWARD_SHADER = `
+@group(0) @binding(0) var readVel: texture_2d<f32>;
+@group(0) @binding(1) var readSedimentAdvectA: texture_2d<f32>;
+@group(0) @binding(2) var writeSedimentAdvectB: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_timestep: f32,
+};
+
+@group(0) @binding(3) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let dim = vec2<f32>(f32(textureDimensions(readSedimentAdvectA).x), f32(textureDimensions(readSedimentAdvectA).y));
+    let curuv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+
+    let curvel = textureLoad(readVel, coord, 0);
+    let useVel = curvel.xy / uniforms.u_SimRes * uniforms.u_timestep;
+    let oldloc = vec2<f32>(curuv.x + useVel.x, curuv.y + useVel.y);
+    let uv_tex = oldloc * dim - 0.5;
+    let i0 = clamp(i32(floor(uv_tex.x)), 0, i32(dim.x) - 1);
+    let j0 = clamp(i32(floor(uv_tex.y)), 0, i32(dim.y) - 1);
+    let i1 = min(i0 + 1, i32(dim.x) - 1);
+    let j1 = min(j0 + 1, i32(dim.y) - 1);
+    let fx = fract(uv_tex.x);
+    let fy = fract(uv_tex.y);
+    let v00 = textureLoad(readSedimentAdvectA, vec2<i32>(i0, j0), 0);
+    let v10 = textureLoad(readSedimentAdvectA, vec2<i32>(i1, j0), 0);
+    let v01 = textureLoad(readSedimentAdvectA, vec2<i32>(i0, j1), 0);
+    let v11 = textureLoad(readSedimentAdvectA, vec2<i32>(i1, j1), 0);
+    let oldsedi = mix(mix(v00.x, v10.x, fx), mix(v01.x, v11.x, fx), fy);
+
+    textureStore(writeSedimentAdvectB, coord, vec4<f32>(oldsedi, 0.0, 0.0, 1.0));
+}
+`;
+
+    // MacCormack correction (maccormack-frag.glsl)
+    private MACCORMACK_CORRECTION_SHADER = `
+@group(0) @binding(0) var readVel: texture_2d<f32>;
+@group(0) @binding(1) var readSediment: texture_2d<f32>;
+@group(0) @binding(2) var readSedimentAdvectA: texture_2d<f32>;
+@group(0) @binding(3) var readSedimentAdvectB: texture_2d<f32>;
+@group(0) @binding(4) var writeSediment: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_timestep: f32,
+};
+
+@group(0) @binding(5) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let dim = f32(textureDimensions(readSediment).x);
+    let curuv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(dim, dim);
+
+    let curvel = textureLoad(readVel, coord, 0);
+    let targetPos = curuv * dim - uniforms.u_timestep * curvel.xy;
+    let st_xy = floor(targetPos - 0.5) + 0.5;
+    let st_zw = st_xy + 1.0;
+    let st_xy_i = vec2<i32>(i32(st_xy.x), i32(st_xy.y));
+    let st_zy_i = vec2<i32>(i32(st_zw.x), i32(st_xy.y));
+    let st_xw_i = vec2<i32>(i32(st_xy.x), i32(st_zw.y));
+    let st_zw_i = vec2<i32>(i32(st_zw.x), i32(st_zw.y));
+    let dim_i = i32(dim);
+    let nodeVal0 = textureLoad(readSediment, clamp(st_xy_i, vec2<i32>(0, 0), vec2<i32>(dim_i - 1, dim_i - 1)), 0).x;
+    let nodeVal1 = textureLoad(readSediment, clamp(st_zy_i, vec2<i32>(0, 0), vec2<i32>(dim_i - 1, dim_i - 1)), 0).x;
+    let nodeVal2 = textureLoad(readSediment, clamp(st_xw_i, vec2<i32>(0, 0), vec2<i32>(dim_i - 1, dim_i - 1)), 0).x;
+    let nodeVal3 = textureLoad(readSediment, clamp(st_zw_i, vec2<i32>(0, 0), vec2<i32>(dim_i - 1, dim_i - 1)), 0).x;
+    let clampMin = min(min(min(nodeVal0, nodeVal1), nodeVal2), nodeVal3);
+    let clampMax = max(max(max(nodeVal0, nodeVal1), nodeVal2), nodeVal3);
+
+    let sediment = textureLoad(readSediment, coord, 0).x;
+    let advectA = textureLoad(readSedimentAdvectA, coord, 0).x;
+    let advectB = textureLoad(readSedimentAdvectB, coord, 0).x;
+    var res = advectA + 0.5 * (sediment - advectB);
+    res = clamp(res, clampMin, clampMax);
+
+    textureStore(writeSediment, coord, vec4<f32>(res, 0.0, 0.0, 1.0));
+}
+`;
+
+    // Max slippage compute shader (maxslippageheight-frag.glsl)
+    private MAX_SLIPPAGE_COMPUTE_SHADER = `
+@group(0) @binding(0) var readTerrain: texture_2d<f32>;
+@group(0) @binding(1) var writeMaxSlippage: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    unif_TalusScale: f32,
+};
+
+@group(0) @binding(2) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+
+    let terraintop = textureLoad(readTerrain, coord + vec2<i32>(0, 1), 0);
+    let terrainright = textureLoad(readTerrain, coord + vec2<i32>(1, 0), 0);
+    let terrainbottom = textureLoad(readTerrain, coord + vec2<i32>(0, -1), 0);
+    let terrainleft = textureLoad(readTerrain, coord + vec2<i32>(-1, 0), 0);
+    let terraincur = textureLoad(readTerrain, coord, 0);
+
+    let _maxHeightDiff = uniforms.unif_TalusScale;
+    let maxLocalDiff = _maxHeightDiff * 0.01;
+    var avgDiff = (terraintop.x + terrainright.x + terrainbottom.x + terrainleft.x) * 0.25 - terraincur.x;
+    avgDiff = 10.0 * max(abs(avgDiff) - maxLocalDiff, 0.0);
+
+    textureStore(writeMaxSlippage, coord, vec4<f32>(max(_maxHeightDiff - avgDiff, 0.0), 0.0, 0.0, 1.0));
+}
+`;
+
+    // Thermal flux compute shader (thermalterrainflux-frag.glsl)
+    private THERMAL_FLUX_COMPUTE_SHADER = `
+@group(0) @binding(0) var readTerrain: texture_2d<f32>;
+@group(0) @binding(1) var readMaxSlippage: texture_2d<f32>;
+@group(0) @binding(2) var writeTerrainFlux: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_PipeLen: f32,
+    u_timestep: f32,
+    u_PipeArea: f32,
+    unif_thermalRate: f32,
+};
+
+@group(0) @binding(3) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+
+    let terraintop = textureLoad(readTerrain, coord + vec2<i32>(0, 1), 0);
+    let terrainright = textureLoad(readTerrain, coord + vec2<i32>(1, 0), 0);
+    let terrainbottom = textureLoad(readTerrain, coord + vec2<i32>(0, -1), 0);
+    let terrainleft = textureLoad(readTerrain, coord + vec2<i32>(-1, 0), 0);
+    let terraincur = textureLoad(readTerrain, coord, 0);
+
+    let slippagetop = textureLoad(readMaxSlippage, coord + vec2<i32>(0, 1), 0).x;
+    let slippageright = textureLoad(readMaxSlippage, coord + vec2<i32>(1, 0), 0).x;
+    let slippagebottom = textureLoad(readMaxSlippage, coord + vec2<i32>(0, -1), 0).x;
+    let slippageleft = textureLoad(readMaxSlippage, coord + vec2<i32>(-1, 0), 0).x;
+    let slippagecur = textureLoad(readMaxSlippage, coord, 0).x;
+
+    var diff = vec4<f32>(
+        terraincur.x - terraintop.x - (slippagecur + slippagetop) * 0.5,
+        terraincur.x - terrainright.x - (slippagecur + slippageright) * 0.5,
+        terraincur.x - terrainbottom.x - (slippagecur + slippagebottom) * 0.5,
+        terraincur.x - terrainleft.x - (slippagecur + slippageleft) * 0.5
+    );
+    diff = max(diff, vec4<f32>(0.0));
+
+    var newFlow = diff * 1.2;
+
+    var outfactor = (newFlow.x + newFlow.y + newFlow.z + newFlow.w) * uniforms.u_timestep;
+    if (outfactor > 1e-5) {
+        outfactor = terraincur.x / outfactor;
+        if (outfactor > 1.0) { outfactor = 1.0; }
+        newFlow = newFlow * outfactor;
+    }
+
+    textureStore(writeTerrainFlux, coord, newFlow);
+}
+`;
+
+    // Thermal apply compute shader (thermalapply-frag.glsl)
+    private THERMAL_APPLY_COMPUTE_SHADER = `
+@group(0) @binding(0) var readTerrainFlux: texture_2d<f32>;
+@group(0) @binding(1) var readTerrain: texture_2d<f32>;
+@group(0) @binding(2) var writeTerrain: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_PipeLen: f32,
+    u_timestep: f32,
+    u_PipeArea: f32,
+    unif_thermalErosionScale: f32,
+};
+
+@group(0) @binding(3) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+
+    let topflux = textureLoad(readTerrainFlux, coord + vec2<i32>(0, 1), 0);
+    let rightflux = textureLoad(readTerrainFlux, coord + vec2<i32>(1, 0), 0);
+    let bottomflux = textureLoad(readTerrainFlux, coord + vec2<i32>(0, -1), 0);
+    let leftflux = textureLoad(readTerrainFlux, coord + vec2<i32>(-1, 0), 0);
+    let outputflux = textureLoad(readTerrainFlux, coord, 0);
+
+    let inputflux = vec4<f32>(topflux.z, rightflux.w, bottomflux.x, leftflux.y);
+    let vol = inputflux.x + inputflux.y + inputflux.z + inputflux.w - outputflux.x - outputflux.y - outputflux.z - outputflux.w;
+
+    let thermalErosionScale = uniforms.unif_thermalErosionScale;
+    let tdelta = min(50.0, uniforms.u_timestep * thermalErosionScale) * vol;
+
+    let curTerrain = textureLoad(readTerrain, coord, 0);
+
+    textureStore(writeTerrain, coord, vec4<f32>(curTerrain.x + tdelta, curTerrain.y, curTerrain.z, curTerrain.w));
+}
+`;
+
+    // Average smoothing compute shader (average-frag.glsl) - 2 outputs: terrain, writeAvg (terrainNorTexture)
+    private AVERAGE_COMPUTE_SHADER = `
+@group(0) @binding(0) var readTerrain: texture_2d<f32>;
+@group(0) @binding(1) var writeTerrain: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(2) var writeAvg: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    unif_ErosionMode: f32,
+};
+
+@group(0) @binding(3) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let diagonalWeight = 0.707;
+    var threathhold = 0.1;
+
+    let cur = textureLoad(readTerrain, coord, 0);
+    let top = textureLoad(readTerrain, coord + vec2<i32>(0, 1), 0);
+    let topright = textureLoad(readTerrain, coord + vec2<i32>(1, 1), 0);
+    let right = textureLoad(readTerrain, coord + vec2<i32>(1, 0), 0);
+    let bottomright = textureLoad(readTerrain, coord + vec2<i32>(1, -1), 0);
+    let bottom = textureLoad(readTerrain, coord + vec2<i32>(0, -1), 0);
+    let bottomleft = textureLoad(readTerrain, coord + vec2<i32>(-1, -1), 0);
+    let left = textureLoad(readTerrain, coord + vec2<i32>(-1, 0), 0);
+    let topleft = textureLoad(readTerrain, coord + vec2<i32>(-1, 1), 0);
+
+    let t_d = cur.x - top.x;
+    let r_d = cur.x - right.x;
+    let b_d = cur.x - bottom.x;
+    let l_d = cur.x - left.x;
+    let tr_d = cur.x - topright.x;
+    let br_d = cur.x - bottomright.x;
+    let bl_d = cur.x - bottomleft.x;
+    let tl_d = cur.x - topleft.x;
+
+    var avg_hdiff = t_d + r_d + b_d + l_d + (tr_d + br_d + bl_d + tl_d) * diagonalWeight;
+    avg_hdiff = avg_hdiff / (4.0 * (1.0 + diagonalWeight));
+    avg_hdiff = abs(avg_hdiff);
+
+    var avg_hdiff_4 = t_d + r_d + b_d + l_d;
+    avg_hdiff_4 = avg_hdiff_4 / 4.0;
+    avg_hdiff_4 = abs(avg_hdiff_4);
+
+    if (uniforms.unif_ErosionMode == 1.0) {
+        threathhold = avg_hdiff / 2.0;
+    } else if (uniforms.unif_ErosionMode == 2.0) {
+        threathhold = pow(avg_hdiff, 3.0);
+    }
+
+    var cur_h = cur.x;
+    var col = 0.0;
+    let curWeight = 8.0;
+
+    if (((abs(r_d) > threathhold && abs(l_d) > threathhold) && r_d * l_d > 0.0) ||
+        ((abs(t_d) > threathhold && abs(b_d) > threathhold) && t_d * b_d > 0.0) ||
+        ((abs(tr_d) > threathhold && abs(bl_d) > threathhold) && tr_d * bl_d > 0.0) ||
+        ((abs(tl_d) > threathhold && abs(br_d) > threathhold) && tl_d * br_d > 0.0)) {
+        cur_h = (cur.x * curWeight + top.x + right.x + bottom.x + left.x + topright.x * diagonalWeight + topleft.x * diagonalWeight + bottomleft.x * diagonalWeight + bottomright.x * diagonalWeight) / (4.0 * (1.0 + diagonalWeight) + curWeight);
+        col = 1.0;
+    }
+
+    textureStore(writeTerrain, coord, vec4<f32>(cur_h, cur.y, cur.z, cur.w));
+    textureStore(writeAvg, coord, vec4<f32>(col, col, col, 1.0));
+}
+`;
+
     private flowPipeline: GPUComputePipeline | null = null;
     private flowBindGroupLayout: GPUBindGroupLayout | null = null;
+    private waterHeightPipeline: GPUComputePipeline | null = null;
+    private waterHeightBindGroupLayout: GPUBindGroupLayout | null = null;
+    private sedimentPipeline: GPUComputePipeline | null = null;
+    private sedimentBindGroupLayout: GPUBindGroupLayout | null = null;
+    private sedimentAdvectSimplePipeline: GPUComputePipeline | null = null;
+    private sedimentAdvectSimpleBindGroupLayout: GPUBindGroupLayout | null = null;
+    private sedimentAdvectForwardPipeline: GPUComputePipeline | null = null;
+    private sedimentAdvectForwardBindGroupLayout: GPUBindGroupLayout | null = null;
+    private sedimentAdvectBackwardPipeline: GPUComputePipeline | null = null;
+    private sedimentAdvectBackwardBindGroupLayout: GPUBindGroupLayout | null = null;
+    private maccormackCorrectionPipeline: GPUComputePipeline | null = null;
+    private maccormackCorrectionBindGroupLayout: GPUBindGroupLayout | null = null;
+    private maxSlippagePipeline: GPUComputePipeline | null = null;
+    private maxSlippageBindGroupLayout: GPUBindGroupLayout | null = null;
+    private thermalFluxPipeline: GPUComputePipeline | null = null;
+    private thermalFluxBindGroupLayout: GPUBindGroupLayout | null = null;
+    private thermalApplyPipeline: GPUComputePipeline | null = null;
+    private thermalApplyBindGroupLayout: GPUBindGroupLayout | null = null;
+    private averagePipeline: GPUComputePipeline | null = null;
+    private averageBindGroupLayout: GPUBindGroupLayout | null = null;
     private evaporationPipeline: GPUComputePipeline | null = null;
     private evaporationBindGroupLayout: GPUBindGroupLayout | null = null;
 
@@ -548,7 +1256,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     /**
      * Water Height compute pass (MRT: 2 outputs - terrain, velocity).
      * Ports alterwaterhight-frag.glsl to WGSL compute shader.
-     * Note: MRT requires separate compute dispatches or multiple storage bindings.
      */
     waterHeightPass(
         texturePool: WebGPUTexturePool,
@@ -562,10 +1269,60 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             velAdvMag: number;
         }
     ): void {
-        // TODO: Implement MRT water height pass
-        // This pass outputs both terrain and velocity textures
-        // Implementation deferred - requires MRT handling in compute shaders
-        console.warn('[ComputeNodePipeline] waterHeightPass not yet implemented');
+        const device = this.device;
+
+        if (!this.waterHeightPipeline) {
+            this.waterHeightBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createSampledTextureLayoutEntry(2),
+                createStorageTextureLayoutEntry(3, 'write-only'),
+                createStorageTextureLayoutEntry(4, 'write-only'),
+                createUniformBufferLayoutEntry(5),
+            ]);
+            this.waterHeightPipeline = this.createComputePipeline(
+                this.WATER_HEIGHT_COMPUTE_SHADER,
+                'main',
+                this.waterHeightBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes,
+            uniforms.pipeLen,
+            uniforms.timestep,
+            uniforms.pipeArea,
+            uniforms.velMult,
+            uniforms.time,
+            uniforms.velAdvMag,
+        ]);
+
+        let uniformBuffer = this.uniformBuffers.get('waterHeight');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'waterHeight-uniforms');
+            this.uniformBuffers.set('waterHeight', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.waterHeightBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readFluxTexture, 0),
+            createSampledTextureBinding(texturePool.readTerrainTexture, 1),
+            createSampledTextureBinding(texturePool.readVelTexture, 2),
+            createStorageTextureBinding(texturePool.writeTerrainTexture, 3),
+            createStorageTextureBinding(texturePool.writeVelTexture, 4),
+            { binding: 5, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.waterHeightPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -576,33 +1333,268 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         texturePool: WebGPUTexturePool,
         uniforms: {
             simRes: number;
+            pipeLen: number;
             timestep: number;
             Kc: number;
             Ks: number;
             Kd: number;
-            // ... other sediment uniforms
+            time: number;
+            rockErosionResistance: number;
         }
     ): void {
-        // TODO: Implement MRT sediment pass (4 outputs)
-        // Implementation deferred - requires MRT handling
-        console.warn('[ComputeNodePipeline] sedimentPass not yet implemented');
+        const device = this.device;
+
+        if (!this.sedimentPipeline) {
+            this.sedimentBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createSampledTextureLayoutEntry(2),
+                createStorageTextureLayoutEntry(3, 'write-only'),
+                createStorageTextureLayoutEntry(4, 'write-only'),
+                createStorageTextureLayoutEntry(5, 'write-only'),
+                createStorageTextureLayoutEntry(6, 'write-only'),
+                createUniformBufferLayoutEntry(7),
+            ]);
+            this.sedimentPipeline = this.createComputePipeline(
+                this.SEDIMENT_COMPUTE_SHADER,
+                'main',
+                this.sedimentBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes,
+            uniforms.pipeLen,
+            uniforms.Ks,
+            uniforms.Kc,
+            uniforms.Kd,
+            uniforms.timestep,
+            uniforms.time,
+            uniforms.rockErosionResistance,
+        ]);
+
+        let uniformBuffer = this.uniformBuffers.get('sediment');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'sediment-uniforms');
+            this.uniformBuffers.set('sediment', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.sedimentBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readTerrainTexture, 0),
+            createSampledTextureBinding(texturePool.readVelTexture, 1),
+            createSampledTextureBinding(texturePool.readSedimentTexture, 2),
+            createStorageTextureBinding(texturePool.writeTerrainTexture, 3),
+            createStorageTextureBinding(texturePool.writeSedimentTexture, 4),
+            createStorageTextureBinding(texturePool.terrainNorTexture, 5),
+            createStorageTextureBinding(texturePool.writeVelTexture, 6),
+            { binding: 7, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.sedimentPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
-     * Sediment advection compute pass (MRT: 3 outputs).
+     * Sediment advection compute pass (MRT: 3 outputs for simple; MacCormack uses 3 subpasses).
      * Ports sediadvect-frag.glsl and maccormack-frag.glsl to WGSL compute shader.
      */
     sedimentAdvectionPass(
         texturePool: WebGPUTexturePool,
         uniforms: {
             simRes: number;
+            timestep: number;
             advectionMethod: number; // 1 = MacCormack, else = Simple
             advectMultiplier: number;
         }
     ): void {
-        // TODO: Implement sediment advection pass
-        // MacCormack requires 3 subpasses, Simple requires 1 pass
-        console.warn('[ComputeNodePipeline] sedimentAdvectionPass not yet implemented');
+        const device = this.device;
+
+        if (uniforms.advectionMethod === 1) {
+            // MacCormack: forward -> backward -> correction
+            if (!this.sedimentAdvectForwardPipeline) {
+                this.sedimentAdvectForwardBindGroupLayout = this.createBindGroupLayout([
+                    createSampledTextureLayoutEntry(0),
+                    createSampledTextureLayoutEntry(1),
+                    createStorageTextureLayoutEntry(2, 'write-only'),
+                    createUniformBufferLayoutEntry(3),
+                ]);
+                this.sedimentAdvectForwardPipeline = this.createComputePipeline(
+                    this.SEDIMENT_ADVECT_FORWARD_SHADER,
+                    'main',
+                    this.sedimentAdvectForwardBindGroupLayout
+                );
+            }
+            if (!this.sedimentAdvectBackwardPipeline) {
+                this.sedimentAdvectBackwardBindGroupLayout = this.createBindGroupLayout([
+                    createSampledTextureLayoutEntry(0),
+                    createSampledTextureLayoutEntry(1),
+                    createStorageTextureLayoutEntry(2, 'write-only'),
+                    createUniformBufferLayoutEntry(3),
+                ]);
+                this.sedimentAdvectBackwardPipeline = this.createComputePipeline(
+                    this.SEDIMENT_ADVECT_BACKWARD_SHADER,
+                    'main',
+                    this.sedimentAdvectBackwardBindGroupLayout
+                );
+            }
+            if (!this.maccormackCorrectionPipeline) {
+                this.maccormackCorrectionBindGroupLayout = this.createBindGroupLayout([
+                    createSampledTextureLayoutEntry(0),
+                    createSampledTextureLayoutEntry(1),
+                    createSampledTextureLayoutEntry(2),
+                    createSampledTextureLayoutEntry(3),
+                    createStorageTextureLayoutEntry(4, 'write-only'),
+                    createUniformBufferLayoutEntry(5),
+                ]);
+                this.maccormackCorrectionPipeline = this.createComputePipeline(
+                    this.MACCORMACK_CORRECTION_SHADER,
+                    'main',
+                    this.maccormackCorrectionBindGroupLayout
+                );
+            }
+
+            const forwardUniformData = new Float32Array([
+                uniforms.simRes,
+                uniforms.timestep,
+                uniforms.advectMultiplier,
+            ]);
+            let forwardUniformBuffer = this.uniformBuffers.get('sedimentAdvectForward');
+            if (!forwardUniformBuffer || forwardUniformBuffer.size < forwardUniformData.byteLength) {
+                if (forwardUniformBuffer) forwardUniformBuffer.destroy();
+                forwardUniformBuffer = createUniformBuffer(device, forwardUniformData, 'sedimentAdvectForward-uniforms');
+                this.uniformBuffers.set('sedimentAdvectForward', forwardUniformBuffer);
+            } else {
+                device.queue.writeBuffer(forwardUniformBuffer, 0, forwardUniformData.buffer);
+            }
+
+            const backwardUniformData = new Float32Array([uniforms.simRes, uniforms.timestep]);
+            let backwardUniformBuffer = this.uniformBuffers.get('sedimentAdvectBackward');
+            if (!backwardUniformBuffer || backwardUniformBuffer.size < backwardUniformData.byteLength) {
+                if (backwardUniformBuffer) backwardUniformBuffer.destroy();
+                backwardUniformBuffer = createUniformBuffer(device, backwardUniformData, 'sedimentAdvectBackward-uniforms');
+                this.uniformBuffers.set('sedimentAdvectBackward', backwardUniformBuffer);
+            } else {
+                device.queue.writeBuffer(backwardUniformBuffer, 0, backwardUniformData.buffer);
+            }
+
+            const correctionUniformData = new Float32Array([uniforms.simRes, uniforms.timestep]);
+            let correctionUniformBuffer = this.uniformBuffers.get('maccormackCorrection');
+            if (!correctionUniformBuffer || correctionUniformBuffer.size < correctionUniformData.byteLength) {
+                if (correctionUniformBuffer) correctionUniformBuffer.destroy();
+                correctionUniformBuffer = createUniformBuffer(device, correctionUniformData, 'maccormackCorrection-uniforms');
+                this.uniformBuffers.set('maccormackCorrection', correctionUniformBuffer);
+            } else {
+                device.queue.writeBuffer(correctionUniformBuffer, 0, correctionUniformData.buffer);
+            }
+
+            const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+
+            // 1. Forward advect: read sediment, vel -> write sedimentAdvectA
+            const encoder1 = device.createCommandEncoder();
+            const pass1 = encoder1.beginComputePass();
+            pass1.setPipeline(this.sedimentAdvectForwardPipeline);
+            pass1.setBindGroup(0, this.createBindGroup(this.sedimentAdvectForwardBindGroupLayout!, [
+                createSampledTextureBinding(texturePool.readVelTexture, 0),
+                createSampledTextureBinding(texturePool.readSedimentTexture, 1),
+                createStorageTextureBinding(texturePool.sedimentAdvectATexture, 2),
+                { binding: 3, resource: { buffer: forwardUniformBuffer } },
+            ]));
+            pass1.dispatchWorkgroups(workgroupX, workgroupY, 1);
+            pass1.end();
+            device.queue.submit([encoder1.finish()]);
+
+            // 2. Backward advect: read vel, sedimentAdvectA -> write sedimentAdvectB
+            const encoder2 = device.createCommandEncoder();
+            const pass2 = encoder2.beginComputePass();
+            pass2.setPipeline(this.sedimentAdvectBackwardPipeline);
+            pass2.setBindGroup(0, this.createBindGroup(this.sedimentAdvectBackwardBindGroupLayout!, [
+                createSampledTextureBinding(texturePool.readVelTexture, 0),
+                createSampledTextureBinding(texturePool.sedimentAdvectATexture, 1),
+                createStorageTextureBinding(texturePool.sedimentAdvectBTexture, 2),
+                { binding: 3, resource: { buffer: backwardUniformBuffer } },
+            ]));
+            pass2.dispatchWorkgroups(workgroupX, workgroupY, 1);
+            pass2.end();
+            device.queue.submit([encoder2.finish()]);
+
+            // 3. Correction: read sediment, A, B -> write sediment
+            const encoder3 = device.createCommandEncoder();
+            const pass3 = encoder3.beginComputePass();
+            pass3.setPipeline(this.maccormackCorrectionPipeline);
+            pass3.setBindGroup(0, this.createBindGroup(this.maccormackCorrectionBindGroupLayout!, [
+                createSampledTextureBinding(texturePool.readVelTexture, 0),
+                createSampledTextureBinding(texturePool.readSedimentTexture, 1),
+                createSampledTextureBinding(texturePool.sedimentAdvectATexture, 2),
+                createSampledTextureBinding(texturePool.sedimentAdvectBTexture, 3),
+                createStorageTextureBinding(texturePool.writeSedimentTexture, 4),
+                { binding: 5, resource: { buffer: correctionUniformBuffer } },
+            ]));
+            pass3.dispatchWorkgroups(workgroupX, workgroupY, 1);
+            pass3.end();
+            device.queue.submit([encoder3.finish()]);
+        } else {
+            // Simple: one pass
+            if (!this.sedimentAdvectSimplePipeline) {
+                this.sedimentAdvectSimpleBindGroupLayout = this.createBindGroupLayout([
+                    createSampledTextureLayoutEntry(0),
+                    createSampledTextureLayoutEntry(1),
+                    createSampledTextureLayoutEntry(2),
+                    createSampledTextureLayoutEntry(3),
+                    createStorageTextureLayoutEntry(4, 'write-only'),
+                    createStorageTextureLayoutEntry(5, 'write-only'),
+                    createStorageTextureLayoutEntry(6, 'write-only'),
+                    createUniformBufferLayoutEntry(7),
+                ]);
+                this.sedimentAdvectSimplePipeline = this.createComputePipeline(
+                    this.SEDIMENT_ADVECT_SIMPLE_SHADER,
+                    'main',
+                    this.sedimentAdvectSimpleBindGroupLayout
+                );
+            }
+
+            const uniformData = new Float32Array([
+                uniforms.simRes,
+                uniforms.timestep,
+                uniforms.advectMultiplier,
+            ]);
+            let uniformBuffer = this.uniformBuffers.get('sedimentAdvectSimple');
+            if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+                if (uniformBuffer) uniformBuffer.destroy();
+                uniformBuffer = createUniformBuffer(device, uniformData, 'sedimentAdvectSimple-uniforms');
+                this.uniformBuffers.set('sedimentAdvectSimple', uniformBuffer);
+            } else {
+                device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+            }
+
+            const bindGroup = this.createBindGroup(this.sedimentAdvectSimpleBindGroupLayout!, [
+                createSampledTextureBinding(texturePool.readVelTexture, 0),
+                createSampledTextureBinding(texturePool.readSedimentTexture, 1),
+                createSampledTextureBinding(texturePool.readSedimentBlendTexture, 2),
+                createSampledTextureBinding(texturePool.readTerrainTexture, 3),
+                createStorageTextureBinding(texturePool.writeSedimentTexture, 4),
+                createStorageTextureBinding(texturePool.writeVelTexture, 5),
+                createStorageTextureBinding(texturePool.writeSedimentBlendTexture, 6),
+                { binding: 7, resource: { buffer: uniformBuffer } },
+            ]);
+
+            const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+            const commandEncoder = device.createCommandEncoder();
+            const computePass = commandEncoder.beginComputePass();
+            computePass.setPipeline(this.sedimentAdvectSimplePipeline);
+            computePass.setBindGroup(0, bindGroup);
+            computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+            computePass.end();
+            device.queue.submit([commandEncoder.finish()]);
+        }
     }
 
     /**
@@ -613,10 +1605,48 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         texturePool: WebGPUTexturePool,
         uniforms: {
             simRes: number;
+            talusScale: number;
         }
     ): void {
-        // TODO: Implement max slippage pass
-        console.warn('[ComputeNodePipeline] maxSlippagePass not yet implemented');
+        const device = this.device;
+
+        if (!this.maxSlippagePipeline) {
+            this.maxSlippageBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createStorageTextureLayoutEntry(1, 'write-only'),
+                createUniformBufferLayoutEntry(2),
+            ]);
+            this.maxSlippagePipeline = this.createComputePipeline(
+                this.MAX_SLIPPAGE_COMPUTE_SHADER,
+                'main',
+                this.maxSlippageBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([uniforms.simRes, uniforms.talusScale]);
+        let uniformBuffer = this.uniformBuffers.get('maxSlippage');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'maxSlippage-uniforms');
+            this.uniformBuffers.set('maxSlippage', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.maxSlippageBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readTerrainTexture, 0),
+            createStorageTextureBinding(texturePool.writeMaxSlippageTexture, 1),
+            { binding: 2, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.maxSlippagePipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -627,12 +1657,59 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         texturePool: WebGPUTexturePool,
         uniforms: {
             simRes: number;
+            pipeLen: number;
+            timestep: number;
+            pipeArea: number;
             thermalRate: number;
-            thermalErosionScale: number;
         }
     ): void {
-        // TODO: Implement thermal flux pass
-        console.warn('[ComputeNodePipeline] thermalFluxPass not yet implemented');
+        const device = this.device;
+
+        if (!this.thermalFluxPipeline) {
+            this.thermalFluxBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createStorageTextureLayoutEntry(2, 'write-only'),
+                createUniformBufferLayoutEntry(3),
+            ]);
+            this.thermalFluxPipeline = this.createComputePipeline(
+                this.THERMAL_FLUX_COMPUTE_SHADER,
+                'main',
+                this.thermalFluxBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes,
+            uniforms.pipeLen,
+            uniforms.timestep,
+            uniforms.pipeArea,
+            uniforms.thermalRate,
+        ]);
+        let uniformBuffer = this.uniformBuffers.get('thermalFlux');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'thermalFlux-uniforms');
+            this.uniformBuffers.set('thermalFlux', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.thermalFluxBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readTerrainTexture, 0),
+            createSampledTextureBinding(texturePool.readMaxSlippageTexture, 1),
+            createStorageTextureBinding(texturePool.writeTerrainFluxTexture, 2),
+            { binding: 3, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.thermalFluxPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -643,10 +1720,59 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         texturePool: WebGPUTexturePool,
         uniforms: {
             simRes: number;
+            pipeLen: number;
+            timestep: number;
+            pipeArea: number;
+            thermalErosionScale: number;
         }
     ): void {
-        // TODO: Implement thermal apply pass
-        console.warn('[ComputeNodePipeline] thermalApplyPass not yet implemented');
+        const device = this.device;
+
+        if (!this.thermalApplyPipeline) {
+            this.thermalApplyBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createStorageTextureLayoutEntry(2, 'write-only'),
+                createUniformBufferLayoutEntry(3),
+            ]);
+            this.thermalApplyPipeline = this.createComputePipeline(
+                this.THERMAL_APPLY_COMPUTE_SHADER,
+                'main',
+                this.thermalApplyBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes,
+            uniforms.pipeLen,
+            uniforms.timestep,
+            uniforms.pipeArea,
+            uniforms.thermalErosionScale,
+        ]);
+        let uniformBuffer = this.uniformBuffers.get('thermalApply');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'thermalApply-uniforms');
+            this.uniformBuffers.set('thermalApply', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.thermalApplyBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readTerrainFluxTexture, 0),
+            createSampledTextureBinding(texturePool.readTerrainTexture, 1),
+            createStorageTextureBinding(texturePool.writeTerrainTexture, 2),
+            { binding: 3, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.thermalApplyPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -657,27 +1783,82 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         texturePool: WebGPUTexturePool,
         uniforms: {
             simRes: number;
+            pipeLen: number;
+            timestep: number;
+            pipeArea: number;
             thermalRate: number;
             thermalErosionScale: number;
         }
     ): void {
-        this.thermalFluxPass(texturePool, uniforms);
+        this.thermalFluxPass(texturePool, {
+            simRes: uniforms.simRes,
+            pipeLen: uniforms.pipeLen,
+            timestep: uniforms.timestep,
+            pipeArea: uniforms.pipeArea,
+            thermalRate: uniforms.thermalRate,
+        });
         texturePool.swapTerrainFluxTextures();
-        this.thermalApplyPass(texturePool, { simRes: uniforms.simRes });
+        this.thermalApplyPass(texturePool, {
+            simRes: uniforms.simRes,
+            pipeLen: uniforms.pipeLen,
+            timestep: uniforms.timestep,
+            pipeArea: uniforms.pipeArea,
+            thermalErosionScale: uniforms.thermalErosionScale,
+        });
     }
 
     /**
-     * Average smoothing compute pass (MRT: 2 outputs - terrain, terrain_nor).
+     * Average smoothing compute pass (MRT: 2 outputs - terrain, terrain_nor/writeAvg).
      * Ports average-frag.glsl to WGSL compute shader.
      */
     averagePass(
         texturePool: WebGPUTexturePool,
         uniforms: {
             simRes: number;
+            erosionMode: number;
         }
     ): void {
-        // TODO: Implement average pass (MRT: 2 outputs)
-        console.warn('[ComputeNodePipeline] averagePass not yet implemented');
+        const device = this.device;
+
+        if (!this.averagePipeline) {
+            this.averageBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createStorageTextureLayoutEntry(1, 'write-only'),
+                createStorageTextureLayoutEntry(2, 'write-only'),
+                createUniformBufferLayoutEntry(3),
+            ]);
+            this.averagePipeline = this.createComputePipeline(
+                this.AVERAGE_COMPUTE_SHADER,
+                'main',
+                this.averageBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([uniforms.simRes, uniforms.erosionMode]);
+        let uniformBuffer = this.uniformBuffers.get('average');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'average-uniforms');
+            this.uniformBuffers.set('average', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.averageBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readTerrainTexture, 0),
+            createStorageTextureBinding(texturePool.writeTerrainTexture, 1),
+            createStorageTextureBinding(texturePool.terrainNorTexture, 2),
+            { binding: 3, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.averagePipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -709,6 +1890,26 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         this.rainBindGroupLayout = null;
         this.flowPipeline = null;
         this.flowBindGroupLayout = null;
+        this.waterHeightPipeline = null;
+        this.waterHeightBindGroupLayout = null;
+        this.sedimentPipeline = null;
+        this.sedimentBindGroupLayout = null;
+        this.sedimentAdvectSimplePipeline = null;
+        this.sedimentAdvectSimpleBindGroupLayout = null;
+        this.sedimentAdvectForwardPipeline = null;
+        this.sedimentAdvectForwardBindGroupLayout = null;
+        this.sedimentAdvectBackwardPipeline = null;
+        this.sedimentAdvectBackwardBindGroupLayout = null;
+        this.maccormackCorrectionPipeline = null;
+        this.maccormackCorrectionBindGroupLayout = null;
+        this.maxSlippagePipeline = null;
+        this.maxSlippageBindGroupLayout = null;
+        this.thermalFluxPipeline = null;
+        this.thermalFluxBindGroupLayout = null;
+        this.thermalApplyPipeline = null;
+        this.thermalApplyBindGroupLayout = null;
+        this.averagePipeline = null;
+        this.averageBindGroupLayout = null;
         this.evaporationPipeline = null;
         this.evaporationBindGroupLayout = null;
     }

@@ -95,47 +95,70 @@ export function SimulatePerStepWebGPU(
     texturePool.swapFluxTextures();
 
     // 2. Water Height/Velocity (MRT: 2 outputs)
-    // TODO: Implement when waterHeightPass is complete
-    // computePipeline.waterHeightPass(texturePool, { ... });
-    // texturePool.swapTerrainTextures();
-    // texturePool.swapVelTextures();
+    computePipeline.waterHeightPass(texturePool, {
+        simRes: simres,
+        pipeLen: controls.pipelen,
+        timestep: controls.timestep,
+        pipeArea: controls.pipeAra,
+        velMult: controls.VelocityMultiplier,
+        time: timer,
+        velAdvMag: controls.VelocityAdvectionMag,
+    });
+    texturePool.swapTerrainTextures();
+    texturePool.swapVelTextures();
 
     // 3. Sediment (MRT: 4 outputs)
-    // TODO: Implement when sedimentPass is complete
-    // computePipeline.sedimentPass(texturePool, { ... });
-    // texturePool.swapSedimentTextures();
-    // texturePool.swapTerrainTextures();
-    // texturePool.swapVelTextures();
+    computePipeline.sedimentPass(texturePool, {
+        simRes: simres,
+        pipeLen: controls.pipelen,
+        timestep: controls.timestep,
+        Kc: controls.Kc,
+        Ks: controls.Ks,
+        Kd: controls.Kd,
+        time: timer,
+        rockErosionResistance: controls.rockErosionResistance,
+    });
+    texturePool.swapTerrainTextures();
+    texturePool.swapSedimentTextures();
+    texturePool.swapVelTextures();
 
     // 4. Sediment Advection (Conditional: MacCormack or Simple)
-    // TODO: Implement when sedimentAdvectionPass is complete
-    // if (controls.AdvectionMethod == 1) {
-    //     // MacCormack (3 subpasses)
-    // } else {
-    //     // Simple (1 pass)
-    // }
-    // texturePool.swapSedimentBlendTextures();
-    // texturePool.swapSedimentTextures();
-    // texturePool.swapVelTextures();
+    computePipeline.sedimentAdvectionPass(texturePool, {
+        simRes: simres,
+        timestep: controls.timestep,
+        advectionMethod: controls.AdvectionMethod,
+        advectMultiplier: controls.AdvectionSpeedScaling,
+    });
+    texturePool.swapSedimentTextures();
+    texturePool.swapSedimentBlendTextures();
+    texturePool.swapVelTextures();
 
     // 5. Max Slippage
-    // TODO: Implement when maxSlippagePass is complete
-    // computePipeline.maxSlippagePass(texturePool, { simRes: simres });
-    // texturePool.swapMaxSlippageTextures();
+    computePipeline.maxSlippagePass(texturePool, {
+        simRes: simres,
+        talusScale: controls.thermalTalusAngleScale,
+    });
+    texturePool.swapMaxSlippageTextures();
 
     // 6. Thermal Terrain Flux
-    // TODO: Implement when thermalFluxPass is complete
-    // computePipeline.thermalFluxPass(texturePool, {
-    //     simRes: simres,
-    //     thermalRate: controls.thermalRate,
-    //     thermalErosionScale: controls.thermalErosionScale,
-    // });
-    // texturePool.swapTerrainFluxTextures();
+    computePipeline.thermalFluxPass(texturePool, {
+        simRes: simres,
+        pipeLen: controls.pipelen,
+        timestep: controls.timestep,
+        pipeArea: controls.pipeAra,
+        thermalRate: controls.thermalRate,
+    });
+    texturePool.swapTerrainFluxTextures();
 
     // 7. Thermal Apply
-    // TODO: Implement when thermalApplyPass is complete
-    // computePipeline.thermalApplyPass(texturePool, { simRes: simres });
-    // texturePool.swapTerrainTextures();
+    computePipeline.thermalApplyPass(texturePool, {
+        simRes: simres,
+        pipeLen: controls.pipelen,
+        timestep: controls.timestep,
+        pipeArea: controls.pipeAra,
+        thermalErosionScale: controls.thermalErosionScale,
+    });
+    texturePool.swapTerrainTextures();
 
     // 8. Evaporation
     computePipeline.evaporationPass(texturePool, {
@@ -149,7 +172,9 @@ export function SimulatePerStepWebGPU(
     // computePipeline.lavaPass(texturePool, { ... });
 
     // 10. Average Smoothing (MRT: 2 outputs)
-    // TODO: Implement when averagePass is complete
-    // computePipeline.averagePass(texturePool, { simRes: simres });
-    // texturePool.swapTerrainTextures();
+    computePipeline.averagePass(texturePool, {
+        simRes: simres,
+        erosionMode: controls.ErosionMode,
+    });
+    texturePool.swapTerrainTextures();
 }
