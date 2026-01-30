@@ -40,14 +40,14 @@ import { SimulatePerStepWebGPU } from './simulation/SimulatePerStepWebGPU';
 import { WebGPUSimulationRunner } from './app/runtime/WebGPUSimulationRunner';
 import { readHeightmapFromTexture } from './utils/webgpu-terrain-readback';
 import { copyWebGPUTerrainToWebGL } from './utils/webgpu-to-webgl-texture-copy';
-import { Scene, Mesh, PlaneGeometry } from 'three';
+import { Scene, Mesh, PlaneGeometry, Color } from 'three';
 import { TerrainMaterialNode } from './rendering/webgpu/materials/TerrainMaterialNode';
 import { WaterMaterialNode } from './rendering/webgpu/materials/WaterMaterialNode';
 import {
   createPoolSyncTextures,
   copyPoolToThreeTextures,
-  type PoolSyncTextures,
 } from './utils/webgpu-pool-to-three-texture-copy';
+import type { PoolSyncTextures } from './utils/webgpu-pool-to-three-texture-copy';
 
 // Note: State is now managed through AppContext and state holders
 // Additional local variables
@@ -881,7 +881,6 @@ function handleInteraction (buttons : number, x : number, y : number){
 let controlsConfig: ControlsConfig;
 
 async function main() {
-
   // Create application context with state holders (composition root)
   appContext = createApp();
 
@@ -938,9 +937,12 @@ async function main() {
   let webgpuTexturePool: WebGPUTexturePool | null = null;
   let webgpuRendererWrapper: WebGPURendererWrapper | null = null;
   let webgpuScene: Scene | null = null;
+  let webgpuTerrainMesh: Mesh | null = null;
+  let webgpuWaterMesh: Mesh | null = null;
   let webgpuPoolSyncTextures: PoolSyncTextures | null = null;
   let webgpuSceneCompileDone = false;
   let webgpuSceneCompileStarted = false;
+  let paletteDebugLogged = false;
 
   // Initialize WebGPU renderer first; get device from it for compute and pool (single device)
   try {
@@ -961,6 +963,8 @@ async function main() {
     terrainGeneratorCompute.setRandomSeed(); // Set initial random seed
 
     webgpuScene = new Scene();
+    // Sky background color matching legacy clear color (atmospheric blue-gray)
+    webgpuScene.background = new Color(0.2, 0.25, 0.3);
     webgpuRendererWrapper.setClearColor(0.2, 0.25, 0.3, 1);
     webgpuRendererWrapper.setSize(window.innerWidth, window.innerHeight);
 
@@ -969,7 +973,10 @@ async function main() {
     webgpuPoolSyncTextures = createPoolSyncTextures(simres);
 
     // Terrain plane with TerrainMaterialNode (samples pool via sync textures)
-    const webgpuTerrainSegments = 256;
+    // Use 255 segments (256×256 vertices) so each vertex maps to a unique texel.
+    // 256 segments would create 257×257 vertices — edge vertices at UV=1.0 sample
+    // outside the 512×512 heightmap, causing spike artifacts from clamped reads.
+    const webgpuTerrainSegments = 255;
     const webgpuTerrainGeometry = new PlaneGeometry(1, 1, webgpuTerrainSegments, webgpuTerrainSegments);
     webgpuTerrainGeometry.rotateX(-Math.PI / 2); // XZ plane, Y up
     const webgpuTerrainMaterial = new TerrainMaterialNode({
@@ -982,8 +989,9 @@ async function main() {
       maxSlippageMap: webgpuPoolSyncTextures.maxSlippageMap,
       sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
       simres,
+      maxHeight: (controls?.TerrainHeight ?? 2) * 120,
     });
-    const webgpuTerrainMesh = new Mesh(webgpuTerrainGeometry, webgpuTerrainMaterial as any);
+    webgpuTerrainMesh = new Mesh(webgpuTerrainGeometry, webgpuTerrainMaterial as any);
     webgpuTerrainMesh.frustumCulled = true;
     webgpuTerrainMesh.renderOrder = 0;
     webgpuScene.add(webgpuTerrainMesh);
@@ -991,13 +999,15 @@ async function main() {
     // Water plane: transparent so terrain shows through; render after terrain
     const webgpuWaterGeometry = new PlaneGeometry(1, 1, webgpuTerrainSegments, webgpuTerrainSegments);
     webgpuWaterGeometry.rotateX(-Math.PI / 2);
-    const webgpuWaterMaterial = new WaterMaterialNode();
-    (webgpuWaterMaterial as any).transparent = true;
-    (webgpuWaterMaterial as any).depthWrite = false;
-    const webgpuWaterMesh = new Mesh(webgpuWaterGeometry, webgpuWaterMaterial as any);
+    const webgpuWaterMaterial = new WaterMaterialNode({
+      heightmap: webgpuPoolSyncTextures.heightmap,
+      sedimentMap: webgpuPoolSyncTextures.sedimentMap,
+      simres,
+    });
+    webgpuWaterMesh = new Mesh(webgpuWaterGeometry, webgpuWaterMaterial as any);
     webgpuWaterMesh.frustumCulled = true;
     webgpuWaterMesh.renderOrder = 1;
-    webgpuWaterMesh.visible = false; // hide until terrain is confirmed; set true when water overlay is needed
+    webgpuWaterMesh.visible = true; // Water visible — opacity driven by water level in heightmap G channel
     webgpuScene.add(webgpuWaterMesh);
 
     console.log('[WebGPU] Renderer, compute pipeline, texture pool, and terrain generator initialized');
@@ -1337,6 +1347,9 @@ async function main() {
   const reusableLightPos = vec3.create();
   const reusableSpawnPos = vec2.create();
   
+  // Reusable buffer for heightmap copy during BVH refit (avoids GC pressure from per-frame allocations)
+  let reusableHeightmapCopy: Float32Array | null = null;
+
   // Reusable arrays for water sources (reused instead of creating new ones)
   const reusableSourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
   const reusableSourceSizes = new Float32Array(MAX_WATER_SOURCES);
@@ -1346,8 +1359,9 @@ async function main() {
   let lastBrushPressed = 0;
   let lastReadMouseX = -1;
   let lastReadMouseY = -1;
-  // Request one initial WebGPU readback so heightMapCpuBuf is populated for brush raycasting
+  // Request one initial WebGPU readback only after terrain texture has been written (avoids reading zeros)
   let initialWebGPUReadbackRequested = false;
+  let webgpuTerrainGeneratedOnce = false;
 
   function tick() {
     stats.begin();
@@ -1539,6 +1553,7 @@ async function main() {
                         webgpuTexturePool.writeTerrainTexture,
                         appContext.simulationState.simres
                     );
+                    webgpuTerrainGeneratedOnce = true;
 
                     // Clear auxiliary textures (flux, velocity, sediment, etc.)
                     webgpuTexturePool.clearAuxiliaryTextures();
@@ -1703,7 +1718,8 @@ async function main() {
 
     //===================per tick uniforms==================
 
-
+    // Legacy WebGL shader uniforms — only needed when WebGL renderer is active for main view
+    if (!webgpuRendererWrapper) {
     flat.setTime(timer);
 
     gl_context.uniform1f(getCachedUniformLocation(gl_context,flat.prog,"u_far"),camera.far);
@@ -1872,6 +1888,7 @@ async function main() {
     }else{
         average.setInt(0,'unif_rainMode');
     }
+    } // end legacy WebGL uniform guard
 
     const brushPressed = controls.brushPressed === 1;
     const brushVisible = Number(controls.brushType) !== 0;
@@ -1896,9 +1913,8 @@ async function main() {
     }
 
     // Request one initial WebGPU readback so heightMapCpuBuf is populated for brush raycasting.
-    // Without this, brushPos stays (-10,-10) until the user moves the mouse (which triggers
-    // shouldRead); by then the same-frame raycast already used stale buffer, so brushes do nothing.
-    if (!initialWebGPUReadbackRequested) {
+    // Only after terrain has been generated once, so we do not read from an empty texture (zeros).
+    if (webgpuTerrainGeneratedOnce && !initialWebGPUReadbackRequested) {
         initialWebGPUReadbackRequested = true;
         appContext.simulationState.readHeightmapFromWebGPU(webgpuDevice, webgpuTexturePool.readTerrainTexture)
             .then(() => {
@@ -1984,7 +2000,13 @@ async function main() {
     
     if (shouldUpdateNow && (updateTriggeredByBrush || updateTriggeredByInterval)) {
         // Copy heightmap data to avoid race conditions (heightmap buffer might be overwritten)
-        const heightmapCopy = new Float32Array(appContext.simulationState.heightMapCpuBuf);
+        // Reuse pre-allocated buffer to avoid GC pressure from per-frame Float32Array allocations
+        const srcBuf = appContext.simulationState.heightMapCpuBuf;
+        if (!reusableHeightmapCopy || reusableHeightmapCopy.length !== srcBuf.length) {
+            reusableHeightmapCopy = new Float32Array(srcBuf.length);
+        }
+        reusableHeightmapCopy.set(srcBuf);
+        const heightmapCopy = reusableHeightmapCopy;
         
         // Clear fresh flag immediately (before async work) to prevent duplicate updates
         appContext.simulationState.setHeightMapBufIsFresh(false);
@@ -2141,6 +2163,57 @@ async function main() {
           webgpuPoolSyncTextures,
           appContext.simulationState.simres
         );
+      }
+      // === DIAGNOSTIC: one-shot height range log after terrain is generated ===
+      if (!paletteDebugLogged && webgpuPoolSyncTextures?.heightmap?.image?.data) {
+        const hdata = webgpuPoolSyncTextures.heightmap.image.data as Float32Array;
+        if (hdata.length > 0) {
+          let hMin = Infinity, hMax = -Infinity, hSum = 0, hCount = 0;
+          for (let i = 0; i < hdata.length; i += 4) {
+            const h = hdata[i]; // R channel = height
+            if (h > 0.001) { // skip zero-initialized texels
+              hMin = Math.min(hMin, h);
+              hMax = Math.max(hMax, h);
+              hSum += h;
+              hCount++;
+            }
+          }
+          if (hCount > 0) {
+            const hAvg = hSum / hCount;
+            const maxH = controls.TerrainHeight * 120;
+            console.log(`[PALETTE DEBUG] Height range: min=${hMin.toFixed(2)}, max=${hMax.toFixed(2)}, avg=${hAvg.toFixed(2)}, nonzero=${hCount}`);
+            console.log(`[PALETTE DEBUG] maxHeight uniform=${maxH}, normHeight range: ${(hMin/maxH).toFixed(3)}–${(hMax/maxH).toFixed(3)}, avg norm=${(hAvg/maxH).toFixed(3)}`);
+            console.log(`[PALETTE DEBUG] simres=${appContext.simulationState.simres}, terrainHeight=${controls.TerrainHeight}, segments=${255}`);
+            paletteDebugLogged = true;
+          }
+        }
+      }
+      if (webgpuTerrainMesh?.material) {
+        const terrainMat = webgpuTerrainMesh.material as unknown as TerrainMaterialNode;
+        const brushPosValid = reusablePos[0] >= 0 && reusablePos[0] <= 1 && reusablePos[1] >= 0 && reusablePos[1] <= 1;
+        // PlaneGeometry + rotateX(-PI/2): fragment uv.y = 0.5 - worldZ, so overlay V must be 1 - raycast V to match
+        const overlayU = reusablePos[0];
+        const overlayV = 1 - reusablePos[1];
+        terrainMat.updateBrush(
+          [overlayU, overlayV],
+          brushPosValid ? controls.brushSize : 0,
+          controls.brushType
+        );
+        // Push per-frame control values to terrain material uniforms
+        terrainMat.updateUniforms({
+          snowRange: controls.SnowRange,
+          forestRange: controls.ForestRange,
+          terrainPalette: controls.TerrainPlatte,
+          maxHeight: (controls?.TerrainHeight ?? 2) * 120,
+          debugMode: controls.TerrainDebug,
+        });
+      }
+      // Push per-frame control values to water material uniforms
+      if (webgpuWaterMesh?.material) {
+        const waterMat = webgpuWaterMesh.material as unknown as WaterMaterialNode;
+        waterMat.updateUniforms({
+          waterTransparency: controls.WaterTransparency,
+        });
       }
       webgpuRendererWrapper.render(webgpuScene, camera.threeCamera);
     } else if (renderer && gl_context) {
@@ -2483,6 +2556,14 @@ async function main() {
   }
 
   runtime.start();
+}
+
+// HMR: full reload on update so main() is never run twice in the same page (avoids double WebGPU/WebGL init)
+const hot = (import.meta as { hot?: { accept: (cb: () => void) => void } }).hot;
+if (hot) {
+  hot.accept(() => {
+    window.location.reload();
+  });
 }
 
 main();

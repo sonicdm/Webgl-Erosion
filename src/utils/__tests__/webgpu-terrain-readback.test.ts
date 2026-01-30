@@ -18,9 +18,8 @@ function createMockGPUDevice(): GPUDevice {
     const mockDevice = {
         createBuffer: jest.fn(() => mockStagingBuffer),
         createCommandEncoder: jest.fn(() => mockCommandEncoder),
-        queue: {
-            submit: jest.fn(),
-        },
+        queue: { submit: jest.fn() },
+        limits: { maxBufferSize: 268435456 }, // 256MB so chunked path is used when needed
     } as any;
 
     return mockDevice;

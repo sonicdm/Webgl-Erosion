@@ -1,6 +1,10 @@
-import { checkWebGPUSupport, WebGPUCapability } from '../capability-check';
+import { checkWebGPUSupport, clearWebGPUCapabilityCache, WebGPUCapability } from '../capability-check';
 
 describe('WebGPU Capability Check', () => {
+    beforeEach(() => {
+        clearWebGPUCapabilityCache();
+    });
+
     describe('checkWebGPUSupport', () => {
         it('should return capability object with correct structure', async () => {
             const result = await checkWebGPUSupport();

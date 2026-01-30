@@ -1,6 +1,7 @@
 /**
  * WebGPU capability check service.
  * Checks for WebGPU support and provides fallback messaging.
+ * Result is cached so main and WebGPURendererWrapper can both call without double adapter/device request.
  */
 
 export interface WebGPUCapability {
@@ -10,13 +11,31 @@ export interface WebGPUCapability {
     fallbackReason?: string;
 }
 
+let capabilityPromise: Promise<WebGPUCapability> | null = null;
+
+/**
+ * Clears the cached capability result. For testing only; allows tests to re-run the check with different mocks.
+ */
+export function clearWebGPUCapabilityCache(): void {
+    capabilityPromise = null;
+}
+
 /**
  * Checks if WebGPU is supported in the current environment.
- * 
+ * Cached: repeated calls return the same promise (avoids double requestAdapter/requestDevice).
+ *
  * @returns Promise resolving to WebGPUCapability object with support status
  */
-export async function checkWebGPUSupport(): Promise<WebGPUCapability> {
-    // Check if navigator.gpu exists
+export function checkWebGPUSupport(): Promise<WebGPUCapability> {
+    if (capabilityPromise !== null) {
+        return capabilityPromise;
+    }
+
+    capabilityPromise = runWebGPUCapabilityCheck();
+    return capabilityPromise;
+}
+
+async function runWebGPUCapabilityCheck(): Promise<WebGPUCapability> {
     if (!navigator.gpu) {
         return {
             supported: false,
@@ -25,9 +44,7 @@ export async function checkWebGPUSupport(): Promise<WebGPUCapability> {
     }
 
     try {
-        // Request adapter
         const adapter = await navigator.gpu.requestAdapter();
-        
         if (!adapter) {
             return {
                 supported: false,
@@ -36,9 +53,12 @@ export async function checkWebGPUSupport(): Promise<WebGPUCapability> {
         }
 
         try {
-            // Request device
-            const device = await adapter.requestDevice();
-            
+            // Use default limits so device creation succeeds on more adapters.
+            // Large readback (e.g. simres 4096) is handled by chunked staging in webgpu-terrain-readback.
+            const device = await adapter.requestDevice({
+                requiredFeatures: ['float32-filterable'],
+            });
+
             return {
                 supported: true,
                 adapter: adapter,
