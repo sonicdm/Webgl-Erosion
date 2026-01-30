@@ -4,6 +4,9 @@ import glsl from 'vite-plugin-glsl';
 export default defineConfig({
   root: './',
   base: '',
+  optimizeDeps: {
+    include: ['three', 'three/webgpu', 'three/tsl'],
+  },
   build: {
     outDir: './dist',
     sourcemap: true,

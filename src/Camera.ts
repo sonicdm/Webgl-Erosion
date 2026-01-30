@@ -145,10 +145,17 @@ class Camera {
 
   setAspectRatio(aspectRatio: number) {
     this.aspectRatio = aspectRatio;
+    if (this.threeCamera) {
+      this.threeCamera.aspect = aspectRatio;
+    }
   }
 
   updateProjectionMatrix() {
     mat4.perspective(this.projectionMatrix, this.fovy, this.aspectRatio, this.near, this.far);
+    if (this.threeCamera) {
+      this.threeCamera.aspect = this.aspectRatio;
+      this.threeCamera.updateProjectionMatrix();
+    }
   }
 
   // Movement key tracking methods

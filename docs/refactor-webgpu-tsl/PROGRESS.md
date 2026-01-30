@@ -28,8 +28,8 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 - Notes: All simulation compute passes ported to WGSL: rain, flow, water height, sediment, sediment advection (simple + MacCormack), max slippage, thermal flux, thermal apply, evaporation, average smoothing. Wired in SimulatePerStepWebGPU with correct uniforms and texture swaps. Lava pass remains TODO.
 
 ### Phase 4 — Terrain Generation + GUI Parity
-- Status: Pending
-- Notes: Full GUI controls, defaults, Generate button, status line, error banner.
+- Status: In Progress
+- Notes: WebGPU main view: single device, pool→Three.js copy each frame, TerrainMaterialNode/WaterMaterialNode, main loop uses WebGPURenderer when available. **Troubleshooting:** Grey/white terrain: ensure copy runs (console: `[WebGPU] Pool → Three.js texture copy active, 8 textures`). Backend textures are created on first compile; skip log on first frames is normal. **Testing:** WebGPU path requires a browser with WebGPU (Chrome with GPU); MCP/headless often reports "No available adapters" and app exits before main loop.
 
 ### Phase 5 — Hybrid BVH + CPU Mesh
 - Status: Pending

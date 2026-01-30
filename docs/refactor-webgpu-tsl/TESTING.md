@@ -43,8 +43,12 @@ Use MCP browser tools to automate UI validation:
 - Capture screenshots for baseline comparisons.
 - Verify UI states (status line, error banner, debug overlays).
 
+**WebGPU main view:** The WebGPU render path and pool→Three.js texture copy require a **real browser with WebGPU** (e.g. Chrome with GPU). MCP/Playwright sessions often report "No available adapters" and the app will show the "WebGPU not supported" alert and exit before the main loop. To verify the grey/terrain fix and pool copy, run the app locally in Chrome (or another WebGPU-capable browser) and check the console for:
+- `[WebGPU] Pool → Three.js texture copy active, 8 textures` — copy is working.
+- `[WebGPU] Pool copy: backend texture not ready for N textures` — normal on first frames until Three.js compile creates textures.
+
 Recommended artifacts:
 - Screenshot set per phase milestone.
 - Minimal click-through script description stored alongside results.
 
-**MCP verification (Jan 30, 2026):** user-browser-devtools — navigate to http://localhost:8080 (200 OK), full-page screenshot saved, visible text "Generating Terrain..." confirms app loads and terrain flow runs.
+**MCP verification (Jan 30, 2026):** user-browser-devtools — navigate to http://localhost:8080 (200 OK). In environments without WebGPU adapter, "No available adapters" appears and the app alerts and exits; no main view. For full UI/terrain validation, use a local browser with WebGPU.

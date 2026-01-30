@@ -24,6 +24,8 @@ declare module 'three/tsl' {
     export function uniform(value: any): any;
     export function depth(value?: any): any;
     export function sub(a: any, b: any): any;
+    export const positionLocal: any;
+    export const normalLocal: any;
     const __all: Record<string, any>;
     export default __all;
 }

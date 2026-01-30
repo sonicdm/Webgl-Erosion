@@ -10,6 +10,7 @@ declare module 'three/webgpu' {
     }
     export class NodeMaterial {
         colorNode: any;
+        positionNode?: any;
     }
     export class MeshBasicNodeMaterial extends NodeMaterial {}
     export const TSL: unknown;

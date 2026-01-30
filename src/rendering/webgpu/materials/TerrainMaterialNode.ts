@@ -1,5 +1,5 @@
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { float, uniform, vec3 } from 'three/tsl';
+import { float, normalLocal, positionLocal, texture, uniform, uv, vec3 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -12,13 +12,14 @@ export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
 
 /**
  * Terrain material using Three.js NodeMaterial (TSL).
- * This is a scaffolding implementation for Phase 4.
+ * Vertex displacement from heightmap matches legacy terrain-vert.glsl (Y = yval / u_SimRes).
  */
 export class TerrainMaterialNode extends MeshBasicNodeMaterial {
     private controller: TerrainShaderNodeController;
     private snowRangeUniform: any;
     private forestRangeUniform: any;
     private terrainPaletteUniform: any;
+    private simresUniform: any;
     private inputs: TerrainMaterialNodeInputs;
 
     constructor(
@@ -31,6 +32,7 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         this.snowRangeUniform = uniform(inputs.snowRange ?? 1);
         this.forestRangeUniform = uniform(inputs.forestRange ?? 1);
         this.terrainPaletteUniform = uniform(inputs.terrainPalette ?? 0);
+        this.simresUniform = inputs.simres != null ? uniform(inputs.simres) : null;
 
         this.buildGraph(this.inputs);
     }
@@ -54,9 +56,18 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
     }
 
     private buildGraph(inputs: TerrainMaterialNodeInputs): void {
+        // Vertex displacement along surface normal (avoids parallax/rectangle when rotating)
+        if (inputs.heightmap && this.simresUniform) {
+            const vertexHeight = texture(inputs.heightmap, uv()).x;
+            const displacementY = vertexHeight.div(this.simresUniform);
+            this.positionNode = positionLocal.add(normalLocal.mul(displacementY));
+        }
+
         const sampling = this.controller.getSamplingNode(inputs);
+        // GLSL terrain-frag uses yval = fH.x * 4; palette expects 0–600 range
+        const heightForPalette = sampling.height.mul(float(4));
         const palette = this.controller.getPaletteNode({
-            height: sampling.height,
+            height: heightForPalette,
             normal: sampling.normal,
             rock: sampling.rock,
             snowRange: this.snowRangeUniform,
