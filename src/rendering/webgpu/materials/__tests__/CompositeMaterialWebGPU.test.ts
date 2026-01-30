@@ -9,12 +9,12 @@ describe('CompositeMaterialWebGPU', () => {
             mixFactor: 0.5,
         });
         expect(material).toBeInstanceOf(CompositeMaterialWebGPU);
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 
     it('updates mix factor', () => {
         const material = new CompositeMaterialWebGPU();
         material.updateInputs({ mixFactor: 0.75 });
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 });

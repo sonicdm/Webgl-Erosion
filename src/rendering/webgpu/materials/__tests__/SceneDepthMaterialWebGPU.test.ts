@@ -5,7 +5,7 @@ describe('SceneDepthMaterialWebGPU', () => {
     it('constructs with defaults', () => {
         const material = new SceneDepthMaterialWebGPU();
         expect(material).toBeInstanceOf(SceneDepthMaterialWebGPU);
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 
     it('uses the terrain shader controller for sampling', () => {

@@ -10,6 +10,6 @@ describe('BackgroundScatteringMaterialWebGPU', () => {
         const material = new BackgroundScatteringMaterialWebGPU({}, mockController);
         expect(material).toBeInstanceOf(BackgroundScatteringMaterialWebGPU);
         expect(mockController.getBackgroundColorNode).toHaveBeenCalled();
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 });

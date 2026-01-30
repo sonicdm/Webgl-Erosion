@@ -1,5 +1,5 @@
 import { ComputePass } from './ComputePass';
-import { WebGPUTexturePool } from '../../simulation/WebGPUTexturePool';
+import { WebGPUTexturePool } from '../../../simulation/WebGPUTexturePool';
 import {
     createStorageTextureBinding,
     createSampledTextureBinding,

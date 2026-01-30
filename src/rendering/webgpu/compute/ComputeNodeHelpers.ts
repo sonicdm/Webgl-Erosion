@@ -116,9 +116,11 @@ export function createUniformBuffer(
         bufferData = new Float32Array(data as number[]).buffer;
     }
 
+    // WebGPU uniform buffers must be padded to a multiple of 16 bytes
+    const alignedSize = Math.ceil(bufferData.byteLength / 16) * 16;
     const buffer = device.createBuffer({
         label: label,
-        size: bufferData.byteLength,
+        size: alignedSize,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -135,7 +137,7 @@ export function updateUniformBuffer(
     data: ArrayBufferView | number[],
     offset: number = 0
 ): void {
-    const bufferData = data instanceof ArrayBufferView
+    const bufferData = ArrayBuffer.isView(data)
         ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
         : new Float32Array(data).buffer;
 

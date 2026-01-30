@@ -27,9 +27,9 @@ describe('TerrainSamplingNode', () => {
             normalMap: new Texture(),
         });
 
-        expect(result.height).toBeDefined();
-        expect(result.normal).toBeDefined();
-        expect(result.sediment).toBeDefined();
-        expect(result.shadowDepth).toBeDefined();
+        expect(result.heightSample).toBeDefined();
+        expect(result.normalSample).toBeDefined();
+        expect(result.sedimentSample).toBeDefined();
+        expect(result.shadowSample).toBeDefined();
     });
 });

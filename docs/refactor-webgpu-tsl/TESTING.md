@@ -46,3 +46,5 @@ Use MCP browser tools to automate UI validation:
 Recommended artifacts:
 - Screenshot set per phase milestone.
 - Minimal click-through script description stored alongside results.
+
+**MCP verification (Jan 30, 2026):** user-browser-devtools — navigate to http://localhost:8080 (200 OK), full-page screenshot saved, visible text "Generating Terrain..." confirms app loads and terrain flow runs.

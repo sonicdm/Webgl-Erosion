@@ -1,9 +1,15 @@
+/**
+ * @jest-environment jsdom
+ */
 import { WebGPURendererWrapper } from '../WebGPURendererWrapper';
 import { AppContext } from '../../../app/context';
 import { createApp } from '../../../app/bootstrap';
-import { checkWebGPUSupport } from '../capability-check';
 
-// Mock Three.js WebGPURenderer
+jest.mock('../capability-check', () => ({
+    checkWebGPUSupport: jest.fn().mockResolvedValue({ supported: true, fallbackReason: null }),
+}));
+
+// Mock Three.js WebGPURenderer (wrapper uses three/webgpu which is separately mocked)
 jest.mock('three', () => {
     const actualThree = jest.requireActual('three');
     return {
@@ -41,17 +47,13 @@ describe('WebGPURendererWrapper', () => {
         });
 
         it('should throw error if WebGPU not supported', async () => {
-            // Mock checkWebGPUSupport to return unsupported
-            jest.spyOn(require('../capability-check'), 'checkWebGPUSupport')
-                .mockResolvedValue({
-                    supported: false,
-                    fallbackReason: 'WebGPU not available'
-                });
-
-            await expect(async () => {
-                const wrapper = new WebGPURendererWrapper(canvas, appContext);
-                await wrapper.initialize();
-            }).rejects.toThrow();
+            const { checkWebGPUSupport } = await import('../capability-check');
+            (checkWebGPUSupport as jest.Mock).mockResolvedValueOnce({
+                supported: false,
+                fallbackReason: 'WebGPU not available',
+            });
+            const wrapper = new WebGPURendererWrapper(canvas, appContext);
+            await expect(wrapper.initialize()).rejects.toThrow();
         });
     });
 

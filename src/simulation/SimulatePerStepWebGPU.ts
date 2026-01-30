@@ -6,7 +6,7 @@
 import { ComputeNodePipeline } from '../rendering/webgpu/compute/ComputeNodePipeline';
 import { WebGPUTexturePool } from './WebGPUTexturePool';
 import { AppContext } from '../app/context';
-import { Controls } from '../settings';
+import type { IAppControls } from '../app/controls/types';
 import { getWaterSourceCount, waterSources, MAX_WATER_SOURCES } from '../utils/water-sources';
 
 /**
@@ -23,7 +23,7 @@ export function SimulatePerStepWebGPU(
     computePipeline: ComputeNodePipeline,
     texturePool: WebGPUTexturePool,
     appContext: AppContext,
-    controls: Controls,
+    controls: IAppControls,
     timer: number,
     brushState?: {
         mouseWorldPos: [number, number, number, number];
@@ -75,8 +75,8 @@ export function SimulatePerStepWebGPU(
         rainErosionStrength: controls.RainErosionStrength,
         rainErosionDropSize: controls.RainErosionDropSize,
         flattenTargetHeight: controls.flattenTargetHeight,
-        slopeStartPos: controls.slopeStartPos,
-        slopeEndPos: controls.slopeEndPos,
+        slopeStartPos: [controls.slopeStartPos[0], controls.slopeStartPos[1]] as [number, number],
+        slopeEndPos: [controls.slopeEndPos[0], controls.slopeEndPos[1]] as [number, number],
         slopeActive: controls.slopeActive,
         sourceCount: sourceCount,
         sourcePositions: reusableSourcePositions,

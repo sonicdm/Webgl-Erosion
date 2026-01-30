@@ -6,17 +6,21 @@ import Camera from "./Camera";
 import { SimulationStateHolder } from "./app/state/SimulationStateHolder";
 import { TerrainStateHolder } from "./app/state/TerrainStateHolder";
 
-// Store original brushOperation when modifier is held (for restoration on release)
-// This is module-level state that persists across calls
-let originalBrushOperation: number | null = null;
+// Default module-level state when no injectable is provided (backward compat)
+let defaultOriginalBrushOperation: number | null = null;
 
-// Export a function to get/set this for external access if needed
 export function getOriginalBrushOperation(): number | null {
-    return originalBrushOperation;
+    return defaultOriginalBrushOperation;
 }
 
 export function setOriginalBrushOperation(value: number | null): void {
-    originalBrushOperation = value;
+    defaultOriginalBrushOperation = value;
+}
+
+/** Injectable getter/setter for original brush operation (modifier restore). */
+export interface OriginalBrushOperationHolder {
+    get(): number | null;
+    set(value: number | null): void;
 }
 
 export interface BrushControls {
@@ -38,6 +42,8 @@ export interface BrushContext {
     simulationState: SimulationStateHolder;
     terrainState: TerrainStateHolder;
     camera: Camera;
+    /** Optional; when provided, used instead of module-level get/set for modifier restore. */
+    originalBrushOperation?: OriginalBrushOperationHolder;
 }
 
 /**
@@ -65,12 +71,15 @@ export function handleBrushMouseDown(
     const secondaryModifier = controlsConfig.modifiers.brushSecondary;
     const isSecondaryPressed = isModifierPressed(secondaryModifier, event);
     
+    const getOrig = () => context.originalBrushOperation?.get() ?? getOriginalBrushOperation();
+    const setOrig = (v: number | null) => (context.originalBrushOperation?.set(v) ?? setOriginalBrushOperation(v));
+
     if (isSecondaryPressed) {
         if (brushTypeNum === 5) {
             // Flatten: Secondary modifier+click should set target height and NOT activate brush
             // Store original operation if not already stored (for restoration on release)
-            if (originalBrushOperation === null) {
-                originalBrushOperation = controls.brushOperation;
+            if (getOrig() === null) {
+                setOrig(controls.brushOperation);
             }
             controls.brushOperation = 1; // Secondary button (temporary override)
             
@@ -238,8 +247,8 @@ export function handleBrushMouseDown(
         } else {
             // For other brushes, Alt modifier sets brushOperation to 1 (subtract)
             // Store original operation if not already stored (for restoration on release)
-            if (originalBrushOperation === null) {
-                originalBrushOperation = controls.brushOperation;
+            if (getOrig() === null) {
+                setOrig(controls.brushOperation);
             }
             controls.brushOperation = 1; // Secondary button (temporary override)
         }
@@ -280,7 +289,7 @@ export function handleBrushMouseDown(
             const modifierPressed = isModifierPressed(invertModifier, event);
             
             if (modifierPressed) {
-                originalBrushOperation = controls.brushOperation;
+                setOrig(controls.brushOperation);
                 controls.brushOperation = controls.brushOperation === 0 ? 1 : 0;
             }
         }
@@ -308,9 +317,11 @@ export function handleBrushMouseUp(
         }
         
         // Restore original brushOperation if it was inverted
-        if (originalBrushOperation !== null) {
-            controls.brushOperation = originalBrushOperation;
-            originalBrushOperation = null;
+        const orig = context.originalBrushOperation?.get() ?? getOriginalBrushOperation();
+        if (orig !== null) {
+            controls.brushOperation = orig;
+            if (context.originalBrushOperation) context.originalBrushOperation.set(null);
+            else setOriginalBrushOperation(null);
         }
     }
 }

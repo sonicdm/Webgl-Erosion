@@ -2,8 +2,6 @@ import {mat4, vec4} from 'gl-matrix';
 import Drawable from './Drawable';
 import Camera from '../../Camera';
 import ShaderProgram from './ShaderProgram';
-import {isNumber} from "util";
-
 // WebGL constants
 const GL_COLOR_BUFFER_BIT = 0x00004000;
 const GL_DEPTH_BUFFER_BIT = 0x00000100;

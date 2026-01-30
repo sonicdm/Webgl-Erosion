@@ -68,6 +68,14 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
   - Eliminated global `gl` dependency: Drawable, Square, Plane, OpenGLRenderer, ShaderProgram, uniform helpers all use DI pattern
 - Shader Migration — Phases 4–5 (January 29, 2026)
   - Added WebGPU material scaffolds and terrain TSL nodes/materials with unit tests (Phase 4–5 redo)
+- Monolith refactor (DI structure) — January 29, 2026
+  - Added `src/app/runtime/types.ts`: ISimulationRunner, ITexturePool (sim-only), IRenderLoop
+  - Added `src/app/services/TerrainGeometryUpdater.ts`: only writer to TerrainStateHolder.setTerrainGeometry / setTerrainBVH
+  - Added `src/app/services/TerrainSceneService.ts`: loadScene, reset, setTerrainRandom as stable actions for createControls
+  - Wired TerrainSceneService into main: actions use service.loadScene(), service.reset(getControls()), service.setTerrainRandom(getControls()); removed standalone loadScene, Reset, setTerrainRandom, createSeededRandom from main
+- Tests + MCP verification — January 30, 2026
+  - CI: `npm run test:ci` — 23 suites, 112 tests passing
+  - MCP (user-browser-devtools): navigated to http://localhost:8080 (200 OK), full-page screenshot saved, visible text "Generating Terrain..." confirms app loads and terrain flow runs
 
 ## Detailed Progress Files
 

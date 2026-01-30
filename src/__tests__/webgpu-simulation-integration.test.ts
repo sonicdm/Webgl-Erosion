@@ -7,7 +7,7 @@ import { ComputeNodePipeline } from '../rendering/webgpu/compute/ComputeNodePipe
 import { WebGPUTexturePool } from '../simulation/WebGPUTexturePool';
 import { SimulatePerStepWebGPU } from '../simulation/SimulatePerStepWebGPU';
 import { AppContext } from '../app/context';
-import { Controls } from '../settings';
+import type { IAppControls } from '../app/controls/types';
 
 // Mock GPUDevice for testing
 function createMockGPUDevice(): GPUDevice {
@@ -25,6 +25,7 @@ function createMockGPUDevice(): GPUDevice {
 
     const mockShaderModule = {} as GPUShaderModule;
     const mockComputePipeline = {} as GPUComputePipeline;
+    const mockPipelineLayout = {} as GPUPipelineLayout;
     const mockBindGroup = {} as GPUBindGroup;
     const mockBindGroupLayout = {} as GPUBindGroupLayout;
     const mockCommandEncoder = {
@@ -42,6 +43,7 @@ function createMockGPUDevice(): GPUDevice {
         createBuffer: jest.fn(() => mockBuffer),
         createShaderModule: jest.fn(() => mockShaderModule),
         createComputePipeline: jest.fn(() => mockComputePipeline),
+        createPipelineLayout: jest.fn(() => mockPipelineLayout),
         createBindGroup: jest.fn(() => mockBindGroup),
         createBindGroupLayout: jest.fn(() => mockBindGroupLayout),
         createCommandEncoder: jest.fn(() => mockCommandEncoder),
@@ -81,7 +83,7 @@ describe('WebGPU Simulation Integration', () => {
 
     describe('SimulatePerStepWebGPU', () => {
         it('should execute rain and flow passes', () => {
-            const controls: Controls = {
+            const controls: IAppControls = {
                 RainDegree: 4.5,
                 SimulationSpeed: 1,
                 brushSize: 4,
@@ -100,7 +102,7 @@ describe('WebGPU Simulation Integration', () => {
                 timestep: 0.05,
                 pipeAra: 0.6,
                 EvaporationConstant: 0.005,
-            } as Controls;
+            } as unknown as IAppControls;
 
             const brushState = {
                 mouseWorldPos: [0, 0, 0, 0] as [number, number, number, number],
@@ -116,7 +118,7 @@ describe('WebGPU Simulation Integration', () => {
 
         it('should handle pauseGeneration flag', () => {
             appContext.simulationState.pauseGeneration = true;
-            const controls = {} as Controls;
+            const controls = {} as unknown as IAppControls;
 
             // Should return early without executing passes
             expect(() => {

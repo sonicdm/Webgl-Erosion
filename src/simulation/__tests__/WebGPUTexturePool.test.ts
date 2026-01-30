@@ -40,18 +40,19 @@ describe('WebGPUTexturePool', () => {
             pool.setup();
 
             // Verify createTexture was called for all simulation textures
-            expect(mockDevice.createTexture).toHaveBeenCalledTimes(15); // 15 simulation textures
+            expect(mockDevice.createTexture).toHaveBeenCalledTimes(17); // 17 simulation textures
 
-            // Verify texture creation parameters
+            // Verify texture creation parameters (usage is a bitmask)
             const calls = (mockDevice.createTexture as jest.Mock).mock.calls;
             calls.forEach(call => {
                 const config = call[0];
                 expect(config.size).toEqual([simres, simres, 1]);
                 expect(config.format).toBe('rgba32float');
-                expect(config.usage).toContain(GPUTextureUsage.TEXTURE_BINDING);
-                expect(config.usage).toContain(GPUTextureUsage.STORAGE_BINDING);
-                expect(config.usage).toContain(GPUTextureUsage.COPY_SRC);
-                expect(config.usage).toContain(GPUTextureUsage.COPY_DST);
+                const usage = config.usage as number;
+                expect(usage & GPUTextureUsage.TEXTURE_BINDING).not.toBe(0);
+                expect(usage & GPUTextureUsage.STORAGE_BINDING).not.toBe(0);
+                expect(usage & GPUTextureUsage.COPY_SRC).not.toBe(0);
+                expect(usage & GPUTextureUsage.COPY_DST).not.toBe(0);
             });
         });
 
@@ -199,10 +200,10 @@ describe('WebGPUTexturePool', () => {
             pool.resizeSimulationTextures(newSimres);
 
             expect(pool.getSimRes()).toBe(newSimres);
-            // Should destroy 15 textures (all simulation textures)
-            expect(destroySpy).toHaveBeenCalledTimes(15);
+            // Should destroy 17 textures (all simulation textures)
+            expect(destroySpy).toHaveBeenCalledTimes(17);
             // Should recreate all textures
-            expect(mockDevice.createTexture).toHaveBeenCalledTimes(30); // 15 initial + 15 after resize
+            expect(mockDevice.createTexture).toHaveBeenCalledTimes(34); // 17 initial + 17 after resize
         });
     });
 
@@ -219,8 +220,8 @@ describe('WebGPUTexturePool', () => {
 
             pool.dispose();
 
-            // Should destroy all 15 simulation textures + heightmap (if set)
-            expect(destroySpy).toHaveBeenCalledTimes(15);
+            // Should destroy all 17 simulation textures + heightmap (dispose always calls destroyTexture 18 times)
+            expect(destroySpy).toHaveBeenCalledTimes(18);
         });
     });
 

@@ -11,7 +11,7 @@ describe('WaterMaterialNode', () => {
 
         expect(material).toBeInstanceOf(WaterMaterialNode);
         expect(mockController.getSurfaceColorNode).toHaveBeenCalled();
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 
     it('updates uniforms and rebuilds when inputs change', () => {

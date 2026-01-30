@@ -9,7 +9,7 @@ describe('TerrainBaseMaterialWebGPU', () => {
             normalMap: new Texture(),
         });
         expect(material).toBeInstanceOf(TerrainBaseMaterialWebGPU);
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 
     it('uses the terrain node controller', () => {

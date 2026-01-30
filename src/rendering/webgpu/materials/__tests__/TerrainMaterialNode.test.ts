@@ -21,7 +21,7 @@ describe('TerrainMaterialNode', () => {
         expect(mockController.getSamplingNode).toHaveBeenCalled();
         expect(mockController.getPaletteNode).toHaveBeenCalled();
         expect(mockController.getShadowNode).toHaveBeenCalled();
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 
     it('updates uniforms and rebuilds when inputs change', () => {

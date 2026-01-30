@@ -9,12 +9,12 @@ describe('BilateralBlurMaterialWebGPU', () => {
             texelSize: new Vector2(1, 1),
         });
         expect(material).toBeInstanceOf(BilateralBlurMaterialWebGPU);
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 
     it('updates inputs', () => {
         const material = new BilateralBlurMaterialWebGPU();
         material.updateInputs({ radius: 4, depthSigma: 2, colorSigma: 1 });
-        expect(material.colorNode).toBeDefined();
+        expect((material as any).colorNode).toBeDefined();
     });
 });

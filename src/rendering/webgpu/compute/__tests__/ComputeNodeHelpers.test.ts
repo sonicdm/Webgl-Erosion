@@ -116,15 +116,16 @@ describe('ComputeNodeHelpers', () => {
     });
 
     describe('createUniformBuffer', () => {
-        it('should create a uniform buffer from ArrayBufferView', () => {
+        it('should create a uniform buffer from ArrayBufferView (size aligned to 16 bytes)', () => {
             const device = createMockGPUDevice();
             const data = new Float32Array([1.0, 2.0, 3.0]);
 
             const buffer = createUniformBuffer(device, data);
 
+            const alignedSize = Math.ceil(data.byteLength / 16) * 16;
             expect(device.createBuffer).toHaveBeenCalledWith({
                 label: undefined,
-                size: data.byteLength,
+                size: alignedSize,
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             });
             expect(device.queue.writeBuffer).toHaveBeenCalled();
@@ -164,11 +165,8 @@ describe('ComputeNodeHelpers', () => {
 
             updateUniformBuffer(device, buffer, data);
 
-            expect(device.queue.writeBuffer).toHaveBeenCalledWith(
-                buffer,
-                0,
-                expect.any(ArrayBuffer)
-            );
+            expect(device.queue.writeBuffer).toHaveBeenCalledWith(buffer, 0, expect.anything());
+            expect((device.queue.writeBuffer as jest.Mock).mock.calls[0][2]).toBeDefined();
         });
 
         it('should support offset', () => {
@@ -178,11 +176,8 @@ describe('ComputeNodeHelpers', () => {
 
             updateUniformBuffer(device, buffer, data, 16);
 
-            expect(device.queue.writeBuffer).toHaveBeenCalledWith(
-                buffer,
-                16,
-                expect.any(ArrayBuffer)
-            );
+            expect(device.queue.writeBuffer).toHaveBeenCalledWith(buffer, 16, expect.anything());
+            expect((device.queue.writeBuffer as jest.Mock).mock.calls[0][2]).toBeDefined();
         });
     });
 

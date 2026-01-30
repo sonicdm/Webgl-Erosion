@@ -19,15 +19,15 @@ import { updatePaletteSelection } from './brush-palette';
 import { MAX_WATER_SOURCES, waterSources, getWaterSourceCount } from './utils/water-sources';
 import { rayCast } from './utils/raycast';
 import { rayCastBVH } from './utils/bvh-raycast';
-import { createTerrainGeometry, updateTerrainGeometry } from './utils/terrain-geometry-builder';
-import { MeshBVH, SAH } from 'three-mesh-bvh';
+import { updateTerrainGeometry } from './utils/terrain-geometry-builder';
 import { createHeightMapLoader } from './utils/heightmap-loader';
 import { getCachedUniformLocation } from './utils/uniform-cache';
 import { LoadProgressTracker, LoadPhase } from './utils/load-progress';
-import { 
-    simres, shadowMapResolution, MaxHightMapBufCounter, shouldReadHeightmap
-} from './simulation/simulation-state';
 import { createApp, AppContext } from './app/bootstrap';
+import { createControls } from './app/controls/controls-factory';
+import type { IAppControls, ControlsActions } from './app/controls/types';
+import { TerrainSceneService } from './app/services/TerrainSceneService';
+import { TerrainGeometryUpdater } from './app/services/TerrainGeometryUpdater';
 import { LegacyTexturePool } from './simulation/LegacyTexturePool';
 import { Render2Texture } from './rendering/render-utils';
 import { createShaders, Shaders } from './rendering/shader-factory';
@@ -37,6 +37,7 @@ import { ComputeNodePipeline } from './rendering/webgpu/compute/ComputeNodePipel
 import { TerrainGeneratorCompute } from './rendering/webgpu/compute/TerrainGeneratorCompute';
 import { WebGPUTexturePool } from './simulation/WebGPUTexturePool';
 import { SimulatePerStepWebGPU } from './simulation/SimulatePerStepWebGPU';
+import { WebGPUSimulationRunner } from './app/runtime/WebGPUSimulationRunner';
 import { readHeightmapFromTexture } from './utils/webgpu-terrain-readback';
 import { copyWebGPUTerrainToWebGL } from './utils/webgpu-to-webgl-texture-copy';
 
@@ -47,182 +48,18 @@ const enableBilateralBlur = false;
 var gl_context : WebGL2RenderingContext;
 let appContext: AppContext;
 let texturePool: LegacyTexturePool;
+/** Controls built by createControls() in main(); in scope for tick/render/sim. */
+let controls: IAppControls;
+/** Terrain scene service (loadScene, reset, setTerrainRandom); created in main(). */
+let terrainSceneService: TerrainSceneService;
+/** Only writer to terrain geometry/BVH; created in main(). */
+let terrainGeometryUpdater: TerrainGeometryUpdater;
 
 // WebGPU terrain generator (module-level for access from Reset/setTerrainRandom)
 let terrainGeneratorCompute: TerrainGeneratorCompute | null = null;
 
 
 
-//  (for backup)
-const controlscomp = {
-
-
-    tesselations: 5,
-    pipelen:  0.8,//
-    Kc : 0.10,
-    Ks : 0.020,
-    Kd : 0.013,
-    timestep : 0.05,
-    pipeAra :  0.6,
-    RainErosion : false, //
-    RainErosionStrength : 1.0,
-    RainErosionDropSize : 1.0,
-    EvaporationConstant : 0.005,
-    VelocityMultiplier : 1,
-    RainDegree : 4.5,
-    AdvectionSpeedScaling : 1.0,
-    spawnposx : 0.5,
-    spawnposy : 0.5,
-    posTemp : vec2.fromValues(0.0,0.0),
-    'Load Scene': loadScene, // A function pointer, essentially
-    'Start/Resume' :StartGeneration,
-    'Generate Terrain' : Reset,
-    'setTerrainRandom':setTerrainRandom,
-    SimulationSpeed : 3,
-    TerrainBaseMap : 0,
-    TerrainBaseType : 0,//0 ordinary fbm, 1 domain warping, 2 terrace, 3 voroni
-    TerrainBiomeType : 1,
-    TerrainScale : 3.2,
-    TerrainHeight : 2.0,
-    TerrainMask : 0,//0 off, 1 sphere
-    TerrainDebug : 0,
-    WaterTransparency : 0.50,
-    SedimentTrace : 0, // 0 on, 1 off
-    TerrainPlatte : 1, // 0 normal alphine mtn, 1 desert, 2 jungle
-    SnowRange : 0,
-    ForestRange : 0,
-    brushType : 2, // 0 : no brush, 1 : terrain, 2 : water
-    brushSize : 4,
-    brushStrenth : 0.40,
-    brushOperation : 0, // 0 : add, 1 : subtract
-    brushPressed : 0, // 0 : not pressed, 1 : pressed
-    sourceCount : 0, // Number of active water sources
-    thermalRate : 0.5,
-    thermalErosionScale : 1.0,
-    lightPosX : 0.4,
-    lightPosY : 0.2,
-    lightPosZ : -1.0,
-    showScattering : true,
-    enableBilateralBlur : true,
-    AdvectionMethod : 1,
-    SimulationResolution : simres,
-
-};
-
-
-const controls = {
-    tesselations: 5,
-    pipelen:  0.8,//
-    Kc : 0.06,
-    Ks : 0.036,
-    Kd : 0.006,
-    timestep : 0.05,
-    pipeAra :  0.6,
-    ErosionMode : 0, // 0 river erosion, 1 : mountain erosion, 2 : polygonal mode
-    RainErosion : false, //
-    RainErosionStrength : 0.2,
-    RainErosionDropSize : 2.0,
-    EvaporationConstant : 0.003,
-    VelocityMultiplier : 1,
-    RainDegree : 4.5,
-    AdvectionSpeedScaling : 1.0,
-    spawnposx : 0.5,
-    spawnposy : 0.5,
-    posTemp : vec2.fromValues(0.0,0.0),
-    'Load Scene': loadScene, // A function pointer, essentially
-    'Pause/Resume' :StartGeneration,
-    'Generate Terrain' : Reset,
-    'setTerrainRandom':setTerrainRandom,
-    'Import Height Map': () => {}, // Will be set in main() after gl_context is available
-    'Clear Height Map': () => {}, // Will be set in main() after gl_context is available
-    'Export Height Map': () => {}, // Will be set in main() after gl_context is available
-    SimulationSpeed : 3,
-    TerrainBaseMap : 0,
-    TerrainBaseType : 0,//0 ordinary fbm, 1 domain warping, 2 terrace, 3 voroni
-    TerrainBiomeType : 1,
-    TerrainScale : 3.2,
-    TerrainHeight : 2.0,
-    TerrainMask : 0,//0 off, 1 sphere
-    TerrainDebug : 0,
-
-    // Advanced terrain generator parameters (GPU compute)
-    terrainFrequency : 1.0,
-    terrainAmplitude : 1.0,
-    terrainOctaves : 8,
-    terrainLacunarity : 2.0,
-    terrainPersistence : 0.5,
-    terrainSeed : 0,
-    terrainOffsetX : 0,
-    terrainOffsetY : 0,
-    terrainRidgeOffset : 1.0,
-    terrainRidgeGain : 2.0,
-    terrainTerraceCount : 8,
-    terrainDomainWarpStrength : 1.0,
-    craterDensity : 1.0,
-    canyonDepth : 0.6,
-    heightmapAmplitude : 1.0,
-    heightmapInvert : false,
-
-    WaterTransparency : 0.50,
-    SedimentTrace : true, // 0 on, 1 off
-    ShowFlowTrace : false,
-    TerrainPlatte : 1, // 0 normal alphine mtn, 1 desert, 2 jungle
-    SnowRange : 0,
-    ForestRange : 0,
-    brushType : 2, // 0 : no brush, 1 : terrain, 2 : water, 3 : rock, 4 : smooth, 5 : flatten, 6 : slope
-    brushSize : 4,
-    brushStrenth : 0.25,
-    brushOperation : 0, // 0 : add, 1 : subtract
-    brushPressed : 0, // 0 : not pressed, 1 : pressed
-    raycastMethod : 'bvh' as 'heightmap' | 'bvh', // Raycast method: 'heightmap' or 'bvh' (will be overridden by settings)
-    flattenTargetHeight : 0.0, // Target height for flatten brush (will be set to center height on Alt+click)
-    slopeStartPos : vec2.fromValues(0.0, 0.0), // Start position for slope brush
-    slopeEndPos : vec2.fromValues(0.0, 0.0), // End position for slope brush
-    slopeActive : 0, // 0 : not active, 1 : start set, 2 : end set
-    sourceCount : 0, // Number of active water sources
-    rockErosionResistance : 0.8, // 0.0 = erodes normally, 1.0 = doesn't erode (multiplier for Ks/Kc) - increased default so rock actually erodes much slower
-    thermalTalusAngleScale : 8.0,
-    thermalRate : 0.5,
-    thermalErosionScale : 1.0,
-    lightPosX : 0.4,
-    lightPosY : 0.8,
-    lightPosZ : -0.0,
-    showScattering : true,
-    enableBilateralBlur : true,
-    AdvectionMethod : 1,
-    VelocityAdvectionMag : 0.2,
-    SimulationResolution : simres,
-    'Reset Erosion Parameters': () => {
-        // Reset all erosion parameters to defaults
-        controls.Kc = 0.06;
-        controls.Ks = 0.036;
-        controls.Kd = 0.006;
-        controls.ErosionMode = 0;
-        controls.EvaporationConstant = 0.003;
-        controls.VelocityMultiplier = 1;
-        controls.VelocityAdvectionMag = 0.2;
-        controls.AdvectionMethod = 1;
-        controls.RainErosion = false;
-        controls.RainErosionStrength = 0.2;
-        controls.RainErosionDropSize = 2.0;
-        
-        // Update GUI controllers to reflect the changes
-        const controllers = (window as any).erosionControllers;
-        if (controllers) {
-            controllers.kcController.updateDisplay();
-            controllers.ksController.updateDisplay();
-            controllers.kdController.updateDisplay();
-            controllers.erosionModeController.updateDisplay();
-            controllers.evaporationController.updateDisplay();
-            controllers.velocityMultiplierController.updateDisplay();
-            controllers.velocityAdvectionController.updateDisplay();
-            controllers.advectionMethodController.updateDisplay();
-            controllers.rainErosionController.updateDisplay();
-            controllers.rainErosionStrengthController.updateDisplay();
-            controllers.rainErosionDropSizeController.updateDisplay();
-        }
-    },
-};
 
 
 
@@ -249,70 +86,8 @@ const terrainRandom = {
 // ================ dat gui button call backs ============
 // =============================================================
 
-function loadScene() {
-  const glContext = appContext.simulationState.glContext;
-  if (!glContext) {
-    console.warn('[loadScene] WebGL2 context not available - cannot create geometry. WebGPU path should be used instead.');
-    return;
-  }
-  
-  square = new Square(glContext, vec3.fromValues(0, 0, 0));
-  square.create();
-  plane = new Plane(glContext, vec3.fromValues(0,0,0), vec2.fromValues(1,1), 18);
-  plane.create();
-  waterPlane = new Plane(glContext, vec3.fromValues(0,0,0), vec2.fromValues(1,1), 18);
-  waterPlane.create();
-}
-
 function StartGeneration(){
     appContext.simulationState.setPauseGeneration(!appContext.simulationState.pauseGeneration);
-}
-
-
-function Reset(){
-    appContext.simulationState.setSimFrameCount(0);
-    setTerrainRandom();
-    appContext.simulationState.setTerrainGeometryDirty(true);
-    // Resolution change will be handled in the TerrainGeometryDirty block
-    //PauseGeneration = true;
-}
-
-function createSeededRandom(seed: number): () => number {
-    let t = (seed >>> 0) || 1;
-    return () => {
-        t += 0x6D2B79F5;
-        let r = Math.imul(t ^ (t >>> 15), 1 | t);
-        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
-        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
-function setTerrainRandom() {
-    const seedValue = Number(controls.terrainSeed ?? 0);
-    const useRandom = !Number.isFinite(seedValue) || seedValue === 0;
-    const rand = useRandom ? Math.random : createSeededRandom(Math.floor(seedValue));
-
-    const angle = rand() * Math.PI * 2.0;
-    terrainRandom.duneDir[0] = Math.cos(angle);
-    terrainRandom.duneDir[1] = Math.sin(angle);
-
-    terrainRandom.craterDensity = 0.8 + rand() * 0.7;
-    terrainRandom.canyonDepth = 0.45 + rand() * 0.5;
-    terrainRandom.seedOffset[0] = rand() * 256.0;
-    terrainRandom.seedOffset[1] = rand() * 256.0;
-
-    // Also randomize the WebGPU terrain generator
-    if (terrainGeneratorCompute) {
-        if (useRandom) {
-            terrainGeneratorCompute.setRandomSeed();
-        } else {
-            terrainGeneratorCompute.setParams({
-                seed: seedValue
-            });
-        }
-    }
-
-    appContext.simulationState.setTerrainGeometryDirty(true);
 }
 
 // Heightmap loading functions are now created via createHeightMapLoader in main()
@@ -771,7 +546,7 @@ function SimulatePerStep(renderer:OpenGLRenderer,
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
         gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, null);
 
-        gl_context.viewport(0, 0, simres, simres);
+        gl_context.viewport(0, 0, appContext.simulationState.simres, appContext.simulationState.simres);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, texturePool.frame_buffer);
 
 
@@ -1100,10 +875,26 @@ let controlsConfig: ControlsConfig;
 async function main() {
 
   // Create application context with state holders (composition root)
-  appContext = createApp(simres);
-  
-  // Create texture pool
-  texturePool = new LegacyTexturePool(null as any, simres, shadowMapResolution); // gl_context will be set below
+  appContext = createApp();
+
+  // Terrain scene service: loadScene, reset, setTerrainRandom (stable actions for createControls)
+  terrainSceneService = new TerrainSceneService(appContext, {
+    terrainRandom,
+    getTerrainGeneratorCompute: () => terrainGeneratorCompute,
+  });
+  const loadSceneImpl = (gl: WebGL2RenderingContext) => {
+    square = new Square(gl, vec3.fromValues(0, 0, 0));
+    square.create();
+    plane = new Plane(gl, vec3.fromValues(0, 0, 0), vec2.fromValues(1, 1), 18);
+    plane.create();
+    waterPlane = new Plane(gl, vec3.fromValues(0, 0, 0), vec2.fromValues(1, 1), 18);
+    waterPlane.create();
+  };
+  terrainSceneService.setLoadSceneImpl(loadSceneImpl);
+  terrainGeometryUpdater = new TerrainGeometryUpdater(appContext.terrainState, appContext.simulationState);
+
+  // Create texture pool (gl_context will be set below)
+  texturePool = new LegacyTexturePool(null as any, appContext.simulationState.simres, appContext.configHolder.shadowMapResolution);
 
   // Initial display for framerate
   const stats = Stats();
@@ -1113,10 +904,6 @@ async function main() {
   stats.domElement.style.bottom = '0px';
   stats.domElement.style.top = 'auto';
   document.body.appendChild(stats.domElement);
-
-  // Setup GUI
-  const { gui, controllers } = setupGUI(controls);
-  const { brushTypeController, brushSizeController, brushStrengthController, brushOperationController } = controllers;
 
   // get canvas
   const canvas = <HTMLCanvasElement> document.getElementById('canvas');
@@ -1146,7 +933,7 @@ async function main() {
   if (gl_context) {
     appContext.simulationState.setGlContext(gl_context);
     // Update texture pool with gl context
-    texturePool = new LegacyTexturePool(gl_context, appContext.simulationState.simres, shadowMapResolution);
+    texturePool = new LegacyTexturePool(gl_context, appContext.simulationState.simres, appContext.configHolder.shadowMapResolution);
   }
   
   // Declare WebGPU variables early (before try block)
@@ -1169,7 +956,7 @@ async function main() {
     }
 
     webgpuComputePipeline = new ComputeNodePipeline(webgpuDevice);
-    webgpuTexturePool = new WebGPUTexturePool(webgpuDevice, appContext.simulationState.simres, shadowMapResolution);
+    webgpuTexturePool = new WebGPUTexturePool(webgpuDevice, appContext.simulationState.simres, appContext.configHolder.shadowMapResolution);
     webgpuTexturePool.setup();
 
     // Initialize terrain generator compute pipeline
@@ -1183,34 +970,63 @@ async function main() {
     alert('Failed to initialize WebGPU compute pipeline. The application cannot run.');
     return; // Exit early - simulation requires WebGPU
   }
-  
-  // Create heightmap loader functions (only if WebGL2 context is available)
-  if (gl_context && texturePool) {
-    const setTerrainBaseType = (value: number) => {
-      if (controllers.terrainBaseTypeController) {
-        controllers.terrainBaseTypeController.setValue(value);
-      }
-      controls.TerrainBaseType = value;
-    };
 
-    const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(
-        gl_context,
-        appContext.simulationState,
-        texturePool,
-        controls,
-        { setTerrainBaseType }
-    );
-    controls['Import Height Map'] = loadHeightMap;
-    controls['Clear Height Map'] = clearHeightMap;
-    controls['Export Height Map'] = exportHeightMap;
-  } else if (webgpuRenderer) {
-    // WebGPU is available but WebGL2 is not - disable heightmap operations for now
-    // These will be migrated to WebGPU in Phase 3
-    console.warn('[Heightmap] Heightmap import/export disabled - WebGL2 not available. Will be migrated to WebGPU in Phase 3.');
-    controls['Import Height Map'] = () => { console.warn('Heightmap import not available - WebGL2 required'); };
-    controls['Clear Height Map'] = () => { console.warn('Heightmap clear not available - WebGL2 required'); };
-    controls['Export Height Map'] = () => { console.warn('Heightmap export not available - WebGL2 required'); };
-  }
+  // Build controls with stable actions before GUI binds (no reassignment after setupGUI)
+  let controllersRef: GUIControllers | null = null;
+  const getControlsForLoader = () => controls;
+  const setTerrainBaseType = (value: number) => {
+    controls.TerrainBaseType = value;
+    controllersRef?.terrainBaseTypeController?.setValue(value);
+  };
+  const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(
+    gl_context,
+    appContext.simulationState,
+    texturePool,
+    getControlsForLoader,
+    { setTerrainBaseType }
+  );
+  const resetErosionParameters = (c: IAppControls) => {
+    c.Kc = 0.06;
+    c.Ks = 0.036;
+    c.Kd = 0.006;
+    c.ErosionMode = 0;
+    c.EvaporationConstant = 0.003;
+    c.VelocityMultiplier = 1;
+    c.VelocityAdvectionMag = 0.2;
+    c.AdvectionMethod = 1;
+    c.RainErosion = false;
+    c.RainErosionStrength = 0.2;
+    c.RainErosionDropSize = 2.0;
+    const erosionControllers = (window as any).erosionControllers;
+    if (erosionControllers) {
+      erosionControllers.kcController.updateDisplay();
+      erosionControllers.ksController.updateDisplay();
+      erosionControllers.kdController.updateDisplay();
+      erosionControllers.erosionModeController.updateDisplay();
+      erosionControllers.evaporationController.updateDisplay();
+      erosionControllers.velocityMultiplierController.updateDisplay();
+      erosionControllers.velocityAdvectionController.updateDisplay();
+      erosionControllers.advectionMethodController.updateDisplay();
+      erosionControllers.rainErosionController.updateDisplay();
+      erosionControllers.rainErosionStrengthController.updateDisplay();
+      erosionControllers.rainErosionDropSizeController.updateDisplay();
+    }
+  };
+  const getControls = () => controls;
+  const actions: ControlsActions = {
+    loadScene: () => terrainSceneService.loadScene(),
+    pauseResume: StartGeneration,
+    generateTerrain: () => terrainSceneService.reset(getControls()),
+    setTerrainRandom: () => terrainSceneService.setTerrainRandom(getControls()),
+    importHeightMap: loadHeightMap,
+    clearHeightMap,
+    exportHeightMap,
+    resetErosionParameters
+  };
+  controls = createControls(appContext, actions);
+  const { gui, controllers } = setupGUI(controls);
+  const { brushTypeController, brushSizeController, brushStrengthController, brushOperationController } = controllers;
+  controllersRef = controllers;
 
   // Load settings (from localStorage or defaults) - must be done before creating event handlers
   controlsConfig = loadSettings();
@@ -1368,14 +1184,14 @@ async function main() {
     // //   console.log(e);
       
     // }
-    if(!gl_context.getExtension('OES_texture_float_linear')){
-      console.log("float texture not supported");
+    if (!gl_context.getExtension('OES_texture_float_linear')) {
+      console.warn('[WebGL] OES_texture_float_linear not supported; float texture filtering may be limited.');
     }
-    if(!gl_context.getExtension('OES_texture_float')){
-      console.log("no float texutre!!!?? y am i here?");
+    if (!gl_context.getExtension('OES_texture_float')) {
+      console.warn('[WebGL] OES_texture_float not supported; simulation may use half-float or be limited.');
     }
-    if(!gl_context.getExtension('EXT_color_buffer_float')) {
-      console.log("cant render to float texture ");
+    if (!gl_context.getExtension('EXT_color_buffer_float')) {
+      console.warn('[WebGL] EXT_color_buffer_float not supported; rendering to float textures may be limited.');
     }
     // `setGL` is a function imported above which sets the value of `gl_context` in the `globals.ts` module.
     // Later, we can import `gl_context` from `globals.ts` to access it
@@ -1383,7 +1199,7 @@ async function main() {
   }
 
   // Initial call to load scene
-  loadScene();
+  terrainSceneService.loadScene();
 
   // Camera is already created above, just check brushUsesLeftClick here for reference
   const brushUsesLeftClick = controlsConfig.mouse.brushActivate === 'LEFT' || 
@@ -1424,13 +1240,29 @@ async function main() {
         combinedShader, bilateralBlur, veladvect
     } = shaders);
     noiseterrain = shaders.noiseterrain;
-    setTerrainRandom();
+    terrainSceneService.setTerrainRandom(controls);
   } else {
     // WebGL2 context not available - cannot proceed without it
     console.error('[main] WebGL2 context required for terrain rendering. WebGPU path will be implemented in Phase 3.');
   }
 
     let timer = 0;
+    const currentBrushState = {
+        mouseWorldPos: [0, 0, 0, 0] as [number, number, number, number],
+        mouseWorldDir: [0, 0, 0] as [number, number, number],
+        brushPos: [0, 0] as [number, number],
+    };
+    let simRunner: WebGPUSimulationRunner | null = null;
+    if (webgpuComputePipeline && webgpuTexturePool) {
+        simRunner = new WebGPUSimulationRunner(
+            webgpuComputePipeline,
+            webgpuTexturePool,
+            appContext,
+            getControls,
+            () => timer,
+            () => currentBrushState
+        );
+    }
     function cleanUpTextures(){
         Render2Texture(renderer, gl_context, camera, clean, texturePool.read_terrain_tex, square, noiseterrain, appContext.simulationState.simres, texturePool);
         Render2Texture(renderer, gl_context, camera, clean, texturePool.read_vel_tex, square, noiseterrain, appContext.simulationState.simres, texturePool);
@@ -1541,14 +1373,18 @@ async function main() {
     }
 
 
-    if(appContext.simulationState.terrainGeometryDirty){
+    if (appContext.simulationState.terrainGeometryDirty) {
+        // Clear dirty immediately so we only run the pipeline once per "request"
+        // (prevents double generation when tick runs again before the async callback completes)
+        appContext.simulationState.setTerrainGeometryDirty(false);
+
         const loadingOverlay = document.getElementById('terrain-loading-overlay');
         const progressText = document.getElementById('loading-progress-text');
         const progressBar = document.getElementById('loading-progress-bar');
-        
+
         // Check if a build is already in progress - if so, don't reset the UI
         const buildInProgress = appContext.terrainState.terrainBVHBuildInProgress || (loadingOverlay && loadingOverlay.classList.contains('visible'));
-        
+
         if (buildInProgress) {
             // Still need to process the loading, but don't reset UI
         } else {
@@ -1742,22 +1578,8 @@ async function main() {
                     return;
                 }
                 
-                // Dispose old geometry and BVH if they exist (needed for rebuilds after reset/resolution change)
-                if (appContext.terrainState.terrainGeometry) {
-                    console.log('[BVH] Disposing old terrain geometry');
-                    appContext.terrainState.terrainGeometry.dispose();
-                    appContext.terrainState.setTerrainGeometry(null);
-                }
-                if (appContext.terrainState.terrainBVH) {
-                    console.log('[BVH] Clearing old BVH');
-                    appContext.terrainState.setTerrainBVH(null);
-                }
-                
-                // Create new terrain geometry from heightmap
                 // Only build BVH if buffer is fresh (just read after terrain generation)
-                // This prevents building BVH with stale data
                 if (appContext.simulationState.heightMapBufIsFresh && appContext.simulationState.heightMapCpuBuf && appContext.simulationState.heightMapCpuBuf.length >= appContext.simulationState.simres * appContext.simulationState.simres * 4) {
-                    // Verify buffer has actual data (not all zeros)
                     let hasData = false;
                     const sampleCount = Math.min(100, appContext.simulationState.simres * appContext.simulationState.simres);
                     for (let i = 0; i < sampleCount; i++) {
@@ -1767,137 +1589,38 @@ async function main() {
                             break;
                         }
                     }
-                    
                     if (hasData) {
                         console.log('[BVH] Heightmap buffer has valid data, starting geometry and BVH build');
                         try {
-                            // Mark BVH build as in progress to prevent duplicates
                             appContext.terrainState.setTerrainBVHBuildInProgress(true);
-                            // Set TerrainGeometryDirty to false NOW (synchronously) to prevent duplicate builds
-                            // This must happen before async operations start
                             appContext.simulationState.setTerrainGeometryDirty(false);
-                            console.log('[BVH] Build marked as in progress, TerrainGeometryDirty set to false');
-                            
-                            // Geometry phase with progress callbacks
                             progressTracker.startPhase(LoadPhase.GEOMETRY);
-                            progressTracker.updateSubPhaseProgress(0.0);
-                            
-                            // Force initial UI update - ensure progress bar is visible before blocking work
+                            progressTracker.startPhase(LoadPhase.BVH);
                             if (progressBar) {
-                                progressBar.style.width = `0%`;
-                                progressBar.offsetHeight; // Force reflow to ensure render
+                                progressBar.style.width = `70%`;
+                                progressBar.offsetHeight;
                             }
-                            // Yield to browser to ensure initial progress is rendered
                             requestAnimationFrame(() => {
-                                // Update progress to show we're starting geometry creation
-                                progressTracker.updateSubPhaseProgress(0.0);
-                                const newGeometry = createTerrainGeometry(
-                                    appContext.simulationState.simres, 
-                                    appContext.simulationState.heightMapCpuBuf, 
-                                    1.0
-                                );
-                                // Mark geometry creation as complete
+                                terrainGeometryUpdater.update(appContext.simulationState.heightMapCpuBuf, appContext.simulationState.simres, 1.0);
                                 progressTracker.updateSubPhaseProgress(1.0);
-                                appContext.terrainState.setTerrainGeometry(newGeometry);
+                                progressTracker.endPhase(LoadPhase.BVH);
                                 progressTracker.endPhase(LoadPhase.GEOMETRY);
-
-                                // BVH phase - ensure UI updates before blocking construction
-                                progressTracker.startPhase(LoadPhase.BVH);
-                                progressTracker.updateSubPhaseProgress(0.0);
-                                
-                                // Force UI update before blocking BVH construction
-                                if (progressBar) {
-                                    progressBar.style.width = `70%`;
-                                    progressBar.offsetHeight; // Force reflow
-                                }
-                                // Yield control to ensure progress bar updates before blocking BVH construction
-                                requestAnimationFrame(() => {
-                                    requestAnimationFrame(() => {
-                                        // Update progress to show we're starting BVH construction
-                                        progressTracker.updateSubPhaseProgress(0.05);
-                                        
-                                        // Force another UI update
-                                        if (progressBar) {
-                                            // Progress is tracked internally, just update UI
-                                            progressBar.style.width = `75%`;
-                                            progressBar.offsetHeight; // Force reflow
-                                        }
-                                        
-                                        const bvhStartTime = performance.now();
-                                        
-                                        // Simulate progress updates during BVH construction
-                                        // Since MeshBVH doesn't provide progress callbacks, we'll estimate progress
-                                        // based on elapsed time (typical BVH build takes 2-3 seconds for 1024x1024)
-                                        const estimatedDuration = 2500; // Estimate 2.5 seconds
-                                        let progressUpdateInterval: number | null = null;
-                                        const startProgress = 0.05;
-                                        const endProgress = 0.95; // Leave 5% for completion
-                                        
-                                        const updateProgress = () => {
-                                            const elapsed = performance.now() - bvhStartTime;
-                                            const estimatedProgress = Math.min(endProgress, startProgress + (elapsed / estimatedDuration) * (endProgress - startProgress));
-                                            progressTracker.updateSubPhaseProgress(estimatedProgress);
-                                            if (progressBar) {
-                                                // Progress is tracked internally, just update UI
-                                                progressBar.style.width = `${(estimatedProgress * 100).toFixed(1)}%`;
-                                            }
-                                        };
-                                        
-                                        // Update progress every 50ms for smooth animation
-                                        progressUpdateInterval = window.setInterval(updateProgress, 50);
-                                        
-                                        // Reduced maxDepth for faster construction while maintaining quality
-                                        // 30 is usually sufficient for most terrain (was 40)
-                                        const bvh = new MeshBVH(newGeometry, {
-                                            strategy: SAH, // Surface Area Heuristic for best performance
-                                            maxDepth: 30,    // Reduced from 40 for faster builds (still very accurate)
-                                            indirect: false   // Direct indexed geometry
-                                        });
-                                        
-                                        // Clear progress update interval
-                                        if (progressUpdateInterval !== null) {
-                                            clearInterval(progressUpdateInterval);
-                                        }
-                                        
-                                        const bvhDuration = performance.now() - bvhStartTime;
-                                        console.log(`[BVH] BVH construction complete in ${bvhDuration.toFixed(2)}ms`);
-                                        
-                                        appContext.terrainState.setTerrainBVH(bvh); // This will clear terrainBVHBuildInProgress
-                                        progressTracker.updateSubPhaseProgress(1.0);
-                                        progressTracker.endPhase(LoadPhase.BVH);
-                                        appContext.simulationState.setHeightMapBufIsFresh(false); // Mark as consumed
-                                        
-                                        // Hide loading overlay after BVH is built
-                                        if (loadingOverlay) {
-                                            loadingOverlay.classList.remove('visible');
-                                        } else {
-                                            console.warn('[Loading] Overlay element not found when trying to hide!');
-                                        }
-                                        
-                                        // TerrainGeometryDirty was already set to false before async operations started
-                                        // No need to set it again here
-                                    });
-                                });
-                                // Don't hide overlay or mark as clean here - wait for BVH to complete
-                                // Exit early, overlay will be hidden and dirty flag cleared after BVH completes
-                                return;
+                                if (loadingOverlay) loadingOverlay.classList.remove('visible');
                             });
                         } catch (error) {
                             console.error('[BVH] Failed to build BVH:', error);
-                            appContext.terrainState.setTerrainBVHBuildInProgress(false); // Clear flag on error
-                            appContext.simulationState.setHeightMapBufIsFresh(false); // Mark as consumed even on error
+                            appContext.terrainState.setTerrainBVHBuildInProgress(false);
+                            appContext.simulationState.setHeightMapBufIsFresh(false);
                             appContext.simulationState.setTerrainGeometryDirty(false);
-                            if (loadingOverlay) {
-                                loadingOverlay.classList.remove('visible');
-                            }
+                            if (loadingOverlay) loadingOverlay.classList.remove('visible');
                         }
                     } else {
                         console.log('[BVH] Heightmap buffer has no valid data');
                         appContext.simulationState.setHeightMapBufIsFresh(false); // Mark as consumed
+                        appContext.simulationState.setTerrainGeometryDirty(true); // Retry on next tick
                         if (progressText) {
                             progressText.textContent = 'Waiting for valid heightmap data...';
                         }
-                        // Keep overlay visible and retry on next tick
                     }
                 } else {
                     console.log('[BVH] Heightmap buffer not fresh yet, will build when available');
@@ -2130,15 +1853,18 @@ async function main() {
     }
     
     // WebGPU simulation path - copy results to WebGL textures for rendering
-    // Prepare brush state for compute passes
-    const brushState = {
-        mouseWorldPos: [reusableMousePoint[0], reusableMousePoint[1], reusableMousePoint[2], reusableMousePoint[3]] as [number, number, number, number],
-        mouseWorldDir: [reusableDir[0], reusableDir[1], reusableDir[2]] as [number, number, number],
-        brushPos: [reusablePos[0], reusablePos[1]] as [number, number],
-    };
-    
-    for(let i = 0;i<controls.SimulationSpeed;i++) {
-        SimulatePerStepWebGPU(webgpuComputePipeline, webgpuTexturePool, appContext, controls, timer, brushState);
+    currentBrushState.mouseWorldPos[0] = reusableMousePoint[0];
+    currentBrushState.mouseWorldPos[1] = reusableMousePoint[1];
+    currentBrushState.mouseWorldPos[2] = reusableMousePoint[2];
+    currentBrushState.mouseWorldPos[3] = reusableMousePoint[3];
+    currentBrushState.mouseWorldDir[0] = reusableDir[0];
+    currentBrushState.mouseWorldDir[1] = reusableDir[1];
+    currentBrushState.mouseWorldDir[2] = reusableDir[2];
+    currentBrushState.brushPos[0] = reusablePos[0];
+    currentBrushState.brushPos[1] = reusablePos[1];
+
+    for (let i = 0; i < controls.SimulationSpeed; i++) {
+        if (simRunner) simRunner.step();
         appContext.simulationState.incrementSimFrameCount();
     }
     
@@ -2159,7 +1885,7 @@ async function main() {
         (Math.abs(appContext.simulationState.lastX - lastReadMouseX) + Math.abs(appContext.simulationState.lastY - lastReadMouseY) > 1);
     
     // Trigger heightmap read for brush raycasting (and BVH updates)
-    const shouldRead = (justPressed || mouseMoved) && shouldReadHeightmap(brushPressed, brushVisible, appContext.simulationState.simres);
+    const shouldRead = (justPressed || mouseMoved) && appContext.configHolder.shouldReadHeightmap(brushPressed, brushVisible, appContext.simulationState.simres, appContext.simulationState.heightMapBufCounter);
     // Also read when brush is released to update BVH after brush stroke
     const shouldReadForBVH = appContext.simulationState.enableBVHUpdates && justReleased && appContext.terrainState.terrainGeometry && appContext.terrainState.terrainBVH;
     
@@ -2177,7 +1903,7 @@ async function main() {
             .then(() => {
                 lastReadMouseX = appContext.simulationState.lastX;
                 lastReadMouseY = appContext.simulationState.lastY;
-                if (!brushPressed && !brushVisible && appContext.simulationState.heightMapBufCounter >= MaxHightMapBufCounter) {
+                if (!brushPressed && !brushVisible && appContext.simulationState.heightMapBufCounter >= appContext.configHolder.maxHeightmapBufCounter) {
                     appContext.simulationState.resetHeightMapBufCounter();
                 }
             })
@@ -2355,7 +2081,7 @@ async function main() {
       gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,null);
       gl_context.bindRenderbuffer(gl_context.RENDERBUFFER,null);
 
-      gl_context.viewport(0,0,shadowMapResolution,shadowMapResolution);
+      gl_context.viewport(0,0,appContext.configHolder.shadowMapResolution,appContext.configHolder.shadowMapResolution);
       gl_context.bindFramebuffer(gl_context.FRAMEBUFFER,texturePool.shadowMap_frame_buffer);
       renderer.clear();// clear when attached to shadow map
       shadowMapShader.use();
@@ -2640,14 +2366,24 @@ async function main() {
     requestAnimationFrame(tick);
   }
 
-  window.addEventListener('resize', function() {
-    if (renderer && gl_context) {
-      texturePool.resizeScreenTextures();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      camera.setAspectRatio(window.innerWidth / window.innerHeight);
-      camera.updateProjectionMatrix();
-    }
-  }, false);
+  const runtime = {
+    start(): void {
+      tick();
+    },
+    resize(): void {
+      if (renderer && gl_context) {
+        texturePool.resizeScreenTextures();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.setAspectRatio(window.innerWidth / window.innerHeight);
+        camera.updateProjectionMatrix();
+      }
+    },
+    getControls: (): IAppControls => controls,
+    getCamera: () => camera,
+    getRenderer: () => renderer,
+  };
+
+  window.addEventListener('resize', runtime.resize, false);
 
   if (renderer) {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -2655,8 +2391,7 @@ async function main() {
     camera.updateProjectionMatrix();
   }
 
-  // Start the render loop
-  tick();
+  runtime.start();
 }
 
 main();

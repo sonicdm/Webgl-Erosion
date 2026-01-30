@@ -1,6 +1,12 @@
 import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 import { LegacyTexturePool } from '../simulation/LegacyTexturePool';
 import { heightmapCache } from '../terrain/HeightmapCache';
+import {
+    getBufferSize,
+    getMaxHeightForScale,
+    decodeFromImageData,
+    encodeToGrayscaleImageData
+} from '../app/heightmap/HeightmapContract';
 
 export interface Controls {
     TerrainHeight: number;
@@ -23,13 +29,23 @@ let reusableHeightDataBuffer: Float32Array | null = null;
 let reusableCanvas: HTMLCanvasElement | null = null;
 let reusableCanvasContext: CanvasRenderingContext2D | null = null;
 
+/**
+ * Either a Controls object or a getter (used so loader can be created before controls exist).
+ */
+export type ControlsOrGetter = Controls | (() => Controls);
+
+function resolveControls(controlsOrGetter: ControlsOrGetter): Controls {
+    return typeof controlsOrGetter === 'function' ? controlsOrGetter() : controlsOrGetter;
+}
+
 export function createHeightMapLoader(
     gl_context: WebGL2RenderingContext,
     simulationState: SimulationStateHolder,
     texturePool: LegacyTexturePool,
-    controls: Controls,
+    controlsOrGetter: ControlsOrGetter,
     callbacks?: HeightmapLoaderCallbacks
 ) {
+    const getControls = () => resolveControls(controlsOrGetter);
     function loadHeightMap() {
         const input = document.createElement('input');
         input.type = 'file';
@@ -80,29 +96,21 @@ export function createHeightMapLoader(
                     }
 
                     // Reuse or create heightData buffer (only reallocate if size changed)
-                    const bufferSize = simulationState.simres * simulationState.simres * 4;
+                    const bufferSize = getBufferSize(simulationState.simres);
                     if (!reusableHeightDataBuffer || reusableHeightDataBuffer.length !== bufferSize) {
                         reusableHeightDataBuffer = new Float32Array(bufferSize);
                     }
                     const heightData = reusableHeightDataBuffer;
 
-                    // Convert image data to height map texture
-                    // Use grayscale (red channel) as height, scale to terrain height range
-                    const maxHeight = controls.TerrainHeight * 120.0;
-
-                    for (let i = 0; i < simulationState.simres * simulationState.simres; i++) {
-                        const r = imageData.data[i * 4];
-                        const g = imageData.data[i * 4 + 1];
-                        const b = imageData.data[i * 4 + 2];
-                        // Convert RGB to grayscale and normalize to 0-1, then scale
-                        const gray = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
-                        const height = gray * maxHeight;
-
-                        heightData[i * 4] = height;      // R: terrain height
-                        heightData[i * 4 + 1] = 0.0;   // G: water (start with no water)
-                        heightData[i * 4 + 2] = 0.0;   // B: rock material
-                        heightData[i * 4 + 3] = 1.0;   // A: alpha
-                    }
+                    // Convert image data to height map via single source of truth
+                    const maxHeight = getMaxHeightForScale(getControls().TerrainHeight);
+                    decodeFromImageData(
+                        imageData.data,
+                        simulationState.simres,
+                        simulationState.simres,
+                        maxHeight,
+                        heightData
+                    );
 
                     // Create or update height map texture
                     let heightmap_tex = texturePool.getHeightMapTexture();
@@ -126,8 +134,8 @@ export function createHeightMapLoader(
                     if (callbacks?.setTerrainBaseType) {
                         callbacks.setTerrainBaseType(HEIGHTMAP_BASE_TYPE_ID);
                         console.log('[Heightmap] Auto-switched to imported heightmap mode via callback');
-                    } else if (controls.TerrainBaseType !== undefined) {
-                        controls.TerrainBaseType = HEIGHTMAP_BASE_TYPE_ID;
+                    } else if (getControls().TerrainBaseType !== undefined) {
+                        (getControls() as { TerrainBaseType?: number }).TerrainBaseType = HEIGHTMAP_BASE_TYPE_ID;
                         console.log('[Heightmap] Auto-switched to imported heightmap mode');
                     }
 
@@ -163,8 +171,8 @@ export function createHeightMapLoader(
         // Get current resolution from simulation state
         const currentRes = simulationState.simres;
 
-        // Create temporary buffer for reading heightmap data
-        const bufferSize = currentRes * currentRes * 4;
+        // Create temporary buffer for reading heightmap data (contract buffer size)
+        const bufferSize = getBufferSize(currentRes);
         const heightData = new Float32Array(bufferSize);
 
         // Read terrain texture from GPU
@@ -174,12 +182,7 @@ export function createHeightMapLoader(
         gl_context.readPixels(0, 0, currentRes, currentRes, gl_context.RGBA, gl_context.FLOAT, heightData);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
-        // Convert height data to grayscale image
-        // Height is stored as: heightValue / simres in shader
-        // For export, we need to reverse: convert back to 0-255 range
-        // Import uses: gray * maxHeight where maxHeight = TerrainHeight * 120.0
-        // So export: height / maxHeight * 255
-        const maxHeight = controls.TerrainHeight * 120.0;
+        const maxHeight = getMaxHeightForScale(getControls().TerrainHeight);
 
         // Reuse canvas if available, create new one only if needed or size changed
         if (!reusableCanvas || reusableCanvas.width !== currentRes || reusableCanvas.height !== currentRes) {
@@ -194,21 +197,9 @@ export function createHeightMapLoader(
             return;
         }
 
-        // Create ImageData and fill with grayscale height values
+        // Encode height buffer to grayscale via contract
         const imageData = ctx.createImageData(currentRes, currentRes);
-        for (let i = 0; i < currentRes * currentRes; i++) {
-            const height = heightData[i * 4]; // R channel contains height (raw value, not divided by simres)
-            // Convert height back to grayscale (0-255)
-            // Import: gray (0-1) = pixel / 255.0, then height = gray * maxHeight
-            // Texture stores: height directly (gray * maxHeight)
-            // Export: gray = height / maxHeight, then pixel = gray * 255
-            const gray = Math.max(0, Math.min(255, Math.round((height / maxHeight) * 255)));
-            
-            imageData.data[i * 4] = gray;     // R
-            imageData.data[i * 4 + 1] = gray; // G
-            imageData.data[i * 4 + 2] = gray; // B
-            imageData.data[i * 4 + 3] = 255;  // A
-        }
+        encodeToGrayscaleImageData(heightData, currentRes, currentRes, maxHeight, imageData);
 
         // Draw to canvas
         ctx.putImageData(imageData, 0, 0);
@@ -253,8 +244,8 @@ export function createHeightMapLoader(
         // Get current resolution from simulation state
         const currentRes = simulationState.simres;
 
-        // Create temporary buffer for reading heightmap data
-        const bufferSize = currentRes * currentRes * 4;
+        // Create temporary buffer for reading heightmap data (contract buffer size)
+        const bufferSize = getBufferSize(currentRes);
         const heightData = new Float32Array(bufferSize);
 
         // Read terrain texture from GPU
@@ -264,7 +255,7 @@ export function createHeightMapLoader(
         gl_context.readPixels(0, 0, currentRes, currentRes, gl_context.RGBA, gl_context.FLOAT, heightData);
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
-        // Create binary blob with Float32Array data
+        // Create binary blob with Float32Array data (contract format: RGBA32F)
         const blob = new Blob([heightData.buffer], { type: 'application/octet-stream' });
 
         // Generate filename with timestamp

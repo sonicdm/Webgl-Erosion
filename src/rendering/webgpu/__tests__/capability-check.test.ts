@@ -37,11 +37,12 @@ describe('WebGPU Capability Check', () => {
         });
 
         it('should handle adapter request failures gracefully', async () => {
-            // Mock navigator.gpu.requestAdapter to reject
-            const originalRequestAdapter = (global as any).navigator?.gpu?.requestAdapter;
-            if ((global as any).navigator?.gpu) {
-                (global as any).navigator.gpu.requestAdapter = jest.fn().mockRejectedValue(new Error('Adapter request failed'));
-            }
+            const originalNav = (global as any).navigator;
+            (global as any).navigator = {
+                gpu: {
+                    requestAdapter: jest.fn().mockRejectedValue(new Error('Adapter request failed')),
+                },
+            };
 
             const result = await checkWebGPUSupport();
             
@@ -49,21 +50,19 @@ describe('WebGPU Capability Check', () => {
             expect(result.fallbackReason).toBeDefined();
             expect(result.fallbackReason).toContain('adapter');
 
-            // Restore original
-            if ((global as any).navigator?.gpu && originalRequestAdapter) {
-                (global as any).navigator.gpu.requestAdapter = originalRequestAdapter;
-            }
+            (global as any).navigator = originalNav;
         });
 
         it('should handle device creation failures gracefully', async () => {
-            // Mock adapter.requestDevice to reject
-            const originalGpu = (global as any).navigator?.gpu;
-            if ((global as any).navigator?.gpu) {
-                const mockAdapter = {
-                    requestDevice: jest.fn().mockRejectedValue(new Error('Device creation failed'))
-                };
-                (global as any).navigator.gpu.requestAdapter = jest.fn().mockResolvedValue(mockAdapter);
-            }
+            const originalNav = (global as any).navigator;
+            const mockAdapter = {
+                requestDevice: jest.fn().mockRejectedValue(new Error('Device creation failed')),
+            };
+            (global as any).navigator = {
+                gpu: {
+                    requestAdapter: jest.fn().mockResolvedValue(mockAdapter),
+                },
+            };
 
             const result = await checkWebGPUSupport();
             
@@ -71,10 +70,7 @@ describe('WebGPU Capability Check', () => {
             expect(result.fallbackReason).toBeDefined();
             expect(result.fallbackReason).toContain('device');
 
-            // Restore original
-            if ((global as any).navigator && originalGpu) {
-                (global as any).navigator.gpu = originalGpu;
-            }
+            (global as any).navigator = originalNav;
         });
 
         it('should provide meaningful fallbackReason when unsupported', async () => {

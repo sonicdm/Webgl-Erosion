@@ -1,16 +1,13 @@
 /**
  * @deprecated This module is deprecated. Use LegacyTexturePool instead.
- * 
+ * No production code should import simulation-state; this module uses local defaults only.
+ *
  * This module will be removed in a future version. All texture management
  * should be done through the LegacyTexturePool class which provides proper
  * dependency injection and eliminates module-level singletons.
- * 
- * Migration guide:
- * - Instead of importing from this module, create a LegacyTexturePool instance
- * - Pass the pool instance to functions that need texture access
- * - Use pool methods instead of module-level exports
  */
-import { simres, shadowMapResolution } from './simulation-state';
+const DEFAULT_SIMRES = 1024;
+const DEFAULT_SHADOW_MAP_RESOLUTION = 4096;
 
 // We need to get gl_context from the caller, so we'll pass it as a parameter
 let gl_context: WebGL2RenderingContext;
@@ -159,7 +156,7 @@ export function setupFramebufferandtextures(context: WebGL2RenderingContext, sim
     sediment_advect_a = LE_create_texture(simres, simres, simulationTextureSampler);
     sediment_advect_b = LE_create_texture(simres, simres, simulationTextureSampler);
 
-    shadowMap_tex = LE_create_screen_texture(shadowMapResolution, shadowMapResolution, gl_context.LINEAR);
+    shadowMap_tex = LE_create_screen_texture(DEFAULT_SHADOW_MAP_RESOLUTION, DEFAULT_SHADOW_MAP_RESOLUTION, gl_context.LINEAR);
     scene_depth_tex = LE_create_screen_texture(window.innerWidth, window.innerHeight, gl_context.LINEAR);
     bilateral_filter_horizontal_tex = LE_create_screen_texture(window.innerWidth, window.innerHeight, gl_context.LINEAR);
     bilateral_filter_vertical_tex = LE_create_screen_texture(window.innerWidth, window.innerHeight, gl_context.LINEAR);
@@ -171,7 +168,7 @@ export function setupFramebufferandtextures(context: WebGL2RenderingContext, sim
     shadowMap_render_buffer = gl_context.createRenderbuffer();
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, shadowMap_render_buffer);
     gl_context.renderbufferStorage(gl_context.RENDERBUFFER, gl_context.DEPTH_COMPONENT16,
-        shadowMapResolution, shadowMapResolution);
+        DEFAULT_SHADOW_MAP_RESOLUTION, DEFAULT_SHADOW_MAP_RESOLUTION);
 
     deferred_frame_buffer = gl_context.createFramebuffer();
     deferred_render_buffer = gl_context.createRenderbuffer();

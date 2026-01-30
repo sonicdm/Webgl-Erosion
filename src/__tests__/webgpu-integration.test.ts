@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { checkWebGPUSupport } from '../rendering/webgpu/capability-check';
 import { WebGPURendererWrapper } from '../rendering/webgpu/WebGPURendererWrapper';
 import OpenGLRenderer from '../rendering/gl/OpenGLRenderer';
@@ -56,8 +59,8 @@ describe('WebGPU Integration in main.ts', () => {
             const capability = await checkWebGPUSupport();
             
             if (!capability.supported) {
-                // In a real scenario, main.ts would create OpenGLRenderer
-                const renderer = new OpenGLRenderer(mockCanvas);
+                const mockGl = {} as WebGL2RenderingContext;
+                const renderer = new OpenGLRenderer(mockCanvas, mockGl);
                 expect(renderer).toBeDefined();
             }
         });
@@ -87,7 +90,8 @@ describe('WebGPU Integration in main.ts', () => {
                 const wrapper = new WebGPURendererWrapper(mockCanvas, {} as any);
                 expect(wrapper).toBeDefined();
             } else {
-                const renderer = new OpenGLRenderer(mockCanvas);
+                const mockGl = {} as WebGL2RenderingContext;
+                const renderer = new OpenGLRenderer(mockCanvas, mockGl);
                 expect(renderer).toBeDefined();
             }
         });
