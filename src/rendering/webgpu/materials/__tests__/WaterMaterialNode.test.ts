@@ -1,31 +1,27 @@
+import { vec3 } from 'three/tsl';
 import { WaterMaterialNode } from '../WaterMaterialNode';
 
 describe('WaterMaterialNode', () => {
-    describe('class definition', () => {
-        it('should extend NodeMaterial', () => {
-            // This test will fail until WaterMaterialNode is implemented
-            expect(WaterMaterialNode).toBeDefined();
-        });
+    it('constructs with a controller and builds a node graph', () => {
+        const mockController = {
+            getSurfaceColorNode: jest.fn(() => vec3(0.1, 0.2, 0.3)),
+        } as any;
 
-        it('should be instantiable with required parameters', () => {
-            // This test will fail until WaterMaterialNode is implemented
-            const material = new WaterMaterialNode();
-            expect(material).toBeDefined();
-            expect(material).toBeInstanceOf(WaterMaterialNode);
-        });
+        const material = new WaterMaterialNode({}, mockController);
 
-        it('should have basic node graph structure', () => {
-            // This test will fail until WaterMaterialNode is implemented
-            const material = new WaterMaterialNode();
-            expect(material).toBeDefined();
-            // Node graph structure will be verified once implemented
-        });
+        expect(material).toBeInstanceOf(WaterMaterialNode);
+        expect(mockController.getSurfaceColorNode).toHaveBeenCalled();
+        expect(material.colorNode).toBeDefined();
+    });
 
-        it('should be usable with WebGPURenderer', () => {
-            // This test will fail until WaterMaterialNode is implemented
-            const material = new WaterMaterialNode();
-            expect(material).toBeDefined();
-            // Compatibility with WebGPURenderer will be verified once implemented
-        });
+    it('updates uniforms and rebuilds when inputs change', () => {
+        const mockController = {
+            getSurfaceColorNode: jest.fn(() => vec3(0.1, 0.2, 0.3)),
+        } as any;
+
+        const material = new WaterMaterialNode({}, mockController);
+        material.updateInputs({ foamStrength: 0.5 });
+
+        expect(mockController.getSurfaceColorNode).toHaveBeenCalledTimes(2);
     });
 });

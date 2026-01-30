@@ -265,15 +265,16 @@ export class ComputeNodePipeline extends ComputePass {
 
         // Create compute pipeline if not already created
         if (!this.rainPipeline) {
-            this.rainPipeline = this.createComputePipeline(RAIN_COMPUTE_SHADER);
-            
-            // Create bind group layout
+            // Create bind group layout first, then pass to pipeline
             this.rainBindGroupLayout = this.createBindGroupLayout([
                 createSampledTextureLayoutEntry(0),
                 createStorageTextureLayoutEntry(1, 'write-only'),
                 createUniformBufferLayoutEntry(2),
                 createUniformBufferLayoutEntry(3),
             ]);
+            this.rainPipeline = this.createComputePipeline(
+                RAIN_COMPUTE_SHADER, 'main', this.rainBindGroupLayout
+            );
         }
 
         // Create or update uniform buffers
@@ -448,7 +449,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         const device = this.device;
 
         if (!this.flowPipeline) {
-            this.flowPipeline = this.createComputePipeline(this.FLOW_COMPUTE_SHADER);
             this.flowBindGroupLayout = this.createBindGroupLayout([
                 createSampledTextureLayoutEntry(0),
                 createSampledTextureLayoutEntry(1),
@@ -456,6 +456,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 createStorageTextureLayoutEntry(3, 'write-only'),
                 createUniformBufferLayoutEntry(4),
             ]);
+            this.flowPipeline = this.createComputePipeline(
+                this.FLOW_COMPUTE_SHADER, 'main', this.flowBindGroupLayout
+            );
         }
 
         const uniformData = new Float32Array([
@@ -506,12 +509,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         const device = this.device;
 
         if (!this.evaporationPipeline) {
-            this.evaporationPipeline = this.createComputePipeline(this.EVAPORATION_COMPUTE_SHADER);
             this.evaporationBindGroupLayout = this.createBindGroupLayout([
                 createSampledTextureLayoutEntry(0),
                 createStorageTextureLayoutEntry(1, 'write-only'),
                 createUniformBufferLayoutEntry(2),
             ]);
+            this.evaporationPipeline = this.createComputePipeline(
+                this.EVAPORATION_COMPUTE_SHADER, 'main', this.evaporationBindGroupLayout
+            );
         }
 
         const uniformData = new Float32Array([uniforms.evaporationConstant]);

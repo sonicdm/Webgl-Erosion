@@ -1,6 +1,7 @@
 import * as DAT from 'dat-gui';
 import { updatePaletteSelection, initBrushPalette } from '../brush-palette';
 import { loadSettings, saveSettings } from '../settings';
+import { generatorRegistry } from '../terrain/TerrainGenerator';
 
 export interface Controls {
     [key: string]: any;
@@ -17,6 +18,8 @@ export interface GUIControllers {
     brushStrengthController: DAT.GUIController;
     brushOperationController: DAT.GUIController;
     flattenTargetHeightController: DAT.GUIController;
+    terrainBaseTypeController: DAT.GUIController;
+    simulationResolutionController: DAT.GUIController;
 }
 
 export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUIControllers } {
@@ -30,7 +33,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     
     // Terrain Parameters
     var terrainParameters = gui.addFolder('Terrain Parameters');
-    terrainParameters.add(controls, 'SimulationResolution', { 256: 256, 512: 512, 1024: 1024, 2048: 2048, 4096: 4096 });
+    const simulationResolutionController = terrainParameters.add(controls, 'SimulationResolution', { 256: 256, 512: 512, 1024: 1024, 2048: 2048, 4096: 4096 });
     terrainParameters.add(controls, 'TerrainScale', 0.1, 4.0);
     terrainParameters.add(controls, 'TerrainHeight', 1.0, 5.0);
     terrainParameters.add(controls, 'TerrainMask', { 
@@ -46,11 +49,12 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         Craters: 10,
         Dunes: 11
     });
-    terrainParameters.add(controls, 'TerrainBaseType', { 
-        ordinaryFBM: 0, 
-        domainWarp: 1, 
-        terrace: 2, 
-        voroni: 3, 
+    const terrainBaseTypeController = terrainParameters.add(controls, 'TerrainBaseType', {
+        // Procedural generators
+        ordinaryFBM: 0,
+        domainWarp: 1,
+        terrace: 2,
+        voroni: 3,
         ridgeNoise: 4,
         billowNoise: 5,
         turbulence: 6,
@@ -58,12 +62,74 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         dunes: 8,
         canyons: 9,
         mountains: 10,
-        billowyRidges: 11
+        billowyRidges: 11,
+        // THREE.Terrain ports
+        perlin: 12,
+        simplex: 13,
+        diamondSquare: 14,
+        fault: 15,
+        hill: 16,
+        hillIsland: 17,
+        particles: 18,
+        value: 19,
+        cosine: 20,
+        weierstrass: 21,
+        perlinLayers: 22,
+        simplexLayers: 23,
+        perlinDiamond: 24,
+        cosineLayers: 25,
+        // Imported heightmap (uses cached data)
+        importedHeightmap: 100
     });
-    terrainParameters.add(controls, 'ResetTerrain');
+    terrainParameters.add(controls, 'Generate Terrain');
     terrainParameters.add(controls, 'Import Height Map');
     terrainParameters.add(controls, 'Clear Height Map');
     terrainParameters.add(controls, 'Export Height Map');
+
+    // Advanced Generator Parameters subfolder
+    var advancedGenParams = terrainParameters.addFolder('Advanced Generator');
+
+    // Noise parameters — store controller references for programmatic updates
+    const advancedControllers: DAT.GUIController[] = [];
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainFrequency', 0.1, 4.0).name('Frequency'));
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainAmplitude', 0.1, 2.0).name('Amplitude'));
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainOctaves', 1, 12).step(1).name('Octaves'));
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainLacunarity', 1.5, 3.0).name('Lacunarity'));
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainPersistence', 0.3, 0.7).name('Persistence'));
+
+    // Seed and offset
+    advancedGenParams.add(controls, 'terrainSeed', 0, 1000).name('Seed');
+    advancedGenParams.add(controls, 'terrainOffsetX', -100, 100).name('Offset X');
+    advancedGenParams.add(controls, 'terrainOffsetY', -100, 100).name('Offset Y');
+
+    // Generator-specific parameters
+    var genSpecificParams = advancedGenParams.addFolder('Generator Specific');
+    advancedControllers.push(genSpecificParams.add(controls, 'terrainRidgeOffset', 0.5, 2.0).name('Ridge Offset'));
+    advancedControllers.push(genSpecificParams.add(controls, 'terrainRidgeGain', 1.0, 4.0).name('Ridge Gain'));
+    advancedControllers.push(genSpecificParams.add(controls, 'terrainTerraceCount', 4, 20).step(1).name('Terrace Count'));
+    advancedControllers.push(genSpecificParams.add(controls, 'terrainDomainWarpStrength', 0.5, 3.0).name('Domain Warp'));
+    advancedControllers.push(genSpecificParams.add(controls, 'craterDensity', 0.5, 2.0).name('Crater Density'));
+    advancedControllers.push(genSpecificParams.add(controls, 'canyonDepth', 0.3, 1.0).name('Canyon Depth'));
+
+    // Heightmap parameters (for imported heightmaps)
+    var heightmapParams = advancedGenParams.addFolder('Heightmap');
+    heightmapParams.add(controls, 'heightmapAmplitude', 0.1, 2.0).name('Amplitude');
+    heightmapParams.add(controls, 'heightmapInvert').name('Invert');
+
+    advancedGenParams.close(); // Closed by default to reduce clutter
+
+    // Apply per-generator defaults when terrain type changes
+    terrainBaseTypeController.onChange((value: number) => {
+        const generator = generatorRegistry.getByGPUTypeId(Number(value));
+        if (generator) {
+            const typeDefaults = generator.getGPUControlDefaults();
+            for (const [key, val] of Object.entries(typeDefaults)) {
+                (controls as any)[key] = val;
+            }
+            advancedControllers.forEach(c => c.updateDisplay());
+        }
+    });
+
     terrainParameters.open();
     
     // Erosion Parameters
@@ -210,7 +276,9 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             brushSizeController,
             brushStrengthController,
             brushOperationController,
-            flattenTargetHeightController
+            flattenTargetHeightController,
+            terrainBaseTypeController,
+            simulationResolutionController
         }
     };
 }

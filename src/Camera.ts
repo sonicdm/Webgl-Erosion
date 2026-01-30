@@ -112,7 +112,7 @@ class Camera {
         RIGHT: null,
         BOTTOM: null
     };
-    console.log( this.threeCamera.position);
+    // console.log( this.threeCamera.position);
 
 
 

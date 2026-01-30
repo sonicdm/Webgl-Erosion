@@ -34,6 +34,7 @@ import { createShaders, Shaders } from './rendering/shader-factory';
 import { checkWebGPUSupport } from './rendering/webgpu/capability-check';
 import { WebGPURendererWrapper } from './rendering/webgpu/WebGPURendererWrapper';
 import { ComputeNodePipeline } from './rendering/webgpu/compute/ComputeNodePipeline';
+import { TerrainGeneratorCompute } from './rendering/webgpu/compute/TerrainGeneratorCompute';
 import { WebGPUTexturePool } from './simulation/WebGPUTexturePool';
 import { SimulatePerStepWebGPU } from './simulation/SimulatePerStepWebGPU';
 import { readHeightmapFromTexture } from './utils/webgpu-terrain-readback';
@@ -46,6 +47,9 @@ const enableBilateralBlur = false;
 var gl_context : WebGL2RenderingContext;
 let appContext: AppContext;
 let texturePool: LegacyTexturePool;
+
+// WebGPU terrain generator (module-level for access from Reset/setTerrainRandom)
+let terrainGeneratorCompute: TerrainGeneratorCompute | null = null;
 
 
 
@@ -72,7 +76,7 @@ const controlscomp = {
     posTemp : vec2.fromValues(0.0,0.0),
     'Load Scene': loadScene, // A function pointer, essentially
     'Start/Resume' :StartGeneration,
-    'ResetTerrain' : Reset,
+    'Generate Terrain' : Reset,
     'setTerrainRandom':setTerrainRandom,
     SimulationSpeed : 3,
     TerrainBaseMap : 0,
@@ -127,7 +131,7 @@ const controls = {
     posTemp : vec2.fromValues(0.0,0.0),
     'Load Scene': loadScene, // A function pointer, essentially
     'Pause/Resume' :StartGeneration,
-    'ResetTerrain' : Reset,
+    'Generate Terrain' : Reset,
     'setTerrainRandom':setTerrainRandom,
     'Import Height Map': () => {}, // Will be set in main() after gl_context is available
     'Clear Height Map': () => {}, // Will be set in main() after gl_context is available
@@ -140,6 +144,25 @@ const controls = {
     TerrainHeight : 2.0,
     TerrainMask : 0,//0 off, 1 sphere
     TerrainDebug : 0,
+
+    // Advanced terrain generator parameters (GPU compute)
+    terrainFrequency : 1.0,
+    terrainAmplitude : 1.0,
+    terrainOctaves : 8,
+    terrainLacunarity : 2.0,
+    terrainPersistence : 0.5,
+    terrainSeed : 0,
+    terrainOffsetX : 0,
+    terrainOffsetY : 0,
+    terrainRidgeOffset : 1.0,
+    terrainRidgeGain : 2.0,
+    terrainTerraceCount : 8,
+    terrainDomainWarpStrength : 1.0,
+    craterDensity : 1.0,
+    canyonDepth : 0.6,
+    heightmapAmplitude : 1.0,
+    heightmapInvert : false,
+
     WaterTransparency : 0.50,
     SedimentTrace : true, // 0 on, 1 off
     ShowFlowTrace : false,
@@ -254,15 +277,40 @@ function Reset(){
     //PauseGeneration = true;
 }
 
+function createSeededRandom(seed: number): () => number {
+    let t = (seed >>> 0) || 1;
+    return () => {
+        t += 0x6D2B79F5;
+        let r = Math.imul(t ^ (t >>> 15), 1 | t);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
 function setTerrainRandom() {
-    const angle = Math.random() * Math.PI * 2.0;
+    const seedValue = Number(controls.terrainSeed ?? 0);
+    const useRandom = !Number.isFinite(seedValue) || seedValue === 0;
+    const rand = useRandom ? Math.random : createSeededRandom(Math.floor(seedValue));
+
+    const angle = rand() * Math.PI * 2.0;
     terrainRandom.duneDir[0] = Math.cos(angle);
     terrainRandom.duneDir[1] = Math.sin(angle);
 
-    terrainRandom.craterDensity = 0.8 + Math.random() * 0.7;
-    terrainRandom.canyonDepth = 0.45 + Math.random() * 0.5;
-    terrainRandom.seedOffset[0] = Math.random() * 256.0;
-    terrainRandom.seedOffset[1] = Math.random() * 256.0;
+    terrainRandom.craterDensity = 0.8 + rand() * 0.7;
+    terrainRandom.canyonDepth = 0.45 + rand() * 0.5;
+    terrainRandom.seedOffset[0] = rand() * 256.0;
+    terrainRandom.seedOffset[1] = rand() * 256.0;
+
+    // Also randomize the WebGPU terrain generator
+    if (terrainGeneratorCompute) {
+        if (useRandom) {
+            terrainGeneratorCompute.setRandomSeed();
+        } else {
+            terrainGeneratorCompute.setParams({
+                seed: seedValue
+            });
+        }
+    }
 
     appContext.simulationState.setTerrainGeometryDirty(true);
 }
@@ -1105,7 +1153,7 @@ async function main() {
   let webgpuDevice: GPUDevice | null = null;
   let webgpuComputePipeline: ComputeNodePipeline | null = null;
   let webgpuTexturePool: WebGPUTexturePool | null = null;
-  
+
   // Initialize WebGPU compute pipeline and texture pool (REQUIRED - no fallback)
   try {
     // Get WebGPU device directly (not through renderer wrapper)
@@ -1114,16 +1162,22 @@ async function main() {
     if (!adapter) {
       throw new Error('Failed to get WebGPU adapter');
     }
-    
+
     webgpuDevice = await adapter.requestDevice();
     if (!webgpuDevice) {
       throw new Error('Failed to get WebGPU device');
     }
-    
+
     webgpuComputePipeline = new ComputeNodePipeline(webgpuDevice);
     webgpuTexturePool = new WebGPUTexturePool(webgpuDevice, appContext.simulationState.simres, shadowMapResolution);
     webgpuTexturePool.setup();
-    console.log('[WebGPU] Compute pipeline and texture pool initialized');
+
+    // Initialize terrain generator compute pipeline
+    terrainGeneratorCompute = new TerrainGeneratorCompute(webgpuDevice);
+    await terrainGeneratorCompute.initialize();
+    terrainGeneratorCompute.setRandomSeed(); // Set initial random seed
+
+    console.log('[WebGPU] Compute pipeline, texture pool, and terrain generator initialized');
   } catch (error) {
     console.error('[WebGPU] Failed to initialize compute pipeline:', error);
     alert('Failed to initialize WebGPU compute pipeline. The application cannot run.');
@@ -1132,7 +1186,20 @@ async function main() {
   
   // Create heightmap loader functions (only if WebGL2 context is available)
   if (gl_context && texturePool) {
-    const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(gl_context, appContext.simulationState, texturePool, controls);
+    const setTerrainBaseType = (value: number) => {
+      if (controllers.terrainBaseTypeController) {
+        controllers.terrainBaseTypeController.setValue(value);
+      }
+      controls.TerrainBaseType = value;
+    };
+
+    const { loadHeightMap, clearHeightMap, exportHeightMap } = createHeightMapLoader(
+        gl_context,
+        appContext.simulationState,
+        texturePool,
+        controls,
+        { setTerrainBaseType }
+    );
     controls['Import Height Map'] = loadHeightMap;
     controls['Clear Height Map'] = clearHeightMap;
     controls['Export Height Map'] = exportHeightMap;
@@ -1297,9 +1364,10 @@ async function main() {
     console.error('[WebGL] WebGL2 context is null - some features may not work');
   } else {
     var extensions = gl_context.getSupportedExtensions();
-    for(let e in extensions){
-      console.log(e);
-    }
+    // for(let e in extensions){
+    // //   console.log(e);
+      
+    // }
     if(!gl_context.getExtension('OES_texture_float_linear')){
       console.log("float texture not supported");
     }
@@ -1482,21 +1550,12 @@ async function main() {
         const buildInProgress = appContext.terrainState.terrainBVHBuildInProgress || (loadingOverlay && loadingOverlay.classList.contains('visible'));
         
         if (buildInProgress) {
-            console.log('[Loading] Build already in progress, skipping UI reset');
             // Still need to process the loading, but don't reset UI
         } else {
-            console.log('[Loading] TerrainGeometryDirty=true, starting loading process');
-            console.log('[Loading] UI elements:', {
-                overlay: !!loadingOverlay,
-                progressText: !!progressText,
-                progressBar: !!progressBar
-            });
-            
             if (loadingOverlay) {
                 loadingOverlay.classList.add('visible');
                 // Force initial render of overlay
                 void loadingOverlay.offsetHeight;
-                console.log('[Loading] Overlay shown (visible class added)');
             } else {
                 console.warn('[Loading] Overlay element not found!');
             }
@@ -1505,13 +1564,11 @@ async function main() {
             if (progressBar) {
                 progressBar.style.width = '0%';
                 void progressBar.offsetHeight; // Force reflow
-                console.log('[Loading] Progress bar initialized to 0%');
             } else {
                 console.warn('[Loading] Progress bar element not found!');
             }
             if (progressText) {
                 progressText.textContent = 'Initializing...';
-                console.log('[Loading] Progress text set to "Initializing..."');
             } else {
                 console.warn('[Loading] Progress text element not found!');
             }
@@ -1520,14 +1577,11 @@ async function main() {
         // Create progress tracker with UI update callback
         const progressTracker = new LoadProgressTracker((progress, phase) => {
             const progressPercent = progress * 100;
-            console.log(`[Loading] Progress callback: ${progressPercent.toFixed(1)}%, phase: ${phase || 'none'}`);
-            
+
             if (progressBar) {
-                const oldWidth = progressBar.style.width;
                 progressBar.style.width = `${progressPercent}%`;
                 // Force a reflow to ensure the browser renders the update
                 void progressBar.offsetHeight;
-                console.log(`[Loading] Progress bar updated: ${oldWidth} -> ${progressPercent.toFixed(1)}%`);
             } else {
                 console.warn('[Loading] Progress bar not available in callback!');
             }
@@ -1542,7 +1596,6 @@ async function main() {
                 };
                 const newText = phase ? phaseNames[phase] : 'Initializing...';
                 progressText.textContent = newText;
-                console.log(`[Loading] Progress text updated: "${newText}"`);
             } else {
                 console.warn('[Loading] Progress text not available in callback!');
             }
@@ -1550,12 +1603,21 @@ async function main() {
         
         // Use requestAnimationFrame to ensure overlay is rendered before blocking operations
         requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
+            requestAnimationFrame(async () => {
                 // Handle resolution change if needed (must happen before texture cleanup)
                 const resolutionChanged = controls.SimulationResolution != appContext.simulationState.simres;
                 if(resolutionChanged){
                     const oldRes = appContext.simulationState.simres;
-                    const newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
+                    let newRes = Number(controls.SimulationResolution); // Ensure it's a number, not a string
+                    const maxHybridSimRes = 1024;
+                    if (newRes > maxHybridSimRes) {
+                        console.warn(`[Loading] Requested simres ${newRes} exceeds hybrid limit ${maxHybridSimRes}. Clamping to ${maxHybridSimRes} to avoid GPU context loss.`);
+                        newRes = maxHybridSimRes;
+                        controls.SimulationResolution = maxHybridSimRes;
+                        if (controllers.simulationResolutionController) {
+                            controllers.simulationResolutionController.setValue(maxHybridSimRes);
+                        }
+                    }
                     console.log(`[Loading] Resolution change detected: ${oldRes} -> ${newRes}`);
                     appContext.simulationState.setSimRes(newRes);
                     if (texturePool) {
@@ -1568,27 +1630,74 @@ async function main() {
                     
                     // Clear old BVH and geometry when resolution changes (they're invalid for new resolution)
                     if (appContext.terrainState.terrainBVH) {
-                        console.log('[Loading] Clearing old BVH due to resolution change');
                         appContext.terrainState.setTerrainBVH(null);
                     }
                     if (appContext.terrainState.terrainGeometry) {
-                        console.log('[Loading] Disposing old geometry due to resolution change');
                         appContext.terrainState.terrainGeometry?.dispose();
                         appContext.terrainState.setTerrainGeometry(null);
                     }
                     if (appContext.terrainState.terrainBVHBuildInProgress) {
-                        console.log('[Loading] Clearing in-progress flag due to resolution change');
                         appContext.terrainState.setTerrainBVHBuildInProgress(false);
                     }
-                } else {
-                    console.log(`[Loading] No resolution change (current: ${appContext.simulationState.simres})`);
                 }
                 
                 //=============clean up all simulation textures===================
                 cleanUpTextures();
                 //=============recreate base terrain textures=====================
-                if (noiseterrain) {
-                    // GPU upload phase (rendering textures)
+
+                // WebGPU compute terrain generation path
+                if (terrainGeneratorCompute && webgpuTexturePool && webgpuDevice) {
+                    progressTracker.startPhase(LoadPhase.GPU_UPLOAD);
+                    progressTracker.updateSubPhaseProgress(0.0);
+
+                    // Update terrain generator with current controls
+                    terrainGeneratorCompute.updateParams(controls);
+                    progressTracker.updateSubPhaseProgress(0.3);
+
+                    // Generate terrain directly into WebGPU textures
+                    terrainGeneratorCompute.generate(
+                        webgpuTexturePool.readTerrainTexture,
+                        webgpuTexturePool.writeTerrainTexture,
+                        appContext.simulationState.simres
+                    );
+
+                    // Clear auxiliary textures (flux, velocity, sediment, etc.)
+                    webgpuTexturePool.clearAuxiliaryTextures();
+                    progressTracker.updateSubPhaseProgress(1.0);
+                    progressTracker.endPhase(LoadPhase.GPU_UPLOAD);
+
+                    // Readback from WebGPU to CPU for BVH building
+                    progressTracker.startPhase(LoadPhase.READBACK);
+                    progressTracker.updateSubPhaseProgress(0.0);
+
+                    // Async readback from WebGPU texture
+                    await appContext.simulationState.readHeightmapFromWebGPU(
+                        webgpuDevice,
+                        webgpuTexturePool.readTerrainTexture
+                    );
+
+                    // Also seed legacy WebGL textures if available (for legacy rendering path)
+                    if (texturePool && gl_context && texturePool.read_terrain_tex) {
+                        const simres = appContext.simulationState.simres;
+                        const cpuBuf = appContext.simulationState.heightMapCpuBuf;
+
+                        // Upload CPU heightmap data to WebGL textures
+                        for (const tex of [texturePool.read_terrain_tex, texturePool.write_terrain_tex]) {
+                            if (!tex) continue;
+                            gl_context.bindTexture(gl_context.TEXTURE_2D, tex);
+                            gl_context.texImage2D(
+                                gl_context.TEXTURE_2D, 0, gl_context.RGBA32F,
+                                simres, simres, 0,
+                                gl_context.RGBA, gl_context.FLOAT, cpuBuf
+                            );
+                        }
+                        gl_context.bindTexture(gl_context.TEXTURE_2D, null);
+                    }
+
+                    progressTracker.updateSubPhaseProgress(1.0);
+                    progressTracker.endPhase(LoadPhase.READBACK);
+                } else if (noiseterrain) {
+                    // Legacy GLSL terrain generation fallback
                     progressTracker.startPhase(LoadPhase.GPU_UPLOAD);
                     progressTracker.updateSubPhaseProgress(0.0);
                     Render2Texture(renderer,gl_context,camera,noiseterrain,texturePool.read_terrain_tex,square,noiseterrain, appContext.simulationState.simres, texturePool);
@@ -1596,7 +1705,7 @@ async function main() {
                     Render2Texture(renderer,gl_context,camera,noiseterrain,texturePool.write_terrain_tex,square,noiseterrain, appContext.simulationState.simres, texturePool);
                     progressTracker.updateSubPhaseProgress(1.0);
                     progressTracker.endPhase(LoadPhase.GPU_UPLOAD);
-                    
+
                     // Readback phase
                     progressTracker.startPhase(LoadPhase.READBACK);
                     progressTracker.updateSubPhaseProgress(0.0);
@@ -1606,6 +1715,9 @@ async function main() {
                     progressTracker.updateSubPhaseProgress(0.5);
                     gl_context.readPixels(0, 0, appContext.simulationState.simres, appContext.simulationState.simres, gl_context.RGBA, gl_context.FLOAT, appContext.simulationState.heightMapCpuBuf);
                     gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
+                    if (webgpuTexturePool) {
+                        webgpuTexturePool.seedTerrainFromHeightmap(appContext.simulationState.heightMapCpuBuf, true);
+                    }
                     appContext.simulationState.setHeightMapBufIsFresh(true); // Mark buffer as fresh
                     progressTracker.updateSubPhaseProgress(1.0);
                     progressTracker.endPhase(LoadPhase.READBACK);
@@ -1672,16 +1784,11 @@ async function main() {
                             
                             // Force initial UI update - ensure progress bar is visible before blocking work
                             if (progressBar) {
-                                // Progress is tracked internally, just update UI
                                 progressBar.style.width = `0%`;
                                 progressBar.offsetHeight; // Force reflow to ensure render
-                                console.log(`[Loading] Initial geometry progress bar set to 0%`);
                             }
-                            
                             // Yield to browser to ensure initial progress is rendered
-                            console.log('[Loading] Yielding to browser before geometry creation');
                             requestAnimationFrame(() => {
-                                console.log('[Loading] Starting geometry creation');
                                 // Update progress to show we're starting geometry creation
                                 progressTracker.updateSubPhaseProgress(0.0);
                                 const newGeometry = createTerrainGeometry(
@@ -1693,25 +1800,19 @@ async function main() {
                                 progressTracker.updateSubPhaseProgress(1.0);
                                 appContext.terrainState.setTerrainGeometry(newGeometry);
                                 progressTracker.endPhase(LoadPhase.GEOMETRY);
-                                console.log('[Loading] Geometry creation complete');
-                            
+
                                 // BVH phase - ensure UI updates before blocking construction
                                 progressTracker.startPhase(LoadPhase.BVH);
                                 progressTracker.updateSubPhaseProgress(0.0);
                                 
                                 // Force UI update before blocking BVH construction
-                                        if (progressBar) {
-                                            // Progress is tracked internally, just update UI
-                                            progressBar.style.width = `70%`;
-                                            progressBar.offsetHeight; // Force reflow
-                                            console.log(`[Loading] BVH phase progress bar set to 70%`);
-                                        }
-                                
+                                if (progressBar) {
+                                    progressBar.style.width = `70%`;
+                                    progressBar.offsetHeight; // Force reflow
+                                }
                                 // Yield control to ensure progress bar updates before blocking BVH construction
-                                console.log('[Loading] Yielding to browser before BVH construction');
                                 requestAnimationFrame(() => {
                                     requestAnimationFrame(() => {
-                                        console.log('[Loading] Starting BVH construction');
                                         // Update progress to show we're starting BVH construction
                                         progressTracker.updateSubPhaseProgress(0.05);
                                         
@@ -1766,22 +1867,15 @@ async function main() {
                                         progressTracker.endPhase(LoadPhase.BVH);
                                         appContext.simulationState.setHeightMapBufIsFresh(false); // Mark as consumed
                                         
-                                        // Log timing information
-                                        console.log('[Load] Terrain loading complete:', {
-                                            bvhDuration: `${bvhDuration.toFixed(2)}ms`
-                                        });
-                                        
                                         // Hide loading overlay after BVH is built
                                         if (loadingOverlay) {
                                             loadingOverlay.classList.remove('visible');
-                                            console.log('[Loading] Overlay hidden (BVH complete)');
                                         } else {
                                             console.warn('[Loading] Overlay element not found when trying to hide!');
                                         }
                                         
                                         // TerrainGeometryDirty was already set to false before async operations started
                                         // No need to set it again here
-                                        console.log('[Loading] BVH build complete, overlay hidden');
                                     });
                                 });
                                 // Don't hide overlay or mark as clean here - wait for BVH to complete
@@ -1795,25 +1889,22 @@ async function main() {
                             appContext.simulationState.setTerrainGeometryDirty(false);
                             if (loadingOverlay) {
                                 loadingOverlay.classList.remove('visible');
-                                console.log('[Loading] Overlay hidden (error)');
                             }
                         }
                     } else {
                         console.log('[BVH] Heightmap buffer has no valid data');
-                        setHightMapBufIsFresh(false); // Mark as consumed
-                        setTerrainGeometryDirty(false);
-                        if (loadingOverlay) {
-                            loadingOverlay.classList.remove('visible');
-                            console.log('[Loading] Overlay hidden (no data)');
+                        appContext.simulationState.setHeightMapBufIsFresh(false); // Mark as consumed
+                        if (progressText) {
+                            progressText.textContent = 'Waiting for valid heightmap data...';
                         }
+                        // Keep overlay visible and retry on next tick
                     }
                 } else {
                     console.log('[BVH] Heightmap buffer not fresh yet, will build when available');
-                    setTerrainGeometryDirty(false);
-                    if (loadingOverlay) {
-                        loadingOverlay.classList.remove('visible');
-                        console.log('[Loading] Overlay hidden (buffer not fresh)');
+                    if (progressText) {
+                        progressText.textContent = 'Waiting for heightmap readback...';
                     }
+                    // Keep overlay visible and retry on next tick
                 }
             });
         });

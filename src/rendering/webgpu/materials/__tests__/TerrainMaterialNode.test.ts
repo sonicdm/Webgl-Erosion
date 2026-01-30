@@ -1,31 +1,47 @@
+import { float, vec2, vec3 } from 'three/tsl';
 import { TerrainMaterialNode } from '../TerrainMaterialNode';
 
 describe('TerrainMaterialNode', () => {
-    describe('class definition', () => {
-        it('should extend NodeMaterial', () => {
-            // This test will fail until TerrainMaterialNode is implemented
-            expect(TerrainMaterialNode).toBeDefined();
-        });
+    it('constructs with a controller and builds a node graph', () => {
+        const sampling = {
+            height: float(0),
+            normal: vec3(0, 1, 0),
+            rock: float(0),
+            uv: vec2(0, 0),
+        } as any;
+        const mockController = {
+            getSamplingNode: jest.fn(() => sampling),
+            getPaletteNode: jest.fn(() => ({ color: vec3(1, 0, 0) })),
+            getShadowNode: jest.fn(() => ({ shadowFactor: float(1) })),
+        } as any;
 
-        it('should be instantiable with required parameters', () => {
-            // This test will fail until TerrainMaterialNode is implemented
-            const material = new TerrainMaterialNode();
-            expect(material).toBeDefined();
-            expect(material).toBeInstanceOf(TerrainMaterialNode);
-        });
+        const material = new TerrainMaterialNode({}, mockController);
 
-        it('should have basic node graph structure', () => {
-            // This test will fail until TerrainMaterialNode is implemented
-            const material = new TerrainMaterialNode();
-            expect(material).toBeDefined();
-            // Node graph structure will be verified once implemented
-        });
+        expect(material).toBeInstanceOf(TerrainMaterialNode);
+        expect(mockController.getSamplingNode).toHaveBeenCalled();
+        expect(mockController.getPaletteNode).toHaveBeenCalled();
+        expect(mockController.getShadowNode).toHaveBeenCalled();
+        expect(material.colorNode).toBeDefined();
+    });
 
-        it('should be usable with WebGPURenderer', () => {
-            // This test will fail until TerrainMaterialNode is implemented
-            const material = new TerrainMaterialNode();
-            expect(material).toBeDefined();
-            // Compatibility with WebGPURenderer will be verified once implemented
-        });
+    it('updates uniforms and rebuilds when inputs change', () => {
+        const sampling = {
+            height: float(0),
+            normal: vec3(0, 1, 0),
+            rock: float(0),
+            uv: vec2(0, 0),
+        } as any;
+        const mockController = {
+            getSamplingNode: jest.fn(() => sampling),
+            getPaletteNode: jest.fn(() => ({ color: vec3(0.2, 0.2, 0.2) })),
+            getShadowNode: jest.fn(() => ({ shadowFactor: float(1) })),
+        } as any;
+
+        const material = new TerrainMaterialNode({}, mockController);
+        material.updateInputs({ snowRange: 0.5, forestRange: 0.2, terrainPalette: 2 });
+
+        expect(mockController.getSamplingNode).toHaveBeenCalledTimes(2);
+        expect(mockController.getPaletteNode).toHaveBeenCalledTimes(2);
+        expect(mockController.getShadowNode).toHaveBeenCalledTimes(2);
     });
 });

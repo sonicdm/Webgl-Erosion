@@ -65,6 +65,7 @@ export function createStorageTextureLayoutEntry(
 
 /**
  * Create a bind group layout entry for a sampled texture.
+ * Uses 'unfilterable-float' since rgba32float textures cannot be filtered.
  */
 export function createSampledTextureLayoutEntry(
     binding: number
@@ -73,7 +74,7 @@ export function createSampledTextureLayoutEntry(
         binding: binding,
         visibility: GPUShaderStage.COMPUTE,
         texture: {
-            sampleType: 'float',
+            sampleType: 'unfilterable-float',
         },
     };
 }

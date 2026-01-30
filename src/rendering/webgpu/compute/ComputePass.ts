@@ -13,14 +13,27 @@ export class ComputePass {
 
     /**
      * Create a compute pipeline from WGSL shader code.
+     * @param shaderCode WGSL source
+     * @param entryPoint Entry point function name
+     * @param bindGroupLayout Optional explicit bind group layout. If provided, the pipeline
+     *   will use this layout instead of 'auto'. Required to match bind groups created with
+     *   the same layout object.
      */
-    protected createComputePipeline(shaderCode: string, entryPoint: string = 'main'): GPUComputePipeline {
+    protected createComputePipeline(
+        shaderCode: string,
+        entryPoint: string = 'main',
+        bindGroupLayout?: GPUBindGroupLayout
+    ): GPUComputePipeline {
         const shaderModule = this.device.createShaderModule({
             code: shaderCode,
         });
 
+        const layout = bindGroupLayout
+            ? this.device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] })
+            : 'auto';
+
         return this.device.createComputePipeline({
-            layout: 'auto',
+            layout,
             compute: {
                 module: shaderModule,
                 entryPoint: entryPoint,

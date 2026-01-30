@@ -98,7 +98,7 @@ describe('ComputeNodeHelpers', () => {
             expect(entry.binding).toBe(2);
             expect(entry.visibility).toBe(GPUShaderStage.COMPUTE);
             expect(entry.texture).toEqual({
-                sampleType: 'float',
+                sampleType: 'unfilterable-float',
             });
         });
     });

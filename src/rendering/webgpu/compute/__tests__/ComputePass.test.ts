@@ -7,9 +7,12 @@ function createMockGPUDevice(): GPUDevice {
     const mockBindGroup = {} as GPUBindGroup;
     const mockBindGroupLayout = {} as GPUBindGroupLayout;
 
+    const mockPipelineLayout = {} as GPUPipelineLayout;
+
     const mockDevice = {
         createShaderModule: jest.fn(() => mockShaderModule),
         createComputePipeline: jest.fn(() => mockComputePipeline),
+        createPipelineLayout: jest.fn(() => mockPipelineLayout),
         createBindGroup: jest.fn(() => mockBindGroup),
         createBindGroupLayout: jest.fn(() => mockBindGroupLayout),
     } as any;
@@ -53,6 +56,26 @@ describe('ComputePass', () => {
                 },
             });
             expect(pipeline).toBeDefined();
+        });
+
+        it('should use explicit bind group layout when provided', () => {
+            const shaderCode = `
+                @compute @workgroup_size(8, 8)
+                fn main() {
+                }
+            `;
+            const mockLayout = {} as GPUBindGroupLayout;
+
+            computePass['createComputePipeline'](shaderCode, 'main', mockLayout);
+
+            expect(mockDevice.createPipelineLayout).toHaveBeenCalledWith({
+                bindGroupLayouts: [mockLayout],
+            });
+            expect(mockDevice.createComputePipeline).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    layout: expect.any(Object), // The pipeline layout object
+                })
+            );
         });
 
         it('should use custom entry point', () => {

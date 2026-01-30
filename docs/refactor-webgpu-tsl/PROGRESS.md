@@ -66,6 +66,8 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
   - Browser validation confirmed functional rendering (red cube visible in canvas)
   - Refactored all WebGL classes to use state holder (`appContext.simulationState.glContext`) instead of global `gl`
   - Eliminated global `gl` dependency: Drawable, Square, Plane, OpenGLRenderer, ShaderProgram, uniform helpers all use DI pattern
+- Shader Migration — Phases 4–5 (January 29, 2026)
+  - Added WebGPU material scaffolds and terrain TSL nodes/materials with unit tests (Phase 4–5 redo)
 
 ## Detailed Progress Files
 

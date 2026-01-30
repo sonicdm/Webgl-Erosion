@@ -1,23 +1,51 @@
-import { NodeMaterial } from 'three/examples/jsm/nodes/materials/NodeMaterial.js';
+import { NodeMaterial } from 'three/webgpu';
+import { uniform } from 'three/tsl';
+import { WaterShaderInputs, WaterShaderNodeController } from '../shader-nodes/water/WaterShaderNodeController';
+
+export interface WaterMaterialNodeInputs extends WaterShaderInputs {
+    foamStrength?: number;
+}
 
 /**
  * Water material using Three.js NodeMaterial (TSL).
- * This is a scaffolding implementation for Phase 2.
- * Full TSL implementation will be completed in later phases.
+ * This is a scaffolding implementation for Phase 4.
  */
 export class WaterMaterialNode extends NodeMaterial {
-    constructor() {
+    private controller: WaterShaderNodeController;
+    private foamStrengthUniform: any;
+    private inputs: WaterMaterialNodeInputs;
+
+    constructor(
+        inputs: WaterMaterialNodeInputs = {},
+        controller: WaterShaderNodeController = new WaterShaderNodeController()
+    ) {
         super();
-        
-        // Basic node graph structure (placeholder for Phase 2)
-        // TODO: Port water shader logic from GLSL to TSL in Phase 3
-        // This will include:
-        // - Water height sampling
-        // - Reflection/refraction calculations
-        // - Wave animation
-        // - Transparency and blending
-        
-        // For now, create a minimal node graph that compiles
-        // This will be expanded in Phase 3 with actual water rendering logic
+        this.controller = controller;
+        this.inputs = { ...inputs };
+        this.foamStrengthUniform = uniform(inputs.foamStrength ?? 0);
+
+        this.buildGraph(this.inputs);
+    }
+
+    updateInputs(inputs: Partial<WaterMaterialNodeInputs>): void {
+        this.inputs = { ...this.inputs, ...inputs };
+        if (inputs.foamStrength !== undefined) {
+            this.foamStrengthUniform.value = inputs.foamStrength;
+        }
+        this.buildGraph(this.inputs);
+    }
+
+    getWaterNodeController(): WaterShaderNodeController {
+        return this.controller;
+    }
+
+    private buildGraph(inputs: WaterMaterialNodeInputs): void {
+        const colorNode = this.controller.getSurfaceColorNode({
+            baseColor: inputs.baseColor,
+            foamColor: inputs.foamColor,
+            foamStrength: this.foamStrengthUniform,
+        });
+
+        this.colorNode = colorNode;
     }
 }

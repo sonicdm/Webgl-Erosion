@@ -8,6 +8,7 @@ export class WebGPUTexturePool {
     private device: GPUDevice;
     private simres: number;
     private shadowMapResolution: number;
+    private zeroBuffer: Float32Array | null = null;
 
     // Simulation textures (ping-pong pairs)
     public readTerrainTexture: GPUTexture;
@@ -94,6 +95,7 @@ export class WebGPUTexturePool {
         this.writeSedimentBlendTexture = this.createSimulationTexture(this.simres, this.simres);
         this.sedimentAdvectATexture = this.createSimulationTexture(this.simres, this.simres);
         this.sedimentAdvectBTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.zeroBuffer = null;
     }
 
     /**
@@ -101,6 +103,7 @@ export class WebGPUTexturePool {
      */
     resizeSimulationTextures(newSimres: number): void {
         this.simres = newSimres;
+        this.zeroBuffer = null;
 
         // Destroy old textures
         this.destroyTexture(this.readTerrainTexture);
@@ -123,6 +126,85 @@ export class WebGPUTexturePool {
 
         // Recreate textures with new size
         this.setup();
+    }
+
+    /**
+     * Seed terrain textures from a CPU heightmap buffer and optionally clear auxiliary textures.
+     */
+    seedTerrainFromHeightmap(heightData: Float32Array, clearAuxiliary: boolean = true): void {
+        const expectedLength = this.simres * this.simres * 4;
+        if (heightData.length < expectedLength) {
+            console.warn('[WebGPUTexturePool] Heightmap buffer size mismatch, skipping seed', {
+                expectedLength,
+                actualLength: heightData.length,
+            });
+            return;
+        }
+
+        this.writeTexture(this.readTerrainTexture, heightData);
+        this.writeTexture(this.writeTerrainTexture, heightData);
+
+        if (!clearAuxiliary) {
+            return;
+        }
+
+        const zero = this.getZeroBuffer();
+        this.writeTexture(this.readFluxTexture, zero);
+        this.writeTexture(this.writeFluxTexture, zero);
+        this.writeTexture(this.readVelTexture, zero);
+        this.writeTexture(this.writeVelTexture, zero);
+        this.writeTexture(this.readSedimentTexture, zero);
+        this.writeTexture(this.writeSedimentTexture, zero);
+        this.writeTexture(this.readTerrainFluxTexture, zero);
+        this.writeTexture(this.writeTerrainFluxTexture, zero);
+        this.writeTexture(this.readMaxSlippageTexture, zero);
+        this.writeTexture(this.writeMaxSlippageTexture, zero);
+        this.writeTexture(this.terrainNorTexture, zero);
+        this.writeTexture(this.readSedimentBlendTexture, zero);
+        this.writeTexture(this.writeSedimentBlendTexture, zero);
+        this.writeTexture(this.sedimentAdvectATexture, zero);
+        this.writeTexture(this.sedimentAdvectBTexture, zero);
+    }
+
+    /**
+     * Clear all auxiliary textures (flux, velocity, sediment, etc.) without touching terrain.
+     */
+    clearAuxiliaryTextures(): void {
+        const zero = this.getZeroBuffer();
+        this.writeTexture(this.readFluxTexture, zero);
+        this.writeTexture(this.writeFluxTexture, zero);
+        this.writeTexture(this.readVelTexture, zero);
+        this.writeTexture(this.writeVelTexture, zero);
+        this.writeTexture(this.readSedimentTexture, zero);
+        this.writeTexture(this.writeSedimentTexture, zero);
+        this.writeTexture(this.readTerrainFluxTexture, zero);
+        this.writeTexture(this.writeTerrainFluxTexture, zero);
+        this.writeTexture(this.readMaxSlippageTexture, zero);
+        this.writeTexture(this.writeMaxSlippageTexture, zero);
+        this.writeTexture(this.terrainNorTexture, zero);
+        this.writeTexture(this.readSedimentBlendTexture, zero);
+        this.writeTexture(this.writeSedimentBlendTexture, zero);
+        this.writeTexture(this.sedimentAdvectATexture, zero);
+        this.writeTexture(this.sedimentAdvectBTexture, zero);
+    }
+
+    private getZeroBuffer(): Float32Array {
+        const expectedLength = this.simres * this.simres * 4;
+        if (!this.zeroBuffer || this.zeroBuffer.length !== expectedLength) {
+            this.zeroBuffer = new Float32Array(expectedLength);
+        }
+        return this.zeroBuffer;
+    }
+
+    private writeTexture(texture: GPUTexture, data: Float32Array): void {
+        const bytesPerPixel = 16;
+        const bytesPerRow = this.simres * bytesPerPixel;
+        this.device.queue.writeTexture(
+            { texture },
+            data,
+            { bytesPerRow, rowsPerImage: this.simres },
+            { width: this.simres, height: this.simres, depthOrArrayLayers: 1 }
+        );
     }
 
     /**
