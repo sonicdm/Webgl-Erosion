@@ -205,11 +205,14 @@ async function main() {
     const webgpuTerrainSegments = appContext.configHolder.raycastMeshResolution - 1;
     const webgpuTerrainGeometry = new PlaneGeometry(1, 1, webgpuTerrainSegments, webgpuTerrainSegments);
     webgpuTerrainGeometry.rotateX(-Math.PI / 2); // XZ plane, Y up
-    // Only pass textures needed for the render path — debug-only maps (velocity, flux,
-    // terrainFlux, maxSlippage) are omitted to cut TSL node count and compile time.
     const webgpuTerrainMaterial = new TerrainMaterialNode({
       heightmap: webgpuPoolSyncTextures.heightmap,
+      normalMap: webgpuPoolSyncTextures.normalMap,
       sedimentMap: webgpuPoolSyncTextures.sedimentMap,
+      velocityMap: webgpuPoolSyncTextures.velocityMap,
+      fluxMap: webgpuPoolSyncTextures.fluxMap,
+      terrainFluxMap: webgpuPoolSyncTextures.terrainFluxMap,
+      maxSlippageMap: webgpuPoolSyncTextures.maxSlippageMap,
       sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
       simres,
       maxHeight: (controls?.TerrainHeight ?? 2) * 120,
@@ -663,7 +666,12 @@ async function main() {
                         (webgpuTerrainMesh.material as any)?.dispose();
                         const newTerrainMat = new TerrainMaterialNode({
                             heightmap: webgpuPoolSyncTextures.heightmap,
+                            normalMap: webgpuPoolSyncTextures.normalMap,
                             sedimentMap: webgpuPoolSyncTextures.sedimentMap,
+                            velocityMap: webgpuPoolSyncTextures.velocityMap,
+                            fluxMap: webgpuPoolSyncTextures.fluxMap,
+                            terrainFluxMap: webgpuPoolSyncTextures.terrainFluxMap,
+                            maxSlippageMap: webgpuPoolSyncTextures.maxSlippageMap,
                             sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
                             simres: newRes,
                             maxHeight: (controls?.TerrainHeight ?? 2) * 120,

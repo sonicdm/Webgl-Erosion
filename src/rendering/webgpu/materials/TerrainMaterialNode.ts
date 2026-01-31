@@ -213,17 +213,10 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             this.positionNode = positionLocal.add(normalLocal.mul(displacementY));
         }
 
-        // Only pass textures actually needed for the render path (not debug-only ones).
-        // This avoids TSL creating nodes for unused texture reads.
-        const samplingInputs: TerrainSamplingInputs = {
-            heightmap: inputs.heightmap,
-            simres: inputs.simres,
-            sedimentMap: inputs.sedimentMap,
-            sedimentBlendMap: inputs.sedimentBlendMap,
-        };
-        const sampling = this.controller.getSamplingNode(samplingInputs);
+        // Pass all textures to sampling — debug views need velocity, flux, etc.
+        const sampling = this.controller.getSamplingNode(inputs);
 
-        // Compute normHeight for debug visualization
+        // normHeight for debug + palette
         const normHeight = clamp(sampling.height.div(this.maxHeightUniform), 0, 1);
 
         // Palette
@@ -251,7 +244,9 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const lightDir = normalize(this.lightDirUniform);
         const lamb = max(dot(surfaceNormal, lightDir), float(0));
         const ambientCol = vec3(0.01, 0.01, 0.01);
-        let litColor = palette.color.mul(shadow.shadowFactor).mul(lamb).add(ambientCol);
+
+        // Use .toVar() so litColor can be assigned inside the Loop
+        const litColor = palette.color.mul(shadow.shadowFactor).mul(lamb).add(ambientCol).toVar();
 
         // Brush overlay — ring + fill. Color comes from a single uniform (set in updateBrush).
         const brushPos = this.brushPosUniform;
@@ -268,14 +263,14 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const brushIntensity = ringFactor.mul(0.95).add(insideFill);
         const brushActiveFloat = brushType.greaterThan(0).select(float(1), float(0));
         const brushBlend = brushActiveFloat.mul(brushIntensity);
-        litColor = mix(litColor, litColor.add(brushCol), brushBlend);
+        litColor.assign(mix(litColor, litColor.add(brushCol), brushBlend));
 
         // --- Water source indicators (red glow via Loop over DataTexture) ---
         const sourceGlowCol = vec3(0.8, 0.15, 0.1);
         const srcTex = texture(this.sourceDataTexture);
         const srcCount = this.sourceCountUniform;
         Loop(srcCount, ({ i }: { i: any }) => {
-            // Sample source data texture at texel i (16×1): uv = ((i+0.5)/16, 0.5)
+            // Sample source data at texel i (16×1): uv = ((i+0.5)/16, 0.5)
             const srcUv = vec2(int(i).toFloat().add(0.5).div(16.0), 0.5);
             const srcData = srcTex.uv(srcUv);
             const srcPos = vec2(srcData.x, srcData.y);
@@ -295,25 +290,43 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const flowColorDark = vec3(0.35, 0.25, 0.10);
         const flowColor = mix(flowColorBright, flowColorDark, smoothstep(float(0.35), float(0.55), terrainLum));
         const flowBlended = mix(litColor, flowColor.mul(lamb).add(ambientCol), flowIntensity.mul(1.5).clamp(0, 0.85));
-        litColor = flowTraceEnabled.select(flowBlended, litColor);
+        litColor.assign(flowTraceEnabled.select(flowBlended, litColor));
 
-        // --- Sediment trace overlay (simplified: single-band green tint) ---
+        // --- Sediment trace overlay (3-tier gradient) ---
         const sedTraceEnabled = this.showSedimentTraceUniform.equal(1);
         const ssval = float(1).sub(pow(float(2.718), sampling.sediment.x.mul(-7).clamp(-10, 0)));
-        const sediCol = vec3(0.0, 0.5, 0.4);
-        const sedBlended = mix(litColor, sediCol.mul(lamb), ssval.clamp(0, 1));
-        litColor = sedTraceEnabled.select(sedBlended, litColor);
+        const lightSediCol = vec3(0.0, 0.5, 0.3);
+        const medSediCol = vec3(0.0, 0.5, 0.5);
+        const deepSediCol = vec3(0.0, 0.0, 0.99);
+        const smallThresh = float(0.4);
+        const largeThresh = float(0.7);
+        const band1 = mix(litColor, lightSediCol.mul(lamb), ssval.div(smallThresh).clamp(0, 1));
+        const band2 = mix(lightSediCol, medSediCol, ssval.sub(smallThresh).div(float(0.3)).clamp(0, 1));
+        const band3 = mix(medSediCol, deepSediCol, ssval.sub(largeThresh).div(float(0.3)).clamp(0, 1));
+        const sediColor = ssval.lessThan(smallThresh).select(band1,
+            ssval.lessThan(largeThresh).select(band2.mul(lamb), band3.mul(lamb)));
+        const sedBlended = mix(litColor, sediColor, ssval.clamp(0, 1));
+        litColor.assign(sedTraceEnabled.select(sedBlended, litColor));
 
-        // --- Debug visualization (simplified: terrain grayscale only, others use debug dropdown CPU-side) ---
+        // --- Debug visualization (all modes from legacy terrain-frag) ---
+        // 0=normal, 1=sediment, 2=velocity, 3=terrain, 4=flux, 5=terrainflux, 7=flow, 10=rock
         const dbg = this.debugModeUniform;
         const debugTerrain = vec3(normHeight, normHeight, normHeight);
-        const debugRock = vec3(sampling.rock, sampling.rock, sampling.rock);
+        const debugSediment = sampling.sediment.mul(float(2));
+        const debugVelocity = sampling.velocity.div(float(20));
+        const debugFlux = sampling.flux.div(float(3));
+        const debugTerrainFlux = sampling.terrainFlux.mul(float(100000));
         const debugFlow = vec3(sampling.sedimentBlend, sampling.sedimentBlend, sampling.sedimentBlend).mul(float(300));
-        // Only 3 modes in the shader; other debug modes can use separate materials if needed
+        const debugRock = vec3(sampling.rock, sampling.rock, sampling.rock);
+
         const finalColor = dbg.equal(3).select(debugTerrain,
-            dbg.equal(10).select(debugRock,
-                dbg.equal(7).select(debugFlow,
-                    litColor)));
+            dbg.equal(1).select(debugSediment,
+                dbg.equal(2).select(debugVelocity,
+                    dbg.equal(4).select(debugFlux,
+                        dbg.equal(5).select(debugTerrainFlux,
+                            dbg.equal(7).select(debugFlow,
+                                dbg.equal(10).select(debugRock,
+                                    litColor)))))));
 
         this.colorNode = finalColor;
     }
