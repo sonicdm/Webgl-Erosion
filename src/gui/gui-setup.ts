@@ -148,6 +148,8 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10 });
     const advectionMethodController = erosionpara.add(controls, 'AdvectionMethod', { Semilagrangian: 0, MacCormack: 1 });
     const velocityMultiplierController = erosionpara.add(controls, 'VelocityMultiplier', 1.0, 5.0);
+    erosionpara.add(controls, 'AdvectionSpeedScaling', 0.1, 3.0);
+    erosionpara.add(controls, 'RainDegree', 0.5, 10.0);
     erosionpara.add(controls, 'Reset Erosion Parameters');
     erosionpara.open();
     
@@ -169,6 +171,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     // Thermal Erosion Parameters
     var thermalerosionpara = gui.addFolder("Thermal Erosion Parameters");
     thermalerosionpara.add(controls, 'thermalTalusAngleScale', 1.0, 10.0);
+    thermalerosionpara.add(controls, 'thermalRate', 0.0, 2.0);
     thermalerosionpara.add(controls, 'thermalErosionScale', 0.0, 5.0);
     
     // Terrain Editor
@@ -260,8 +263,6 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
     renderingpara.add(controls, 'ShowFlowTrace');
     renderingpara.add(controls, 'SedimentTrace');
-    renderingpara.add(controls, 'showScattering');
-    renderingpara.add(controls, 'enableBilateralBlur');
     var renderingparalightpos = renderingpara.addFolder('sunPos/Dir');
     renderingparalightpos.add(controls, 'lightPosX', -1.0, 1.0);
     renderingparalightpos.add(controls, 'lightPosY', 0.0, 1.0);

@@ -1,6 +1,6 @@
-import { Vector2 } from 'three';
+import { Vector2, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, pow, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -17,6 +17,10 @@ export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
     brushType?: number | any;
     /** Debug visualization mode (0 = none, see TerrainDebugMode) */
     debugMode?: number;
+    /** Show flow trace overlay (where water has flowed) */
+    showFlowTrace?: boolean;
+    /** Show sediment trace overlay (sediment deposits on terrain) */
+    showSedimentTrace?: boolean;
 }
 
 /**
@@ -34,6 +38,13 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
     private brushSizeUniform: any;
     private brushTypeUniform: any;
     private debugModeUniform: any;
+    private showFlowTraceUniform: any;
+    private showSedimentTraceUniform: any;
+    /** Water source indicator uniforms (up to 8 sources) */
+    private sourceCountUniform: any;
+    private sourcePosUniforms: any[] = [];
+    private sourceSizeUniforms: any[] = [];
+    private lightDirUniform: any;
     private inputs: TerrainMaterialNodeInputs;
 
     constructor(
@@ -54,6 +65,16 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         this.brushSizeUniform = uniform(inputs.brushSize ?? 0);
         this.brushTypeUniform = uniform(inputs.brushType ?? 0);
         this.debugModeUniform = uniform(inputs.debugMode ?? 0);
+        this.showFlowTraceUniform = uniform(inputs.showFlowTrace ? 1 : 0);
+        this.showSedimentTraceUniform = uniform(inputs.showSedimentTrace !== false ? 1 : 0);
+        this.lightDirUniform = uniform(new Vector3(0.4, 0.8, 0.0));
+        // Water source indicator uniforms (up to 8 sources displayed)
+        this.sourceCountUniform = uniform(0);
+        const MAX_DISPLAYED_SOURCES = 8;
+        for (let i = 0; i < MAX_DISPLAYED_SOURCES; i++) {
+            this.sourcePosUniforms.push(uniform(new Vector2(-10, -10)));
+            this.sourceSizeUniforms.push(uniform(0));
+        }
 
         this.buildGraph(this.inputs);
     }
@@ -105,12 +126,33 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         terrainPalette?: number;
         maxHeight?: number;
         debugMode?: number;
+        showFlowTrace?: boolean;
+        showSedimentTrace?: boolean;
+        lightDir?: [number, number, number];
     }): void {
         if (params.snowRange !== undefined) this.snowRangeUniform.value = params.snowRange;
         if (params.forestRange !== undefined) this.forestRangeUniform.value = params.forestRange;
         if (params.terrainPalette !== undefined) this.terrainPaletteUniform.value = params.terrainPalette;
         if (params.maxHeight !== undefined) this.maxHeightUniform.value = params.maxHeight;
         if (params.debugMode !== undefined) this.debugModeUniform.value = params.debugMode;
+        if (params.showFlowTrace !== undefined) this.showFlowTraceUniform.value = params.showFlowTrace ? 1 : 0;
+        if (params.showSedimentTrace !== undefined) this.showSedimentTraceUniform.value = params.showSedimentTrace ? 1 : 0;
+        if (params.lightDir !== undefined) this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
+    }
+
+    /** Update water source indicator positions each frame. */
+    updateSources(sources: { position: [number, number]; size: number }[]): void {
+        const count = Math.min(sources.length, this.sourcePosUniforms.length);
+        this.sourceCountUniform.value = count;
+        for (let i = 0; i < this.sourcePosUniforms.length; i++) {
+            if (i < count) {
+                this.sourcePosUniforms[i].value.set(sources[i].position[0], sources[i].position[1]);
+                this.sourceSizeUniforms[i].value = sources[i].size;
+            } else {
+                this.sourcePosUniforms[i].value.set(-10, -10);
+                this.sourceSizeUniforms[i].value = 0;
+            }
+        }
     }
 
     /** getValueType() returns null for plain arrays; use Vector2 so WGSL gets type 'vec2'. */
@@ -152,9 +194,9 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             shadowCoord,
         });
 
-        // Directional light
+        // Directional light (driven by sunPos/Dir controls)
         const surfaceNormal = sampling.normal.negate();
-        const lightDir = normalize(vec3(0.4, 0.8, 0.0));
+        const lightDir = normalize(this.lightDirUniform);
         const lamb = max(dot(surfaceNormal, lightDir), float(0));
         const ambientCol = vec3(0.01, 0.01, 0.01);
         let litColor = palette.color.mul(shadow.shadowFactor).mul(lamb).add(ambientCol);
@@ -188,6 +230,52 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const brushActiveFloat = brushType.greaterThan(0).select(float(1), float(0));
         const brushBlend = brushActiveFloat.mul(brushIntensity);
         litColor = mix(litColor, litColor.add(brushCol), brushBlend);
+
+        // --- Water source indicators (red glow at source positions) ---
+        const sourceGlowCol = vec3(0.8, 0.15, 0.1);
+        for (let i = 0; i < this.sourcePosUniforms.length; i++) {
+            const srcPos = this.sourcePosUniforms[i];
+            const srcSize = this.sourceSizeUniforms[i];
+            const srcDelta = sampling.uv.sub(srcPos);
+            const srcDist = length(srcDelta);
+            const srcRadius = float(0.01).mul(srcSize);
+            // Smooth radial falloff within source radius
+            const srcGlow = float(1).sub(srcDist.div(srcRadius)).clamp(0, 1);
+            const srcActive = srcSize.greaterThan(0).select(float(1), float(0));
+            litColor = mix(litColor, litColor.add(sourceGlowCol.mul(srcGlow.mul(0.5))), srcActive.mul(srcGlow));
+        }
+
+        // --- Flow trace overlay (legacy: yellowish where water has flowed) ---
+        // sedimentBlend accumulates over time where water flows, fades when dry.
+        // Legacy: sedimentTrace = 1 - exp(-sval*300), mixed with khaki color.
+        const flowTraceEnabled = this.showFlowTraceUniform.equal(1);
+        const sval = sampling.sedimentBlend; // accumulated flow history
+        const flowIntensity = float(1).sub(pow(float(2.718), sval.mul(-300).clamp(-10, 0)));
+        const flowColor = vec3(240 / 255, 230 / 255, 140 / 255); // khaki/yellow
+        const flowBlended = mix(litColor, flowColor.mul(lamb).add(ambientCol), flowIntensity.mul(1.5).clamp(0, 0.85));
+        litColor = flowTraceEnabled.select(flowBlended, litColor);
+
+        // --- Sediment trace overlay (legacy: 3-tier gradient showing sediment deposits) ---
+        // Uses actual sediment concentration with exponential mapping and 3-band color gradient.
+        const sedTraceEnabled = this.showSedimentTraceUniform.equal(1);
+        const ssval = float(1).sub(pow(float(2.718), sampling.sediment.x.mul(-7).clamp(-10, 0)));
+        // 3-tier colors: green-teal → teal → deep blue (legacy active colors)
+        const lightSediCol = vec3(0.0, 0.5, 0.3);
+        const medSediCol = vec3(0.0, 0.5, 0.5);
+        const deepSediCol = vec3(0.0, 0.0, 0.99);
+        const smallThresh = float(0.4);
+        const largeThresh = float(0.7);
+        // Band 1: 0→0.4 lerp base→light
+        const band1 = mix(litColor, lightSediCol.mul(lamb), ssval.div(smallThresh).clamp(0, 1));
+        // Band 2: 0.4→0.7 lerp light→medium
+        const band2 = mix(lightSediCol, medSediCol, ssval.sub(smallThresh).div(float(0.3)).clamp(0, 1));
+        // Band 3: 0.7→1.0 lerp medium→deep
+        const band3 = mix(medSediCol, deepSediCol, ssval.sub(largeThresh).div(float(0.3)).clamp(0, 1));
+        // Select band based on ssval thresholds
+        const sediColor = ssval.lessThan(smallThresh).select(band1,
+            ssval.lessThan(largeThresh).select(band2.mul(lamb), band3.mul(lamb)));
+        const sedBlended = mix(litColor, sediColor, ssval.clamp(0, 1));
+        litColor = sedTraceEnabled.select(sedBlended, litColor);
 
         // --- Debug visualization modes (match legacy terrain-frag TerrainDebug dropdown) ---
         // 0 = normal render, 1 = sediment, 2 = velocity, 3 = terrain (normHeight grayscale),

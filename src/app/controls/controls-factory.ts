@@ -24,8 +24,8 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
 
         tesselations: 5,
         pipelen: 0.8,
-        Kc: 0.06,
-        Ks: 0.036,
+        Kc: 0.04,
+        Ks: 0.02,
         Kd: 0.006,
         timestep: 0.05,
         pipeAra: 0.6,

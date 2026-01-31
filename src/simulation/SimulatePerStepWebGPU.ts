@@ -148,6 +148,7 @@ export function SimulatePerStepWebGPU(
         timestep: controls.timestep,
         pipeArea: controls.pipeAra,
         thermalRate: controls.thermalRate,
+        rockErosionResistance: controls.rockErosionResistance,
     });
     texturePool.swapTerrainFluxTextures();
 
@@ -158,6 +159,7 @@ export function SimulatePerStepWebGPU(
         timestep: controls.timestep,
         pipeArea: controls.pipeAra,
         thermalErosionScale: controls.thermalErosionScale,
+        rockErosionResistance: controls.rockErosionResistance,
     });
     texturePool.swapTerrainTextures();
 

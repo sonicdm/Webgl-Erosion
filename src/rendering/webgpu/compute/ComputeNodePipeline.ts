@@ -1019,6 +1019,7 @@ struct Uniforms {
     u_timestep: f32,
     u_PipeArea: f32,
     unif_thermalRate: f32,
+    u_RockErosionResistance: f32,
 };
 
 @group(0) @binding(3) var<uniform> uniforms: Uniforms;
@@ -1032,6 +1033,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let terrainbottom = textureLoad(readTerrain, coord + vec2<i32>(0, -1), 0);
     let terrainleft = textureLoad(readTerrain, coord + vec2<i32>(-1, 0), 0);
     let terraincur = textureLoad(readTerrain, coord, 0);
+
+    // Rock-awareness: reduce thermal flux from rock cells
+    let rockVal = terraincur.z;
+    let rockStrength = clamp((rockVal - 0.1) / 0.9, 0.0, 1.0);
+    let rockFactor = select(1.0, 1.0 - uniforms.u_RockErosionResistance * rockStrength, rockVal > 0.1);
 
     let slippagetop = textureLoad(readMaxSlippage, coord + vec2<i32>(0, 1), 0).x;
     let slippageright = textureLoad(readMaxSlippage, coord + vec2<i32>(1, 0), 0).x;
@@ -1047,7 +1053,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     );
     diff = max(diff, vec4<f32>(0.0));
 
-    var newFlow = diff * 1.2;
+    var newFlow = diff * 1.2 * rockFactor;
 
     var outfactor = (newFlow.x + newFlow.y + newFlow.z + newFlow.w) * uniforms.u_timestep;
     if (outfactor > 1e-5) {
@@ -1080,6 +1086,7 @@ struct Uniforms {
     u_timestep: f32,
     u_PipeArea: f32,
     unif_thermalErosionScale: f32,
+    u_RockErosionResistance: f32,
 };
 
 @group(0) @binding(3) var<uniform> uniforms: Uniforms;
@@ -1102,11 +1109,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let curTerrain = textureLoad(readTerrain, coord, 0);
 
+    // Rock-awareness: reduce thermal erosion on rock cells
+    let rockVal = curTerrain.z;
+    let rockStrength = clamp((rockVal - 0.1) / 0.9, 0.0, 1.0);
+    let rockFactor = select(1.0, 1.0 - uniforms.u_RockErosionResistance * rockStrength, rockVal > 0.1);
+
     // Boundary protection: skip thermal erosion at edges
     let dim = vec2<f32>(f32(textureDimensions(readTerrain).x), f32(textureDimensions(readTerrain).y));
     let uv = (vec2<f32>(global_id.xy) + 0.5) / dim;
     let div = 1.0 / uniforms.u_SimRes;
-    var safeDelta = tdelta;
+    var safeDelta = tdelta * rockFactor;
     if (uv.x <= div || uv.x >= 1.0 - 2.0 * div || uv.y <= div || uv.y >= 1.0 - 2.0 * div) {
         safeDelta = 0.0;
     }
@@ -1171,10 +1183,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var col = 0.0;
     let curWeight = 8.0;
 
-    if (((abs(r_d) > threathhold && abs(l_d) > threathhold) && r_d * l_d > 0.0) ||
+    // Skip smoothing for rock cells (rock resists all erosion types)
+    let rockVal = cur.z;
+    let isRock = rockVal > 0.1;
+
+    if (!isRock && (((abs(r_d) > threathhold && abs(l_d) > threathhold) && r_d * l_d > 0.0) ||
         ((abs(t_d) > threathhold && abs(b_d) > threathhold) && t_d * b_d > 0.0) ||
         ((abs(tr_d) > threathhold && abs(bl_d) > threathhold) && tr_d * bl_d > 0.0) ||
-        ((abs(tl_d) > threathhold && abs(br_d) > threathhold) && tl_d * br_d > 0.0)) {
+        ((abs(tl_d) > threathhold && abs(br_d) > threathhold) && tl_d * br_d > 0.0))) {
         cur_h = (cur.x * curWeight + top.x + right.x + bottom.x + left.x + topright.x * diagonalWeight + topleft.x * diagonalWeight + bottomleft.x * diagonalWeight + bottomright.x * diagonalWeight) / (4.0 * (1.0 + diagonalWeight) + curWeight);
         col = 1.0;
     }
@@ -1738,6 +1754,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             timestep: number;
             pipeArea: number;
             thermalRate: number;
+            rockErosionResistance: number;
         }
     ): void {
         const device = this.device;
@@ -1762,6 +1779,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             uniforms.timestep,
             uniforms.pipeArea,
             uniforms.thermalRate,
+            uniforms.rockErosionResistance,
         ]);
         let uniformBuffer = this.uniformBuffers.get('thermalFlux');
         if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
@@ -1801,6 +1819,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             timestep: number;
             pipeArea: number;
             thermalErosionScale: number;
+            rockErosionResistance: number;
         }
     ): void {
         const device = this.device;
@@ -1825,6 +1844,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             uniforms.timestep,
             uniforms.pipeArea,
             uniforms.thermalErosionScale,
+            uniforms.rockErosionResistance,
         ]);
         let uniformBuffer = this.uniformBuffers.get('thermalApply');
         if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
@@ -1865,6 +1885,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pipeArea: number;
             thermalRate: number;
             thermalErosionScale: number;
+            rockErosionResistance: number;
         }
     ): void {
         this.thermalFluxPass(texturePool, {
@@ -1873,6 +1894,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             timestep: uniforms.timestep,
             pipeArea: uniforms.pipeArea,
             thermalRate: uniforms.thermalRate,
+            rockErosionResistance: uniforms.rockErosionResistance,
         });
         texturePool.swapTerrainFluxTextures();
         this.thermalApplyPass(texturePool, {
@@ -1881,6 +1903,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             timestep: uniforms.timestep,
             pipeArea: uniforms.pipeArea,
             thermalErosionScale: uniforms.thermalErosionScale,
+            rockErosionResistance: uniforms.rockErosionResistance,
         });
     }
 

@@ -10,6 +10,7 @@ import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperatio
 import { updatePaletteSelection } from './brush-palette';
 import { rayCast } from './utils/raycast';
 import { rayCastBVH } from './utils/bvh-raycast';
+import { waterSources } from './utils/water-sources';
 import { updateTerrainGeometry } from './utils/terrain-geometry-builder';
 import { createHeightMapLoader } from './utils/heightmap-loader';
 import { LoadProgressTracker, LoadPhase } from './utils/load-progress';
@@ -24,9 +25,10 @@ import { ComputeNodePipeline } from './rendering/webgpu/compute/ComputeNodePipel
 import { TerrainGeneratorCompute } from './rendering/webgpu/compute/TerrainGeneratorCompute';
 import { WebGPUTexturePool } from './simulation/WebGPUTexturePool';
 import { WebGPUSimulationRunner } from './app/runtime/WebGPUSimulationRunner';
-import { Scene, Mesh, PlaneGeometry, Color } from 'three';
+import { Scene, Mesh, PlaneGeometry, SphereGeometry } from 'three';
 import { TerrainMaterialNode } from './rendering/webgpu/materials/TerrainMaterialNode';
 import { WaterMaterialNode } from './rendering/webgpu/materials/WaterMaterialNode';
+import { SkyMaterialNode } from './rendering/webgpu/materials/SkyMaterialNode';
 import {
   createPoolSyncTextures,
   copyPoolToThreeTextures,
@@ -171,9 +173,7 @@ async function main() {
     terrainGeneratorCompute.setRandomSeed(); // Set initial random seed
 
     webgpuScene = new Scene();
-    // Sky background color matching legacy clear color (atmospheric blue-gray)
-    webgpuScene.background = new Color(0.2, 0.25, 0.3);
-    webgpuRendererWrapper.setClearColor(0.2, 0.25, 0.3, 1);
+    webgpuRendererWrapper.setClearColor(0, 0, 0, 1);
     webgpuRendererWrapper.setSize(window.innerWidth, window.innerHeight);
 
     // Pool-sync textures: Three.js DataTextures (rgba32float) that we copy from pool each frame
@@ -216,6 +216,15 @@ async function main() {
     webgpuWaterMesh.visible = true; // Water visible — opacity driven by water level in heightmap G channel
     webgpuScene.add(webgpuWaterMesh);
 
+    // Sky sphere: large inverted sphere with gradient sky + sun disc
+    const skyGeometry = new SphereGeometry(100, 32, 16);
+    const skyMaterial = new SkyMaterialNode([0.4, 0.8, 0.0]); // defaults; updated per-frame from controls
+    const skyMesh = new Mesh(skyGeometry, skyMaterial as any);
+    skyMesh.renderOrder = -1; // Render before everything
+    skyMesh.frustumCulled = false;
+    webgpuScene.add(skyMesh);
+    (webgpuScene as any)._skyMesh = skyMesh; // Stash reference for per-frame updates
+
     console.log('[WebGPU] Renderer, compute pipeline, texture pool, and terrain generator initialized');
   } catch (error) {
     console.error('[WebGPU] Failed to initialize:', error);
@@ -242,8 +251,8 @@ async function main() {
     { setTerrainBaseType }
   );
   const resetErosionParameters = (c: IAppControls) => {
-    c.Kc = 0.06;
-    c.Ks = 0.036;
+    c.Kc = 0.04;
+    c.Ks = 0.02;
     c.Kd = 0.006;
     c.ErosionMode = 0;
     c.EvaporationConstant = 0.003;
@@ -1088,13 +1097,29 @@ async function main() {
           terrainPalette: controls.TerrainPlatte,
           maxHeight: (controls?.TerrainHeight ?? 2) * 120,
           debugMode: controls.TerrainDebug,
+          showFlowTrace: controls.ShowFlowTrace,
+          showSedimentTrace: controls.SedimentTrace,
+          lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
         });
+        // Pass water source positions for red glow indicators
+        terrainMat.updateSources(waterSources.map(s => ({
+          position: [s.position[0], s.position[1]] as [number, number],
+          size: s.size,
+        })));
       }
       // Push per-frame control values to water material uniforms
       if (webgpuWaterMesh?.material) {
         const waterMat = webgpuWaterMesh.material as unknown as WaterMaterialNode;
         waterMat.updateUniforms({
           waterTransparency: controls.WaterTransparency,
+          lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
+        });
+      }
+      // Update sky sun position
+      const skyMesh = (webgpuScene as any)?._skyMesh;
+      if (skyMesh?.material) {
+        (skyMesh.material as SkyMaterialNode).updateUniforms({
+          lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
         });
       }
       webgpuRendererWrapper.render(webgpuScene, camera.threeCamera);
