@@ -1,6 +1,6 @@
 import { Vector2, Vector3, DataTexture, FloatType, RGBAFormat, NearestFilter } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, int, length, Loop, max, mix, normalize, normalLocal, positionLocal, pow, smoothstep, texture, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
+import { clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, pow, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -246,7 +246,7 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const ambientCol = vec3(0.01, 0.01, 0.01);
 
         // Use .toVar() so litColor can be assigned inside the Loop
-        const litColor = palette.color.mul(shadow.shadowFactor).mul(lamb).add(ambientCol).toVar();
+        let litColor = palette.color.mul(shadow.shadowFactor).mul(lamb).add(ambientCol);
 
         // Brush overlay — ring + fill. Color comes from a single uniform (set in updateBrush).
         const brushPos = this.brushPosUniform;
@@ -263,23 +263,22 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const brushIntensity = ringFactor.mul(0.95).add(insideFill);
         const brushActiveFloat = brushType.greaterThan(0).select(float(1), float(0));
         const brushBlend = brushActiveFloat.mul(brushIntensity);
-        litColor.assign(mix(litColor, litColor.add(brushCol), brushBlend));
+        litColor = mix(litColor, litColor.add(brushCol), brushBlend);
 
-        // --- Water source indicators (red glow via Loop over DataTexture) ---
+        // --- Water source indicators (red glow, unrolled over DataTexture) ---
+        // Each iteration reads one texel from the 16×1 source data texture.
+        // Inactive sources at (-10,-10) with size=0 naturally produce 0 glow.
         const sourceGlowCol = vec3(0.8, 0.15, 0.1);
         const srcTex = texture(this.sourceDataTexture);
-        const srcCount = this.sourceCountUniform;
-        Loop(srcCount, ({ i }: { i: any }) => {
-            // Sample source data at texel i (16×1): uv = ((i+0.5)/16, 0.5)
-            const srcUv = vec2(int(i).toFloat().add(0.5).div(16.0), 0.5);
+        const MAX_SOURCES = 16;
+        for (let i = 0; i < MAX_SOURCES; i++) {
+            const srcUv = vec2((i + 0.5) / MAX_SOURCES, 0.5);
             const srcData = srcTex.uv(srcUv);
-            const srcPos = vec2(srcData.x, srcData.y);
-            const srcSize = srcData.z;
-            const srcDist = length(sampling.uv.sub(srcPos));
-            const srcRadius = float(0.01).mul(srcSize);
-            const srcGlow = float(1).sub(srcDist.div(srcRadius)).clamp(0, 1);
-            litColor.assign(mix(litColor, litColor.add(sourceGlowCol.mul(srcGlow.mul(0.5))), srcGlow));
-        });
+            const srcDist = length(sampling.uv.sub(vec2(srcData.x, srcData.y)));
+            const srcRadius = float(0.01).mul(srcData.z).max(float(0.0001)); // avoid div-by-zero
+            const srcGlow = float(1).sub(srcDist.div(srcRadius)).clamp(0, 1).mul(srcData.w); // w=active
+            litColor = mix(litColor, litColor.add(sourceGlowCol.mul(0.5)), srcGlow);
+        }
 
         // --- Flow trace overlay ---
         const flowTraceEnabled = this.showFlowTraceUniform.equal(1);
@@ -290,7 +289,7 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const flowColorDark = vec3(0.35, 0.25, 0.10);
         const flowColor = mix(flowColorBright, flowColorDark, smoothstep(float(0.35), float(0.55), terrainLum));
         const flowBlended = mix(litColor, flowColor.mul(lamb).add(ambientCol), flowIntensity.mul(1.5).clamp(0, 0.85));
-        litColor.assign(flowTraceEnabled.select(flowBlended, litColor));
+        litColor = flowTraceEnabled.select(flowBlended, litColor);
 
         // --- Sediment trace overlay (3-tier gradient) ---
         const sedTraceEnabled = this.showSedimentTraceUniform.equal(1);
@@ -306,7 +305,7 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const sediColor = ssval.lessThan(smallThresh).select(band1,
             ssval.lessThan(largeThresh).select(band2.mul(lamb), band3.mul(lamb)));
         const sedBlended = mix(litColor, sediColor, ssval.clamp(0, 1));
-        litColor.assign(sedTraceEnabled.select(sedBlended, litColor));
+        litColor = sedTraceEnabled.select(sedBlended, litColor);
 
         // --- Debug visualization (all modes from legacy terrain-frag) ---
         // 0=normal, 1=sediment, 2=velocity, 3=terrain, 4=flux, 5=terrainflux, 7=flow, 10=rock
