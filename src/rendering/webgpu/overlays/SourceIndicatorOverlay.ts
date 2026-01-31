@@ -1,6 +1,6 @@
 import { Scene, Mesh, BufferGeometry, Float32BufferAttribute, DoubleSide } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { float, vec3 } from 'three/tsl';
+import { attribute, float, mix, vec3 } from 'three/tsl';
 
 /** Height sampler: (u, v) → raw terrain height value */
 export type HeightSampler = (u: number, v: number) => number;
@@ -10,14 +10,16 @@ export interface SourceIndicatorData {
     size: number;
 }
 
-const RING_SEGMENTS = 48;
-const RING_INNER = 0.85; // fraction of outer radius
-const RING_RADIAL_STRIPS = 1; // single strip for the ring band
+const SEGMENTS = 32;      // angular segments around the disc
+const RADIAL_RINGS = 6;   // concentric vertex rings (center → edge)
 
 /**
- * Manages terrain-conforming ring overlay meshes for water source indicators.
- * Each ring's vertices are placed in world space with Y sampled from the
- * heightmap, so the ring drapes over the terrain surface.
+ * Terrain-conforming radial glow discs for water source indicators.
+ * Each disc is a filled circle whose vertices are height-sampled from the
+ * CPU heightmap buffer, with per-vertex alpha creating a soft radial
+ * falloff (bright at center, transparent at edge). Renders additively
+ * on top of terrain — mimics the old in-shader glow without adding any
+ * TSL nodes to the terrain material.
  */
 export class SourceIndicatorOverlay {
     private scene: Scene;
@@ -29,21 +31,17 @@ export class SourceIndicatorOverlay {
     constructor(scene: Scene) {
         this.scene = scene;
 
+        // Material reads per-vertex 'alpha' attribute for radial falloff
+        const vAlpha = attribute('alpha', 'float');
         this.material = new MeshBasicNodeMaterial();
-        this.material.colorNode = vec3(0.95, 0.25, 0.15);
-        this.material.opacityNode = float(0.55);
+        this.material.colorNode = mix(vec3(0.95, 0.3, 0.15), vec3(1.0, 0.6, 0.3), vAlpha);
+        this.material.opacityNode = vAlpha.mul(float(0.45));
         this.material.transparent = true;
         this.material.depthTest = false;
         this.material.depthWrite = false;
         this.material.side = DoubleSide;
     }
 
-    /**
-     * Update overlay to match current source list.
-     * @param sources  Active water sources
-     * @param sampleHeight  (u, v) → raw height from CPU buffer
-     * @param simres  Simulation resolution (worldY = rawHeight / simres)
-     */
     update(
         sources: SourceIndicatorData[],
         sampleHeight: HeightSampler,
@@ -64,7 +62,7 @@ export class SourceIndicatorOverlay {
 
         for (let i = 0; i < this.meshes.length; i++) {
             if (i < sources.length) {
-                this.buildRingGeometry(this.geometries[i], sources[i], sampleHeight);
+                this.buildDiscGeometry(this.geometries[i], sources[i], sampleHeight);
                 this.meshes[i].visible = true;
             } else {
                 this.meshes[i].visible = false;
@@ -72,70 +70,79 @@ export class SourceIndicatorOverlay {
         }
     }
 
-    private buildRingGeometry(
+    private buildDiscGeometry(
         geo: BufferGeometry,
         src: SourceIndicatorData,
         sampleHeight: HeightSampler,
     ): void {
         const centerU = src.position[0];
         const centerV = src.position[1];
-        const outerR = 0.01 * src.size; // UV-space radius
-        const innerR = outerR * RING_INNER;
-        const yBias = 0.001;
+        const outerR = 0.01 * src.size;
+        const yBias = 0.0015;
 
-        const verts: number[] = [];
+        const positions: number[] = [];
+        const alphas: number[] = [];
         const indices: number[] = [];
 
-        // Two concentric rings of vertices: inner and outer
-        for (let s = 0; s <= RING_SEGMENTS; s++) {
-            const angle = (s / RING_SEGMENTS) * Math.PI * 2;
-            const cosA = Math.cos(angle);
-            const sinA = Math.sin(angle);
+        // Center vertex
+        const cU = Math.max(0, Math.min(1, centerU));
+        const cV = Math.max(0, Math.min(1, centerV));
+        const centerH = sampleHeight(cU, cV);
+        positions.push(centerU - 0.5, centerH / this.simres + yBias, 0.5 - centerV);
+        alphas.push(1.0); // Full intensity at center
+        // vertex index 0 = center
 
-            for (let r = 0; r <= RING_RADIAL_STRIPS; r++) {
-                const frac = r / RING_RADIAL_STRIPS;
-                const radius = innerR + (outerR - innerR) * frac;
-                const u = centerU + cosA * radius;
-                const v = centerV + sinA * radius;
+        // Concentric rings of vertices
+        for (let ring = 1; ring <= RADIAL_RINGS; ring++) {
+            const frac = ring / RADIAL_RINGS;
+            const radius = outerR * frac;
+            // Radial falloff: strong near center, fading to 0 at edge
+            // Use a quadratic curve for a natural soft glow
+            const alpha = (1.0 - frac) * (1.0 - frac);
 
-                // UV → world XZ
-                const worldX = u - 0.5;
-                const worldZ = 0.5 - v;
+            for (let s = 0; s < SEGMENTS; s++) {
+                const angle = (s / SEGMENTS) * Math.PI * 2;
+                const u = centerU + Math.cos(angle) * radius;
+                const v = centerV + Math.sin(angle) * radius;
 
-                // Sample terrain height, clamp UV to valid range
-                const clampedU = Math.max(0, Math.min(1, u));
-                const clampedV = Math.max(0, Math.min(1, v));
-                const rawH = sampleHeight(clampedU, clampedV);
-                const worldY = rawH / this.simres + yBias;
+                const clU = Math.max(0, Math.min(1, u));
+                const clV = Math.max(0, Math.min(1, v));
+                const rawH = sampleHeight(clU, clV);
 
-                verts.push(worldX, worldY, worldZ);
+                positions.push(u - 0.5, rawH / this.simres + yBias, 0.5 - v);
+                alphas.push(alpha);
             }
         }
 
-        // Build triangle strip indices
-        const stride = RING_RADIAL_STRIPS + 1; // verts per segment
-        for (let s = 0; s < RING_SEGMENTS; s++) {
-            for (let r = 0; r < RING_RADIAL_STRIPS; r++) {
-                const a = s * stride + r;
-                const b = a + 1;
-                const c = (s + 1) * stride + r;
-                const d = c + 1;
-                indices.push(a, c, b);
-                indices.push(b, c, d);
+        // Triangles: center fan for ring 1
+        const ring1Start = 1; // first vertex of ring 1
+        for (let s = 0; s < SEGMENTS; s++) {
+            const curr = ring1Start + s;
+            const next = ring1Start + (s + 1) % SEGMENTS;
+            indices.push(0, curr, next);
+        }
+
+        // Triangle strips between consecutive rings
+        for (let ring = 1; ring < RADIAL_RINGS; ring++) {
+            const innerStart = 1 + (ring - 1) * SEGMENTS;
+            const outerStart = 1 + ring * SEGMENTS;
+            for (let s = 0; s < SEGMENTS; s++) {
+                const iCurr = innerStart + s;
+                const iNext = innerStart + (s + 1) % SEGMENTS;
+                const oCurr = outerStart + s;
+                const oNext = outerStart + (s + 1) % SEGMENTS;
+                indices.push(iCurr, oCurr, iNext);
+                indices.push(iNext, oCurr, oNext);
             }
         }
 
-        geo.setAttribute('position', new Float32BufferAttribute(verts, 3));
+        geo.setAttribute('position', new Float32BufferAttribute(positions, 3));
+        geo.setAttribute('alpha', new Float32BufferAttribute(alphas, 1));
         geo.setIndex(indices);
-        geo.computeVertexNormals();
 
-        // Mark for GPU re-upload
-        if (geo.attributes.position) {
-            (geo.attributes.position as any).needsUpdate = true;
-        }
-        if (geo.index) {
-            geo.index.needsUpdate = true;
-        }
+        if (geo.attributes.position) (geo.attributes.position as any).needsUpdate = true;
+        if (geo.attributes.alpha) (geo.attributes.alpha as any).needsUpdate = true;
+        if (geo.index) geo.index.needsUpdate = true;
     }
 
     dispose(): void {
