@@ -1,6 +1,6 @@
-import { Vector2, Vector3 } from 'three';
+import { Vector2, Vector3, DataTexture, FloatType, RGBAFormat, NearestFilter } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, pow, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { clamp, dot, float, int, length, Loop, max, mix, normalize, normalLocal, positionLocal, pow, smoothstep, texture, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -51,6 +51,9 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
     private slopeRockAmountUniform: any;
     /** Brush overlay color (set from JS based on brushType) */
     private brushColorUniform: any;
+    /** Water source data packed into a 16×1 RGBA32F DataTexture (R=u, G=v, B=size, A=active) */
+    private sourceDataTexture: DataTexture;
+    private sourceCountUniform: any;
     private inputs: TerrainMaterialNodeInputs;
 
     constructor(
@@ -77,6 +80,16 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         this.snowLineUniform = uniform(0.70);
         this.slopeRockAmountUniform = uniform(1.0);
         this.brushColorUniform = uniform(new Vector3(0.1, 0.3, 0.8)); // default: water brush blue
+
+        // 16×1 RGBA32F texture packing source data: R=u, G=v, B=size, A=active(0/1)
+        const MAX_SOURCES = 16;
+        this.sourceDataTexture = new DataTexture(
+            new Float32Array(MAX_SOURCES * 4), MAX_SOURCES, 1, RGBAFormat, FloatType
+        );
+        this.sourceDataTexture.magFilter = NearestFilter;
+        this.sourceDataTexture.minFilter = NearestFilter;
+        this.sourceDataTexture.needsUpdate = true;
+        this.sourceCountUniform = uniform(0);
 
         this.buildGraph(this.inputs);
     }
@@ -129,6 +142,29 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         };
         const c = colors[brushType] ?? [0, 0, 0];
         this.brushColorUniform.value.set(c[0], c[1], c[2]);
+    }
+
+    /** Update water source indicator data each frame (no graph rebuild). */
+    updateSources(sources: { position: [number, number]; size: number }[]): void {
+        const data = this.sourceDataTexture.image.data as Float32Array;
+        const max = data.length / 4; // 16
+        const count = Math.min(sources.length, max);
+        for (let i = 0; i < max; i++) {
+            const base = i * 4;
+            if (i < count) {
+                data[base] = sources[i].position[0];     // R = u
+                data[base + 1] = sources[i].position[1]; // G = v
+                data[base + 2] = sources[i].size;         // B = size
+                data[base + 3] = 1;                       // A = active
+            } else {
+                data[base] = -10;
+                data[base + 1] = -10;
+                data[base + 2] = 0;
+                data[base + 3] = 0;
+            }
+        }
+        this.sourceDataTexture.needsUpdate = true;
+        this.sourceCountUniform.value = count;
     }
 
     /** Update per-frame uniforms from controls (no graph rebuild). */
@@ -233,6 +269,22 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const brushActiveFloat = brushType.greaterThan(0).select(float(1), float(0));
         const brushBlend = brushActiveFloat.mul(brushIntensity);
         litColor = mix(litColor, litColor.add(brushCol), brushBlend);
+
+        // --- Water source indicators (red glow via Loop over DataTexture) ---
+        const sourceGlowCol = vec3(0.8, 0.15, 0.1);
+        const srcTex = texture(this.sourceDataTexture);
+        const srcCount = this.sourceCountUniform;
+        Loop(srcCount, ({ i }: { i: any }) => {
+            // Sample source data texture at texel i (16×1): uv = ((i+0.5)/16, 0.5)
+            const srcUv = vec2(int(i).toFloat().add(0.5).div(16.0), 0.5);
+            const srcData = srcTex.uv(srcUv);
+            const srcPos = vec2(srcData.x, srcData.y);
+            const srcSize = srcData.z;
+            const srcDist = length(sampling.uv.sub(srcPos));
+            const srcRadius = float(0.01).mul(srcSize);
+            const srcGlow = float(1).sub(srcDist.div(srcRadius)).clamp(0, 1);
+            litColor.assign(mix(litColor, litColor.add(sourceGlowCol.mul(srcGlow.mul(0.5))), srcGlow));
+        });
 
         // --- Flow trace overlay ---
         const flowTraceEnabled = this.showFlowTraceUniform.equal(1);

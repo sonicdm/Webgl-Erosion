@@ -9,7 +9,7 @@ import { setupGUI, GUIControllers } from './gui/gui-setup';
 import { createEventHandlers } from './events/event-handlers';
 import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
 import { updatePaletteSelection } from './brush-palette';
-import { rayCast, sampleHeightBilinear } from './utils/raycast';
+import { rayCast } from './utils/raycast';
 import { rayCastBVH } from './utils/bvh-raycast';
 import { waterSources } from './utils/water-sources';
 import { updateTerrainGeometry } from './utils/terrain-geometry-builder';
@@ -27,7 +27,6 @@ import { TerrainGeneratorCompute } from './rendering/webgpu/compute/TerrainGener
 import { WebGPUTexturePool } from './simulation/WebGPUTexturePool';
 import { WebGPUSimulationRunner } from './app/runtime/WebGPUSimulationRunner';
 import { Scene, Mesh, PlaneGeometry, SphereGeometry } from 'three';
-import { SourceIndicatorOverlay } from './rendering/webgpu/overlays/SourceIndicatorOverlay';
 import { TerrainMaterialNode } from './rendering/webgpu/materials/TerrainMaterialNode';
 import { WaterMaterialNode } from './rendering/webgpu/materials/WaterMaterialNode';
 import { SkyMaterialNode } from './rendering/webgpu/materials/SkyMaterialNode';
@@ -157,7 +156,6 @@ async function main() {
   let webgpuScene: Scene | null = null;
   let webgpuTerrainMesh: Mesh | null = null;
   let webgpuWaterMesh: Mesh | null = null;
-  let sourceIndicatorOverlay: SourceIndicatorOverlay | null = null;
   let webgpuPoolSyncTextures: PoolSyncTextures | null = null;
   let webgpuSceneCompileDone = false;
   let webgpuSceneCompileStarted = false;
@@ -243,9 +241,6 @@ async function main() {
     skyMesh.frustumCulled = false;
     webgpuScene.add(skyMesh);
     (webgpuScene as any)._skyMesh = skyMesh; // Stash reference for per-frame updates
-
-    // Source indicator rings (overlay meshes — no TSL compile cost)
-    sourceIndicatorOverlay = new SourceIndicatorOverlay(webgpuScene);
 
     _tlog('materials + scene setup');
     console.log('[WebGPU] Renderer, compute pipeline, texture pool, and terrain generator initialized');
@@ -1138,20 +1133,11 @@ async function main() {
             snowLine: controls.SnowLine,
             slopeRockAmount: controls.SlopeRockAmount,
           });
-          // Update water source indicator overlay meshes (terrain-conforming rings)
-          const simState = appContext.simulationState;
-          const heightSampler = (u: number, v: number) => {
-            const uv = vec2.fromValues(u, v);
-            return sampleHeightBilinear(uv, simState.simres, simState.heightMapCpuBuf);
-          };
-          sourceIndicatorOverlay?.update(
-            waterSources.map(s => ({
-              position: [s.position[0], s.position[1]] as [number, number],
-              size: s.size,
-            })),
-            heightSampler,
-            simState.simres,
-          );
+          // Pass water source positions for glow indicators (Loop in shader)
+          terrainMat.updateSources(waterSources.map(s => ({
+            position: [s.position[0], s.position[1]] as [number, number],
+            size: s.size,
+          })));
         }
         // Push per-frame control values to water material uniforms
         if (webgpuWaterMesh?.material) {

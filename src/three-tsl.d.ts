@@ -30,6 +30,9 @@ declare module 'three/tsl' {
     export function smoothstep(edge0: any, edge1: any, x: any): any;
     export function acos(x: any): any;
     export function reflect(incident: any, normal: any): any;
+    export function attribute(name: string, type?: string): any;
+    export function Loop(count: any, body: (ctx: { i: any }) => any): any;
+    export function int(value: any): any;
     export const positionLocal: any;
     export const positionWorld: any;
     export const normalLocal: any;
