@@ -1245,6 +1245,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     private evaporationPipeline: GPUComputePipeline | null = null;
     private evaporationBindGroupLayout: GPUBindGroupLayout | null = null;
 
+    // Lava compute pipelines
+    private lavaSourcePipeline: GPUComputePipeline | null = null;
+    private lavaSourceBindGroupLayout: GPUBindGroupLayout | null = null;
+    private lavaFluxPipeline: GPUComputePipeline | null = null;
+    private lavaFluxBindGroupLayout: GPUBindGroupLayout | null = null;
+    private lavaHeightVelPipeline: GPUComputePipeline | null = null;
+    private lavaHeightVelBindGroupLayout: GPUBindGroupLayout | null = null;
+    private lavaThermalErosionPipeline: GPUComputePipeline | null = null;
+    private lavaThermalErosionBindGroupLayout: GPUBindGroupLayout | null = null;
+    private lavaCoolingPipeline: GPUComputePipeline | null = null;
+    private lavaCoolingBindGroupLayout: GPUBindGroupLayout | null = null;
+    private lavaWaterInteractionPipeline: GPUComputePipeline | null = null;
+    private lavaWaterInteractionBindGroupLayout: GPUBindGroupLayout | null = null;
+
     /**
      * Flow (flux) compute pass.
      * Ports flow-frag.glsl to WGSL compute shader.
@@ -1978,19 +1992,942 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         device.queue.submit([commandEncoder.finish()]);
     }
 
+    // ===== LAVA COMPUTE PASSES =====
+
     /**
-     * Lava flow compute pass.
-     * Ports lava flow shaders to WGSL compute shader.
+     * Lava source injection pass.
+     * Handles lava brush (type 7) and persistent lava sources.
      */
-    lavaPass(
+    lavaSourcePass(
         texturePool: WebGPUTexturePool,
         uniforms: {
             simRes: number;
-            // ... lava physics constants
+            brushSize: number;
+            brushStrength: number;
+            brushType: number;
+            brushPos: [number, number];
+            brushPressed: number;
+            brushOperation: number;
+            emissionTemp: number;
+            sourceCount: number;
+            sourcePositions: Float32Array;
+            sourceSizes: Float32Array;
+            sourceStrengths: Float32Array;
+            time: number;
         }
     ): void {
-        // TODO: Implement lava passes (flow, update, terrain interaction)
-        console.warn('[ComputeNodePipeline] lavaPass not yet implemented');
+        const device = this.device;
+
+        if (!this.lavaSourcePipeline) {
+            const SHADER = `
+@group(0) @binding(0) var readLava: texture_2d<f32>;
+@group(0) @binding(1) var writeLava: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_BrushSize: f32,
+    u_BrushStrength: f32,
+    u_BrushType: i32,
+    u_BrushPos: vec2<f32>,
+    u_BrushPressed: i32,
+    u_BrushOperation: i32,
+    u_EmissionTemp: f32,
+    u_SourceCount: i32,
+    u_Time: f32,
+    _padding: f32,
+};
+
+struct SourceData {
+    positions: array<vec2<f32>, 16>,
+    sizes: array<f32, 16>,
+    strengths: array<f32, 16>,
+};
+
+@group(0) @binding(2) var<uniform> uniforms: Uniforms;
+@group(0) @binding(3) var<uniform> sources: SourceData;
+
+fn random(st: vec2<f32>) -> f32 {
+    return fract(sin(dot(st.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453123);
+}
+
+fn noise2D(st: vec2<f32>) -> f32 {
+    let i = floor(st);
+    let f = fract(st);
+    let a = random(i);
+    let b = random(i + vec2<f32>(1.0, 0.0));
+    let c = random(i + vec2<f32>(0.0, 1.0));
+    let d = random(i + vec2<f32>(1.0, 1.0));
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let texture_size = textureDimensions(readLava);
+    let uv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(texture_size);
+    let cur = textureLoad(readLava, vec2<i32>(global_id.xy), 0);
+
+    var addLava: f32 = 0.0;
+    var temperature = cur.g;
+    var viscosity = cur.b;
+    var crust = cur.a;
+
+    // Lava brush (type 7)
+    if (uniforms.u_BrushType == 7 && uniforms.u_BrushPressed == 1) {
+        let pdis = distance(uniforms.u_BrushPos, uv);
+        let brushRadius = 0.01 * uniforms.u_BrushSize;
+        if (pdis < brushRadius) {
+            let dens = max(0.0, (brushRadius - pdis * 0.5) / brushRadius);
+            let nv = noise2D(uv * 50.0 + vec2<f32>(sin(uniforms.u_Time * 5.0), cos(uniforms.u_Time * 15.0)));
+            let amount = 0.0006 * uniforms.u_BrushStrength * dens * 200.0;
+            if (uniforms.u_BrushOperation == 0) {
+                addLava = amount * (0.5 + 0.5 * nv);
+                if (addLava > 0.0 && cur.r + addLava > 0.001) {
+                    let totalLava = cur.r + addLava;
+                    temperature = (cur.g * cur.r + uniforms.u_EmissionTemp * addLava) / totalLava;
+                    crust = 0.0;
+                }
+            } else {
+                addLava = -amount;
+            }
+        }
+    }
+
+    // Persistent lava sources
+    for (var i: i32 = 0; i < uniforms.u_SourceCount; i++) {
+        let srcPos = sources.positions[i];
+        let pdis = distance(srcPos, uv);
+        let srcRadius = 0.01 * sources.sizes[i];
+        if (pdis < srcRadius) {
+            let dens = (srcRadius - pdis) / srcRadius;
+            let nv = noise2D(uv * 100.0 + vec2<f32>(sin(uniforms.u_Time * 3.0), cos(uniforms.u_Time * 7.0)));
+            let sourceAmount = 0.0006 * sources.strengths[i] * dens * 200.0 * (0.5 + 0.5 * nv);
+            addLava += sourceAmount;
+            if (sourceAmount > 0.0) {
+                let totalLava = max(cur.r + addLava, 0.001);
+                temperature = (temperature * (totalLava - sourceAmount) + uniforms.u_EmissionTemp * sourceAmount) / totalLava;
+                crust = max(0.0, crust - sourceAmount * 2.0);
+            }
+        }
+    }
+
+    let finalLava = max(cur.r + addLava, 0.0);
+    if (finalLava < 0.0001) {
+        temperature = 0.0;
+        viscosity = 0.0;
+        crust = 0.0;
+    }
+
+    textureStore(writeLava, vec2<i32>(global_id.xy), vec4<f32>(finalLava, temperature, viscosity, crust));
+}
+`;
+            this.lavaSourceBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createStorageTextureLayoutEntry(1, 'write-only'),
+                createUniformBufferLayoutEntry(2),
+                createUniformBufferLayoutEntry(3),
+            ]);
+            this.lavaSourcePipeline = this.createComputePipeline(
+                SHADER, 'main', this.lavaSourceBindGroupLayout
+            );
+        }
+
+        // Pack uniforms with DataView for mixed f32/i32 fields
+        const UNIFORM_SIZE = 48;
+        const buf = new ArrayBuffer(UNIFORM_SIZE);
+        const v = new DataView(buf);
+        const LE = true;
+        v.setFloat32(0, uniforms.simRes, LE);
+        v.setFloat32(4, uniforms.brushSize, LE);
+        v.setFloat32(8, uniforms.brushStrength, LE);
+        v.setInt32(12, uniforms.brushType, LE);
+        v.setFloat32(16, uniforms.brushPos[0], LE);
+        v.setFloat32(20, uniforms.brushPos[1], LE);
+        v.setInt32(24, uniforms.brushPressed, LE);
+        v.setInt32(28, uniforms.brushOperation, LE);
+        v.setFloat32(32, uniforms.emissionTemp, LE);
+        v.setInt32(36, uniforms.sourceCount, LE);
+        v.setFloat32(40, uniforms.time, LE);
+        v.setFloat32(44, 0.0, LE); // padding
+
+        let uniformBuffer = this.uniformBuffers.get('lavaSource');
+        if (!uniformBuffer || uniformBuffer.size < UNIFORM_SIZE) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, new Float32Array(buf), 'lavaSource-uniforms');
+            this.uniformBuffers.set('lavaSource', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, buf);
+        }
+
+        // Source data buffer (same layout as water sources)
+        const sourceData = new Float32Array(16 * 2 + 16 + 16);
+        sourceData.set(uniforms.sourcePositions, 0);
+        sourceData.set(uniforms.sourceSizes, 16 * 2);
+        sourceData.set(uniforms.sourceStrengths, 16 * 2 + 16);
+
+        let sourceBuffer = this.uniformBuffers.get('lavaSource-sources');
+        if (!sourceBuffer || sourceBuffer.size < sourceData.byteLength) {
+            if (sourceBuffer) sourceBuffer.destroy();
+            sourceBuffer = createUniformBuffer(device, sourceData, 'lavaSource-sources');
+            this.uniformBuffers.set('lavaSource-sources', sourceBuffer);
+        } else {
+            device.queue.writeBuffer(sourceBuffer, 0, sourceData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.lavaSourceBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readLavaTexture, 0),
+            createStorageTextureBinding(texturePool.writeLavaTexture, 1),
+            { binding: 2, resource: { buffer: uniformBuffer } },
+            { binding: 3, resource: { buffer: sourceBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.lavaSourcePipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
+    }
+
+    /**
+     * Lava flux compute pass.
+     * Calculates lava outflow flux with viscosity damping, yield stress, and crust breakout.
+     */
+    lavaFluxPass(
+        texturePool: WebGPUTexturePool,
+        uniforms: {
+            simRes: number;
+            pipeLen: number;
+            timestep: number;
+            pipeArea: number;
+            viscosityScale: number;
+            yieldStress: number;
+            crustStrength: number;
+        }
+    ): void {
+        const device = this.device;
+
+        if (!this.lavaFluxPipeline) {
+            const SHADER = `
+@group(0) @binding(0) var readTerrain: texture_2d<f32>;
+@group(0) @binding(1) var readLava: texture_2d<f32>;
+@group(0) @binding(2) var readLavaFlux: texture_2d<f32>;
+@group(0) @binding(3) var writeLavaFlux: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_PipeLen: f32,
+    u_timestep: f32,
+    u_PipeArea: f32,
+    u_ViscosityScale: f32,
+    u_YieldStress: f32,
+    u_CrustStrength: f32,
+    _padding: f32,
+};
+
+@group(0) @binding(4) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let texture_size = textureDimensions(readTerrain);
+    let uv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(texture_size);
+    let div = 1.0 / uniforms.u_SimRes;
+    let g = 0.80;
+    let coord = vec2<i32>(global_id.xy);
+
+    let curTerrain = textureLoad(readTerrain, coord, 0);
+    let curLava = textureLoad(readLava, coord, 0);
+    let curFlux = textureLoad(readLavaFlux, coord, 0);
+
+    let lavaHeight = curLava.r;
+    let temperature = curLava.g;
+    let viscosity_val = curLava.b;
+    let crustThickness = curLava.a;
+
+    // No lava → zero flux
+    if (lavaHeight < 0.0001) {
+        textureStore(writeLavaFlux, coord, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        return;
+    }
+
+    // Crust breakout check
+    let lavaPressure = lavaHeight * max(temperature, 0.1);
+    let crustResistance = crustThickness * uniforms.u_CrustStrength;
+    if (lavaPressure < crustResistance && crustThickness > 0.01) {
+        textureStore(writeLavaFlux, coord, curFlux * 0.5);
+        return;
+    }
+
+    // Surface height = terrain + water + lava
+    let surfaceHeight = curTerrain.r + curTerrain.g + lavaHeight;
+
+    let topT = textureLoad(readTerrain, coord + vec2<i32>(0, 1), 0);
+    let rightT = textureLoad(readTerrain, coord + vec2<i32>(1, 0), 0);
+    let bottomT = textureLoad(readTerrain, coord + vec2<i32>(0, -1), 0);
+    let leftT = textureLoad(readTerrain, coord + vec2<i32>(-1, 0), 0);
+
+    let topL = textureLoad(readLava, coord + vec2<i32>(0, 1), 0);
+    let rightL = textureLoad(readLava, coord + vec2<i32>(1, 0), 0);
+    let bottomL = textureLoad(readLava, coord + vec2<i32>(0, -1), 0);
+    let leftL = textureLoad(readLava, coord + vec2<i32>(-1, 0), 0);
+
+    let Htop = surfaceHeight - (topT.r + topT.g + topL.r);
+    let Hright = surfaceHeight - (rightT.r + rightT.g + rightL.r);
+    let Hbottom = surfaceHeight - (bottomT.r + bottomT.g + bottomL.r);
+    let Hleft = surfaceHeight - (leftT.r + leftT.g + leftL.r);
+
+    // Viscosity damping
+    let viscDamp = 1.0 / (1.0 + viscosity_val * uniforms.u_ViscosityScale);
+
+    var ftop = max(0.0, curFlux.r + (uniforms.u_timestep * g * uniforms.u_PipeArea * Htop) / uniforms.u_PipeLen) * viscDamp;
+    var fright = max(0.0, curFlux.g + (uniforms.u_timestep * g * uniforms.u_PipeArea * Hright) / uniforms.u_PipeLen) * viscDamp;
+    var fbottom = max(0.0, curFlux.b + (uniforms.u_timestep * g * uniforms.u_PipeArea * Hbottom) / uniforms.u_PipeLen) * viscDamp;
+    var fleft = max(0.0, curFlux.a + (uniforms.u_timestep * g * uniforms.u_PipeArea * Hleft) / uniforms.u_PipeLen) * viscDamp;
+
+    // Yield stress: thin lava on flat ground doesn't flow
+    let maxSlope = max(max(abs(Htop), abs(Hright)), max(abs(Hbottom), abs(Hleft)));
+    if (lavaHeight < uniforms.u_YieldStress && maxSlope < 0.01) {
+        ftop = 0.0;
+        fright = 0.0;
+        fbottom = 0.0;
+        fleft = 0.0;
+    }
+
+    // Conservation factor
+    let lavaOut = uniforms.u_timestep * (ftop + fright + fbottom + fleft);
+    let k = min(1.0, (lavaHeight * uniforms.u_PipeLen * uniforms.u_PipeLen) / max(lavaOut, 0.0001));
+    ftop *= k;
+    fright *= k;
+    fbottom *= k;
+    fleft *= k;
+
+    // Boundary conditions
+    if (uv.x <= div || uv.x >= 1.0 - 2.0 * div || uv.y <= div || uv.y >= 1.0 - 2.0 * div) {
+        ftop = 0.0;
+        fright = 0.0;
+        fbottom = 0.0;
+        fleft = 0.0;
+    }
+
+    textureStore(writeLavaFlux, coord, vec4<f32>(ftop, fright, fbottom, fleft));
+}
+`;
+            this.lavaFluxBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createSampledTextureLayoutEntry(2),
+                createStorageTextureLayoutEntry(3, 'write-only'),
+                createUniformBufferLayoutEntry(4),
+            ]);
+            this.lavaFluxPipeline = this.createComputePipeline(
+                SHADER, 'main', this.lavaFluxBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes, uniforms.pipeLen, uniforms.timestep, uniforms.pipeArea,
+            uniforms.viscosityScale, uniforms.yieldStress, uniforms.crustStrength, 0.0,
+        ]);
+
+        let uniformBuffer = this.uniformBuffers.get('lavaFlux');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'lavaFlux-uniforms');
+            this.uniformBuffers.set('lavaFlux', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.lavaFluxBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readTerrainTexture, 0),
+            createSampledTextureBinding(texturePool.readLavaTexture, 1),
+            createSampledTextureBinding(texturePool.readLavaFluxTexture, 2),
+            createStorageTextureBinding(texturePool.writeLavaFluxTexture, 3),
+            { binding: 4, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.lavaFluxPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
+    }
+
+    /**
+     * Lava height/velocity update pass.
+     * Computes flux divergence, updates lava height and velocity, advects temperature.
+     */
+    lavaHeightVelPass(
+        texturePool: WebGPUTexturePool,
+        uniforms: {
+            simRes: number;
+            pipeLen: number;
+            timestep: number;
+            pipeArea: number;
+            heatScale: number;
+            velAdvMag: number;
+        }
+    ): void {
+        const device = this.device;
+
+        if (!this.lavaHeightVelPipeline) {
+            const SHADER = `
+@group(0) @binding(0) var readLavaFlux: texture_2d<f32>;
+@group(0) @binding(1) var readLava: texture_2d<f32>;
+@group(0) @binding(2) var readLavaVel: texture_2d<f32>;
+@group(0) @binding(3) var writeLava: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(4) var writeLavaVel: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_PipeLen: f32,
+    u_timestep: f32,
+    u_PipeArea: f32,
+    u_HeatScale: f32,
+    u_VelAdvMag: f32,
+    _pad0: f32,
+    _pad1: f32,
+};
+
+@group(0) @binding(5) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let texture_size = textureDimensions(readLava);
+    let dim = vec2<f32>(f32(texture_size.x), f32(texture_size.y));
+    let curuv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+    let coord = vec2<i32>(global_id.xy);
+
+    let curFlux = textureLoad(readLavaFlux, coord, 0);
+    let cur = textureLoad(readLava, coord, 0);
+    let curVel = textureLoad(readLavaVel, coord, 0);
+
+    let topFlux = textureLoad(readLavaFlux, coord + vec2<i32>(0, 1), 0);
+    let rightFlux = textureLoad(readLavaFlux, coord + vec2<i32>(1, 0), 0);
+    let bottomFlux = textureLoad(readLavaFlux, coord + vec2<i32>(0, -1), 0);
+    let leftFlux = textureLoad(readLavaFlux, coord + vec2<i32>(-1, 0), 0);
+
+    let fin = topFlux.b + rightFlux.a + bottomFlux.r + leftFlux.g;
+    let fout = curFlux.r + curFlux.g + curFlux.b + curFlux.a;
+    let deltaVol = uniforms.u_timestep * (fin - fout) / (uniforms.u_PipeLen * uniforms.u_PipeLen);
+
+    let d1 = cur.r;
+    let d2 = max(d1 + deltaVol, 0.0);
+    let da = (d1 + d2) / 2.0;
+
+    var vel = vec2<f32>(
+        leftFlux.g - curFlux.a + curFlux.g - rightFlux.a,
+        bottomFlux.r - curFlux.b + curFlux.r - topFlux.b
+    ) / 2.0;
+
+    if (da <= 0.0001) {
+        vel = vec2<f32>(0.0);
+    } else {
+        vel = vel / (da * uniforms.u_PipeLen);
+    }
+
+    // Velocity advection
+    var useVel = curVel.xy / uniforms.u_SimRes * 0.5;
+    let oldLoc = curuv - useVel * uniforms.u_timestep;
+    let velDim = vec2<f32>(f32(textureDimensions(readLavaVel).x), f32(textureDimensions(readLavaVel).y));
+    let uvTex = oldLoc * velDim - 0.5;
+    let i0 = clamp(i32(floor(uvTex.x)), 0, i32(velDim.x) - 1);
+    let j0 = clamp(i32(floor(uvTex.y)), 0, i32(velDim.y) - 1);
+    let i1 = min(i0 + 1, i32(velDim.x) - 1);
+    let j1 = min(j0 + 1, i32(velDim.y) - 1);
+    let fx = fract(uvTex.x);
+    let fy = fract(uvTex.y);
+    let v00 = textureLoad(readLavaVel, vec2<i32>(i0, j0), 0);
+    let v10 = textureLoad(readLavaVel, vec2<i32>(i1, j0), 0);
+    let v01 = textureLoad(readLavaVel, vec2<i32>(i0, j1), 0);
+    let v11 = textureLoad(readLavaVel, vec2<i32>(i1, j1), 0);
+    let oldVel = mix(mix(v00.xy, v10.xy, fx), mix(v01.xy, v11.xy, fx), fy);
+    vel += oldVel * uniforms.u_VelAdvMag;
+
+    if (d2 < 0.01) {
+        vel = vec2<f32>(0.0);
+    }
+
+    let speed = length(vel);
+    let heat = clamp(speed * uniforms.u_HeatScale, 0.0, 1.0);
+
+    // Temperature advection: incoming lava carries its temperature
+    var newTemp = cur.g;
+    if (fin > 0.001 && d2 > 0.001) {
+        let topLava = textureLoad(readLava, coord + vec2<i32>(0, 1), 0);
+        let rightLava = textureLoad(readLava, coord + vec2<i32>(1, 0), 0);
+        let bottomLava = textureLoad(readLava, coord + vec2<i32>(0, -1), 0);
+        let leftLava = textureLoad(readLava, coord + vec2<i32>(-1, 0), 0);
+
+        let tempIn = (topFlux.b * topLava.g + rightFlux.a * rightLava.g +
+                      bottomFlux.r * bottomLava.g + leftFlux.g * leftLava.g) / max(fin, 0.001);
+        let inFrac = clamp(uniforms.u_timestep * fin / (d2 * uniforms.u_PipeLen * uniforms.u_PipeLen), 0.0, 0.5);
+        newTemp = mix(cur.g, tempIn, inFrac);
+    }
+
+    textureStore(writeLava, coord, vec4<f32>(d2, newTemp, cur.b, cur.a));
+    textureStore(writeLavaVel, coord, vec4<f32>(vel.x, vel.y, speed, heat));
+}
+`;
+            this.lavaHeightVelBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createSampledTextureLayoutEntry(2),
+                createStorageTextureLayoutEntry(3, 'write-only'),
+                createStorageTextureLayoutEntry(4, 'write-only'),
+                createUniformBufferLayoutEntry(5),
+            ]);
+            this.lavaHeightVelPipeline = this.createComputePipeline(
+                SHADER, 'main', this.lavaHeightVelBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes, uniforms.pipeLen, uniforms.timestep, uniforms.pipeArea,
+            uniforms.heatScale, uniforms.velAdvMag, 0.0, 0.0,
+        ]);
+
+        let uniformBuffer = this.uniformBuffers.get('lavaHeightVel');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'lavaHeightVel-uniforms');
+            this.uniformBuffers.set('lavaHeightVel', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.lavaHeightVelBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readLavaFluxTexture, 0),
+            createSampledTextureBinding(texturePool.readLavaTexture, 1),
+            createSampledTextureBinding(texturePool.readLavaVelTexture, 2),
+            createStorageTextureBinding(texturePool.writeLavaTexture, 3),
+            createStorageTextureBinding(texturePool.writeLavaVelTexture, 4),
+            { binding: 5, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.lavaHeightVelPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
+    }
+
+    /**
+     * Lava thermal erosion pass.
+     * Hot flowing lava erodes terrain beneath it. Rock resists unless above melt threshold.
+     */
+    lavaThermalErosionPass(
+        texturePool: WebGPUTexturePool,
+        uniforms: {
+            simRes: number;
+            thermalErosionRate: number;
+            Ks: number;
+            rockMeltThreshold: number;
+        }
+    ): void {
+        const device = this.device;
+
+        if (!this.lavaThermalErosionPipeline) {
+            const SHADER = `
+@group(0) @binding(0) var readLava: texture_2d<f32>;
+@group(0) @binding(1) var readLavaVel: texture_2d<f32>;
+@group(0) @binding(2) var readTerrain: texture_2d<f32>;
+@group(0) @binding(3) var writeTerrain: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_ThermalErosionRate: f32,
+    u_Ks: f32,
+    u_RockMeltThreshold: f32,
+};
+
+@group(0) @binding(4) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let lava = textureLoad(readLava, coord, 0);
+    let lavaVel = textureLoad(readLavaVel, coord, 0);
+    let terrain = textureLoad(readTerrain, coord, 0);
+
+    var height = terrain.r;
+    var water = terrain.g;
+    var rock = terrain.b;
+    var baseRock = terrain.a;
+
+    let lavaHeight = lava.r;
+    let temperature = lava.g;
+    let speed = lavaVel.b;
+
+    if (lavaHeight > 0.01 && temperature > 0.1) {
+        var erosionRate = uniforms.u_ThermalErosionRate * uniforms.u_Ks * temperature * speed;
+
+        if (rock > 0.1) {
+            let rockStrength = clamp((rock - 0.1) / 0.9, 0.0, 1.0);
+            if (temperature > uniforms.u_RockMeltThreshold) {
+                erosionRate *= (1.0 - rockStrength * 0.7);
+                rock = max(0.0, rock - erosionRate * 0.01);
+            } else {
+                erosionRate *= (1.0 - rockStrength * 0.95);
+            }
+        }
+
+        height = max(height - erosionRate, -0.10);
+    }
+
+    textureStore(writeTerrain, coord, vec4<f32>(height, water, rock, baseRock));
+}
+`;
+            this.lavaThermalErosionBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createSampledTextureLayoutEntry(2),
+                createStorageTextureLayoutEntry(3, 'write-only'),
+                createUniformBufferLayoutEntry(4),
+            ]);
+            this.lavaThermalErosionPipeline = this.createComputePipeline(
+                SHADER, 'main', this.lavaThermalErosionBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes, uniforms.thermalErosionRate, uniforms.Ks, uniforms.rockMeltThreshold,
+        ]);
+
+        let uniformBuffer = this.uniformBuffers.get('lavaThermalErosion');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'lavaThermalErosion-uniforms');
+            this.uniformBuffers.set('lavaThermalErosion', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.lavaThermalErosionBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readLavaTexture, 0),
+            createSampledTextureBinding(texturePool.readLavaVelTexture, 1),
+            createSampledTextureBinding(texturePool.readTerrainTexture, 2),
+            createStorageTextureBinding(texturePool.writeTerrainTexture, 3),
+            { binding: 4, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.lavaThermalErosionPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
+    }
+
+    /**
+     * Lava cooling and solidification pass.
+     * Temperature decays, viscosity increases, crust grows, lava solidifies into terrain+rock.
+     */
+    lavaCoolingPass(
+        texturePool: WebGPUTexturePool,
+        uniforms: {
+            simRes: number;
+            coolingRate: number;
+            proportionalCooling: number;
+            solidificationThreshold: number;
+            rockFraction: number;
+            crustGrowthRate: number;
+            waterEvapRate: number;
+            timestep: number;
+        }
+    ): void {
+        const device = this.device;
+
+        if (!this.lavaCoolingPipeline) {
+            const SHADER = `
+@group(0) @binding(0) var readLava: texture_2d<f32>;
+@group(0) @binding(1) var readTerrain: texture_2d<f32>;
+@group(0) @binding(2) var writeLava: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(3) var writeTerrain: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_CoolingRate: f32,
+    u_ProportionalCooling: f32,
+    u_SolidificationThreshold: f32,
+    u_RockFraction: f32,
+    u_CrustGrowthRate: f32,
+    u_WaterEvapRate: f32,
+    u_timestep: f32,
+};
+
+@group(0) @binding(4) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let lava = textureLoad(readLava, coord, 0);
+    let terrain = textureLoad(readTerrain, coord, 0);
+
+    var lavaHeight = lava.r;
+    var temperature = lava.g;
+    var viscosity = lava.b;
+    var crustThickness = lava.a;
+    var terrainHeight = terrain.r;
+    var water = terrain.g;
+    var rock = terrain.b;
+    var baseRock = terrain.a;
+
+    if (lavaHeight < 0.0001) {
+        textureStore(writeLava, coord, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        textureStore(writeTerrain, coord, terrain);
+        return;
+    }
+
+    // Temperature decay: constant + proportional to surface area
+    let surfaceAreaFactor = 1.0 + uniforms.u_ProportionalCooling / max(lavaHeight, 0.001);
+    let crustInsulation = 1.0 / (1.0 + crustThickness * 5.0);
+    temperature -= uniforms.u_CoolingRate * uniforms.u_WaterEvapRate * surfaceAreaFactor * crustInsulation * uniforms.u_timestep;
+    temperature = max(temperature, 0.0);
+
+    // Viscosity from temperature
+    viscosity = 1.0 + uniforms.u_SimRes * 0.001 * (1.0 - temperature) * (1.0 - temperature);
+
+    // Crust growth
+    if (temperature < 0.8) {
+        crustThickness += uniforms.u_CrustGrowthRate * (1.0 - temperature) * uniforms.u_timestep;
+        crustThickness = min(crustThickness, lavaHeight * 0.5);
+    }
+
+    // Solidification
+    if (temperature < uniforms.u_SolidificationThreshold) {
+        let solidRate = (uniforms.u_SolidificationThreshold - temperature) / uniforms.u_SolidificationThreshold;
+        let solidAmount = min(lavaHeight * solidRate * uniforms.u_timestep * 2.0, lavaHeight);
+
+        terrainHeight += solidAmount;
+        rock = min(1.0, rock + solidAmount * uniforms.u_RockFraction);
+        if (rock > 0.1 && baseRock < 0.001) {
+            baseRock = terrainHeight;
+        }
+        lavaHeight -= solidAmount;
+
+        if (lavaHeight < 0.001) {
+            crustThickness = 0.0;
+            temperature = 0.0;
+            viscosity = 0.0;
+            lavaHeight = 0.0;
+        }
+    }
+
+    textureStore(writeLava, coord, vec4<f32>(lavaHeight, temperature, viscosity, crustThickness));
+    textureStore(writeTerrain, coord, vec4<f32>(terrainHeight, water, rock, baseRock));
+}
+`;
+            this.lavaCoolingBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createStorageTextureLayoutEntry(2, 'write-only'),
+                createStorageTextureLayoutEntry(3, 'write-only'),
+                createUniformBufferLayoutEntry(4),
+            ]);
+            this.lavaCoolingPipeline = this.createComputePipeline(
+                SHADER, 'main', this.lavaCoolingBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes, uniforms.coolingRate, uniforms.proportionalCooling,
+            uniforms.solidificationThreshold, uniforms.rockFraction, uniforms.crustGrowthRate,
+            uniforms.waterEvapRate, uniforms.timestep,
+        ]);
+
+        let uniformBuffer = this.uniformBuffers.get('lavaCooling');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'lavaCooling-uniforms');
+            this.uniformBuffers.set('lavaCooling', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.lavaCoolingBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readLavaTexture, 0),
+            createSampledTextureBinding(texturePool.readTerrainTexture, 1),
+            createStorageTextureBinding(texturePool.writeLavaTexture, 2),
+            createStorageTextureBinding(texturePool.writeTerrainTexture, 3),
+            { binding: 4, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.lavaCoolingPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
+    }
+
+    /**
+     * Lava-water interaction pass.
+     * Contact solidification, water evaporation, and heat radius effects.
+     */
+    lavaWaterInteractionPass(
+        texturePool: WebGPUTexturePool,
+        uniforms: {
+            simRes: number;
+            heatRadius: number;
+            coolingRate: number;
+            solidificationThreshold: number;
+            rockFraction: number;
+            waterEvapRate: number;
+        }
+    ): void {
+        const device = this.device;
+
+        if (!this.lavaWaterInteractionPipeline) {
+            const SHADER = `
+@group(0) @binding(0) var readLava: texture_2d<f32>;
+@group(0) @binding(1) var readTerrain: texture_2d<f32>;
+@group(0) @binding(2) var writeLava: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(3) var writeTerrain: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_HeatRadius: i32,
+    u_CoolingRate: f32,
+    u_SolidificationThreshold: f32,
+    u_RockFraction: f32,
+    u_WaterEvapRate: f32,
+    _pad0: f32,
+    _pad1: f32,
+};
+
+@group(0) @binding(4) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let coord = vec2<i32>(global_id.xy);
+    let texture_size = textureDimensions(readTerrain);
+    let lava = textureLoad(readLava, coord, 0);
+    let terrain = textureLoad(readTerrain, coord, 0);
+
+    var lavaHeight = lava.r;
+    var temperature = lava.g;
+    var viscosity = lava.b;
+    var crustThickness = lava.a;
+    var terrainHeight = terrain.r;
+    var water = terrain.g;
+    var rock = terrain.b;
+    var baseRock = terrain.a;
+
+    // Direct contact: lava and water in same cell
+    if (lavaHeight > 0.001 && water > 0.001) {
+        let contactAmount = min(water, lavaHeight * 0.1) * 0.5;
+        water = max(0.0, water - contactAmount);
+        temperature = max(0.0, temperature - contactAmount * 10.0);
+
+        if (temperature < uniforms.u_SolidificationThreshold * 2.0) {
+            let solidAmount = min(lavaHeight * 0.1, lavaHeight);
+            terrainHeight += solidAmount;
+            rock = min(1.0, rock + solidAmount * uniforms.u_RockFraction);
+            if (rock > 0.1 && baseRock < 0.001) {
+                baseRock = terrainHeight;
+            }
+            lavaHeight = max(0.0, lavaHeight - solidAmount);
+            crustThickness = max(crustThickness, solidAmount);
+        }
+    }
+
+    // Heat radius: nearby lava heats this cell's water
+    if (water > 0.001) {
+        var nearbyHeat: f32 = 0.0;
+        let radius = uniforms.u_HeatRadius;
+        for (var dy: i32 = -radius; dy <= radius; dy++) {
+            for (var dx: i32 = -radius; dx <= radius; dx++) {
+                if (dx == 0 && dy == 0) { continue; }
+                let nc = coord + vec2<i32>(dx, dy);
+                if (nc.x >= 0 && nc.x < i32(texture_size.x) && nc.y >= 0 && nc.y < i32(texture_size.y)) {
+                    let neighborLava = textureLoad(readLava, nc, 0);
+                    if (neighborLava.r > 0.01) {
+                        let dist = length(vec2<f32>(f32(dx), f32(dy)));
+                        nearbyHeat += neighborLava.g * neighborLava.r / (1.0 + dist);
+                    }
+                }
+            }
+        }
+        if (nearbyHeat > 0.01) {
+            water = max(0.0, water - nearbyHeat * uniforms.u_WaterEvapRate * 0.5);
+        }
+    }
+
+    if (lavaHeight < 0.0001) {
+        lavaHeight = 0.0;
+        temperature = 0.0;
+        viscosity = 0.0;
+        crustThickness = 0.0;
+    }
+
+    textureStore(writeLava, coord, vec4<f32>(lavaHeight, temperature, viscosity, crustThickness));
+    textureStore(writeTerrain, coord, vec4<f32>(terrainHeight, water, rock, baseRock));
+}
+`;
+            this.lavaWaterInteractionBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createStorageTextureLayoutEntry(2, 'write-only'),
+                createStorageTextureLayoutEntry(3, 'write-only'),
+                createUniformBufferLayoutEntry(4),
+            ]);
+            this.lavaWaterInteractionPipeline = this.createComputePipeline(
+                SHADER, 'main', this.lavaWaterInteractionBindGroupLayout
+            );
+        }
+
+        // Pack with DataView for mixed f32/i32
+        const UNIFORM_SIZE = 32;
+        const buf = new ArrayBuffer(UNIFORM_SIZE);
+        const v = new DataView(buf);
+        const LE = true;
+        v.setFloat32(0, uniforms.simRes, LE);
+        v.setInt32(4, uniforms.heatRadius, LE);
+        v.setFloat32(8, uniforms.coolingRate, LE);
+        v.setFloat32(12, uniforms.solidificationThreshold, LE);
+        v.setFloat32(16, uniforms.rockFraction, LE);
+        v.setFloat32(20, uniforms.waterEvapRate, LE);
+        v.setFloat32(24, 0.0, LE);
+        v.setFloat32(28, 0.0, LE);
+
+        let uniformBuffer = this.uniformBuffers.get('lavaWaterInteraction');
+        if (!uniformBuffer || uniformBuffer.size < UNIFORM_SIZE) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, new Float32Array(buf), 'lavaWaterInteraction-uniforms');
+            this.uniformBuffers.set('lavaWaterInteraction', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, buf);
+        }
+
+        const bindGroup = this.createBindGroup(this.lavaWaterInteractionBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readLavaTexture, 0),
+            createSampledTextureBinding(texturePool.readTerrainTexture, 1),
+            createStorageTextureBinding(texturePool.writeLavaTexture, 2),
+            createStorageTextureBinding(texturePool.writeTerrainTexture, 3),
+            { binding: 4, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.lavaWaterInteractionPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -2029,5 +2966,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         this.averageBindGroupLayout = null;
         this.evaporationPipeline = null;
         this.evaporationBindGroupLayout = null;
+        this.lavaSourcePipeline = null;
+        this.lavaSourceBindGroupLayout = null;
+        this.lavaFluxPipeline = null;
+        this.lavaFluxBindGroupLayout = null;
+        this.lavaHeightVelPipeline = null;
+        this.lavaHeightVelBindGroupLayout = null;
+        this.lavaThermalErosionPipeline = null;
+        this.lavaThermalErosionBindGroupLayout = null;
+        this.lavaCoolingPipeline = null;
+        this.lavaCoolingBindGroupLayout = null;
+        this.lavaWaterInteractionPipeline = null;
+        this.lavaWaterInteractionBindGroupLayout = null;
     }
 }

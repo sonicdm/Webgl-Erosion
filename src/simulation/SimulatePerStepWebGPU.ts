@@ -8,6 +8,7 @@ import { WebGPUTexturePool } from './WebGPUTexturePool';
 import { AppContext } from '../app/context';
 import type { IAppControls } from '../app/controls/types';
 import { getWaterSourceCount, waterSources, MAX_WATER_SOURCES } from '../utils/water-sources';
+import { getLavaSourceCount, lavaSources, MAX_LAVA_SOURCES } from '../utils/lava-sources';
 
 /**
  * Execute one complete simulation step using WebGPU compute shaders.
@@ -170,9 +171,104 @@ export function SimulatePerStepWebGPU(
     });
     texturePool.swapTerrainTextures();
 
-    // 9. Lava Flow (if enabled)
-    // TODO: Implement when lavaPass is complete
-    // computePipeline.lavaPass(texturePool, { ... });
+    // 9. Lava Simulation (if enabled) — 6 sub-passes gated by lavaEnabled
+    if (controls.lavaEnabled) {
+        // Prepare lava source buffers
+        const lavaSrcBuffers = appContext.simulationState.getLavaSourceBuffers(MAX_LAVA_SOURCES);
+        const lavaSourceCount = getLavaSourceCount();
+        for (let i = 0; i < MAX_LAVA_SOURCES; i++) {
+            if (i < lavaSources.length) {
+                lavaSrcBuffers.positions[i * 2] = lavaSources[i].position[0];
+                lavaSrcBuffers.positions[i * 2 + 1] = lavaSources[i].position[1];
+                lavaSrcBuffers.sizes[i] = lavaSources[i].size;
+                lavaSrcBuffers.strengths[i] = lavaSources[i].strength;
+            } else {
+                lavaSrcBuffers.positions[i * 2] = 0.0;
+                lavaSrcBuffers.positions[i * 2 + 1] = 0.0;
+                lavaSrcBuffers.sizes[i] = 0.0;
+                lavaSrcBuffers.strengths[i] = 0.0;
+            }
+        }
+
+        // 9a. Lava Source Injection
+        computePipeline.lavaSourcePass(texturePool, {
+            simRes: simres,
+            brushSize: controls.brushSize,
+            brushStrength: controls.brushStrenth,
+            brushType: controls.brushType,
+            brushPos: brushState?.brushPos || [0, 0],
+            brushPressed: controls.brushPressed ? 1 : 0,
+            brushOperation: controls.brushOperation,
+            emissionTemp: controls.lavaEmissionTemp,
+            sourceCount: lavaSourceCount,
+            sourcePositions: lavaSrcBuffers.positions,
+            sourceSizes: lavaSrcBuffers.sizes,
+            sourceStrengths: lavaSrcBuffers.strengths,
+            time: timer,
+        });
+        texturePool.swapLavaTextures();
+
+        // 9b. Lava Flux
+        computePipeline.lavaFluxPass(texturePool, {
+            simRes: simres,
+            pipeLen: controls.pipelen,
+            timestep: controls.timestep,
+            pipeArea: controls.pipeAra,
+            viscosityScale: controls.lavaViscosityScale,
+            yieldStress: controls.lavaYieldStress,
+            crustStrength: controls.lavaCrustStrength,
+        });
+        texturePool.swapLavaFluxTextures();
+
+        // 9c. Lava Height/Velocity Update
+        computePipeline.lavaHeightVelPass(texturePool, {
+            simRes: simres,
+            pipeLen: controls.pipelen,
+            timestep: controls.timestep,
+            pipeArea: controls.pipeAra,
+            heatScale: controls.lavaHeatScale,
+            velAdvMag: controls.VelocityAdvectionMag * 0.5,
+        });
+        texturePool.swapLavaTextures();
+        texturePool.swapLavaVelTextures();
+
+        // 9d. Lava Thermal Erosion
+        computePipeline.lavaThermalErosionPass(texturePool, {
+            simRes: simres,
+            thermalErosionRate: controls.lavaThermalErosionRate,
+            Ks: controls.Ks,
+            rockMeltThreshold: controls.lavaRockMeltThreshold,
+        });
+        texturePool.swapTerrainTextures();
+
+        // 9e. Lava Cooling & Solidification
+        computePipeline.lavaCoolingPass(texturePool, {
+            simRes: simres,
+            coolingRate: controls.lavaCoolingRate,
+            proportionalCooling: controls.lavaProportionalCooling,
+            solidificationThreshold: controls.lavaSolidificationThreshold,
+            rockFraction: controls.lavaRockFraction,
+            crustGrowthRate: controls.lavaCrustGrowthRate,
+            waterEvapRate: controls.EvaporationConstant,
+            timestep: controls.timestep,
+        });
+        texturePool.swapLavaTextures();
+        texturePool.swapTerrainTextures();
+
+        // 9f. Lava-Water Interaction
+        if (controls.lavaWaterInteraction) {
+            computePipeline.lavaWaterInteractionPass(texturePool, {
+                simRes: simres,
+                heatRadius: controls.lavaHeatRadius,
+                coolingRate: controls.lavaCoolingRate,
+                solidificationThreshold: controls.lavaSolidificationThreshold,
+                rockFraction: controls.lavaRockFraction,
+                waterEvapRate: controls.EvaporationConstant,
+            });
+            texturePool.swapLavaTextures();
+            texturePool.swapTerrainTextures();
+        }
+    }
 
     // 10. Average Smoothing (MRT: 2 outputs)
     computePipeline.averagePass(texturePool, {

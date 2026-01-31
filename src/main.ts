@@ -29,6 +29,8 @@ import { WebGPUSimulationRunner } from './app/runtime/WebGPUSimulationRunner';
 import { Scene, Mesh, PlaneGeometry, SphereGeometry } from 'three';
 import { TerrainMaterialNode } from './rendering/webgpu/materials/TerrainMaterialNode';
 import { WaterMaterialNode } from './rendering/webgpu/materials/WaterMaterialNode';
+import { LavaMaterialNode } from './rendering/webgpu/materials/LavaMaterialNode';
+import { lavaSources } from './utils/lava-sources';
 import { SkyMaterialNode } from './rendering/webgpu/materials/SkyMaterialNode';
 import {
   createPoolSyncTextures,
@@ -156,6 +158,7 @@ async function main() {
   let webgpuScene: Scene | null = null;
   let webgpuTerrainMesh: Mesh | null = null;
   let webgpuWaterMesh: Mesh | null = null;
+  let webgpuLavaMesh: Mesh | null = null;
   let webgpuPoolSyncTextures: PoolSyncTextures | null = null;
   let webgpuSceneCompileDone = false;
   let webgpuSceneCompileStarted = false;
@@ -214,6 +217,8 @@ async function main() {
       terrainFluxMap: webgpuPoolSyncTextures.terrainFluxMap,
       maxSlippageMap: webgpuPoolSyncTextures.maxSlippageMap,
       sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
+      lavaMap: webgpuPoolSyncTextures.lavaMap,
+      lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
       simres,
       maxHeight: (controls?.TerrainHeight ?? 2) * 120,
     });
@@ -235,6 +240,21 @@ async function main() {
     webgpuWaterMesh.renderOrder = 1;
     webgpuWaterMesh.visible = true; // Water visible — opacity driven by water level in heightmap G channel
     webgpuScene.add(webgpuWaterMesh);
+
+    // Lava plane: transparent, renders after water; displaced by terrain+water+lava height
+    const webgpuLavaGeometry = new PlaneGeometry(1, 1, webgpuTerrainSegments, webgpuTerrainSegments);
+    webgpuLavaGeometry.rotateX(-Math.PI / 2);
+    const webgpuLavaMaterial = new LavaMaterialNode({
+      heightmap: webgpuPoolSyncTextures.heightmap,
+      lavaMap: webgpuPoolSyncTextures.lavaMap,
+      lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
+      simres,
+    });
+    webgpuLavaMesh = new Mesh(webgpuLavaGeometry, webgpuLavaMaterial as any);
+    webgpuLavaMesh.frustumCulled = true;
+    webgpuLavaMesh.renderOrder = 2;
+    webgpuLavaMesh.visible = true;
+    webgpuScene.add(webgpuLavaMesh);
 
     // Sky sphere: large inverted sphere with gradient sky + sun disc
     const skyGeometry = new SphereGeometry(100, 32, 16);
@@ -673,6 +693,8 @@ async function main() {
                             terrainFluxMap: webgpuPoolSyncTextures.terrainFluxMap,
                             maxSlippageMap: webgpuPoolSyncTextures.maxSlippageMap,
                             sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
+                            lavaMap: webgpuPoolSyncTextures.lavaMap,
+                            lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
                             simres: newRes,
                             maxHeight: (controls?.TerrainHeight ?? 2) * 120,
                         });
@@ -687,7 +709,17 @@ async function main() {
                         });
                         webgpuWaterMesh.material = newWaterMat as any;
                     }
-                    
+                    if (webgpuLavaMesh) {
+                        (webgpuLavaMesh.material as any)?.dispose();
+                        const newLavaMat = new LavaMaterialNode({
+                            heightmap: webgpuPoolSyncTextures.heightmap,
+                            lavaMap: webgpuPoolSyncTextures.lavaMap,
+                            lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
+                            simres: newRes,
+                        });
+                        webgpuLavaMesh.material = newLavaMat as any;
+                    }
+
                     // Clear old BVH and geometry when resolution changes (they're invalid for new resolution)
                     if (appContext.terrainState.terrainBVH) {
                         appContext.terrainState.setTerrainBVH(null);
@@ -1146,12 +1178,23 @@ async function main() {
             position: [s.position[0], s.position[1]] as [number, number],
             size: s.size,
           })));
+          terrainMat.updateLavaSources(lavaSources.map(s => ({
+            position: [s.position[0], s.position[1]] as [number, number],
+            size: s.size,
+          })));
         }
         // Push per-frame control values to water material uniforms
         if (webgpuWaterMesh?.material) {
           const waterMat = webgpuWaterMesh.material as unknown as WaterMaterialNode;
           waterMat.updateUniforms({
             waterTransparency: controls.WaterTransparency,
+            lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
+          });
+        }
+        // Push per-frame control values to lava material uniforms
+        if (webgpuLavaMesh?.material) {
+          const lavaMat = webgpuLavaMesh.material as unknown as LavaMaterialNode;
+          lavaMat.updateUniforms({
             lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
           });
         }

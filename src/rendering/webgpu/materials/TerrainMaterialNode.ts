@@ -1,6 +1,6 @@
-import { Vector2, Vector3, DataTexture, FloatType, RGBAFormat, NearestFilter } from 'three';
+import { Texture, Vector2, Vector3, DataTexture, FloatType, RGBAFormat, NearestFilter } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, pow, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { abs, clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, pow, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -21,6 +21,10 @@ export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
     showFlowTrace?: boolean;
     /** Show sediment trace overlay (sediment deposits on terrain) */
     showSedimentTrace?: boolean;
+    /** Lava map texture (R=lavaHeight, G=temperature, B=viscosity, A=crustThickness) */
+    lavaMap?: Texture;
+    /** Lava velocity map texture (R=velX, G=velY, B=speed, A=heat) */
+    lavaVelocityMap?: Texture;
 }
 
 /**
@@ -54,6 +58,9 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
     /** Water source data packed into a 16×1 RGBA32F DataTexture (R=u, G=v, B=size, A=active) */
     private sourceDataTexture: DataTexture;
     private sourceCountUniform: any;
+    /** Lava source data packed into a 16×1 RGBA32F DataTexture (R=u, G=v, B=size, A=active) */
+    private lavaSourceDataTexture: DataTexture;
+    private lavaSourceCountUniform: any;
     private inputs: TerrainMaterialNodeInputs;
 
     constructor(
@@ -90,6 +97,15 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         this.sourceDataTexture.minFilter = NearestFilter;
         this.sourceDataTexture.needsUpdate = true;
         this.sourceCountUniform = uniform(0);
+
+        // 16×1 RGBA32F texture packing lava source data: R=u, G=v, B=size, A=active(0/1)
+        this.lavaSourceDataTexture = new DataTexture(
+            new Float32Array(MAX_SOURCES * 4), MAX_SOURCES, 1, RGBAFormat, FloatType
+        );
+        this.lavaSourceDataTexture.magFilter = NearestFilter;
+        this.lavaSourceDataTexture.minFilter = NearestFilter;
+        this.lavaSourceDataTexture.needsUpdate = true;
+        this.lavaSourceCountUniform = uniform(0);
 
         this.buildGraph(this.inputs);
     }
@@ -139,6 +155,7 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             4: [0.5, 0.8, 1.0],                      // smooth: cyan
             5: [1.0, 1.0, 0.3],                      // flatten: yellow
             6: [0.3, 1.0, 0.3],                      // slope: green
+            7: [0.88, 0.34, 0.13],                    // lava: orange
         };
         const c = colors[brushType] ?? [0, 0, 0];
         this.brushColorUniform.value.set(c[0], c[1], c[2]);
@@ -165,6 +182,29 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         }
         this.sourceDataTexture.needsUpdate = true;
         this.sourceCountUniform.value = count;
+    }
+
+    /** Update lava source indicator data each frame (no graph rebuild). */
+    updateLavaSources(sources: { position: [number, number]; size: number }[]): void {
+        const data = this.lavaSourceDataTexture.image.data as Float32Array;
+        const max = data.length / 4; // 16
+        const count = Math.min(sources.length, max);
+        for (let i = 0; i < max; i++) {
+            const base = i * 4;
+            if (i < count) {
+                data[base] = sources[i].position[0];     // R = u
+                data[base + 1] = sources[i].position[1]; // G = v
+                data[base + 2] = sources[i].size;         // B = size
+                data[base + 3] = 1;                       // A = active
+            } else {
+                data[base] = -10;
+                data[base + 1] = -10;
+                data[base + 2] = 0;
+                data[base + 3] = 0;
+            }
+        }
+        this.lavaSourceDataTexture.needsUpdate = true;
+        this.lavaSourceCountUniform.value = count;
     }
 
     /** Update per-frame uniforms from controls (no graph rebuild). */
@@ -282,6 +322,18 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             litColor = litColor.add(sourceGlowCol.mul(0.5).mul(srcGlow));
         }
 
+        // --- Lava source indicators (orange glow, unrolled over DataTexture) ---
+        const lavaSourceGlowCol = vec3(1.0, 0.6, 0.1);
+        const lavaSrcTex = texture(this.lavaSourceDataTexture);
+        for (let i = 0; i < MAX_SOURCES; i++) {
+            const lsUv = vec2((i + 0.5) / MAX_SOURCES, 0.5);
+            const lsData = lavaSrcTex.uv(lsUv);
+            const lsDist = length(sampling.uv.sub(vec2(lsData.x, lsData.y)));
+            const lsRadius = float(0.01).mul(lsData.z).max(float(0.0001));
+            const lsGlow = float(1).sub(lsDist.div(lsRadius)).clamp(0, 1).mul(lsData.w);
+            litColor = litColor.add(lavaSourceGlowCol.mul(0.5).mul(lsGlow));
+        }
+
         // --- Flow trace overlay ---
         const flowTraceEnabled = this.showFlowTraceUniform.equal(1);
         const sval = sampling.sedimentBlend;
@@ -320,6 +372,21 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const debugFlow = vec3(sampling.sedimentBlend, sampling.sedimentBlend, sampling.sedimentBlend).mul(float(300));
         const debugRock = vec3(sampling.rock, sampling.rock, sampling.rock);
 
+        // Lava debug views (sample lava textures if available)
+        const curUv = sampling.uv;
+        let debugLavaHeight = vec3(0, 0, 0);
+        let debugLavaTemp = vec3(0, 0, 0);
+        let debugLavaVel = vec3(0, 0, 0);
+        if (inputs.lavaMap) {
+            const lavaData = texture(inputs.lavaMap, curUv);
+            debugLavaHeight = vec3(lavaData.x.mul(5), lavaData.x.mul(2), lavaData.x);  // blue-white ramp
+            debugLavaTemp = vec3(lavaData.y, lavaData.y.mul(0.3), float(0));  // red-orange heat
+        }
+        if (inputs.lavaVelocityMap) {
+            const lavaVelData = texture(inputs.lavaVelocityMap, curUv);
+            debugLavaVel = abs(vec3(lavaVelData.x, lavaVelData.y, lavaVelData.z)).div(5);
+        }
+
         const finalColor = dbg.equal(3).select(debugTerrain,
             dbg.equal(1).select(debugSediment,
                 dbg.equal(2).select(debugVelocity,
@@ -327,7 +394,10 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
                         dbg.equal(5).select(debugTerrainFlux,
                             dbg.equal(7).select(debugFlow,
                                 dbg.equal(10).select(debugRock,
-                                    litColor)))))));
+                                    dbg.equal(11).select(debugLavaHeight,
+                                        dbg.equal(12).select(debugLavaTemp,
+                                            dbg.equal(13).select(debugLavaVel,
+                                                litColor))))))))));
 
         this.colorNode = finalColor;
     }

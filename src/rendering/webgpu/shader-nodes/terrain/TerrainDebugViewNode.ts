@@ -14,6 +14,9 @@ export enum TerrainDebugMode {
     Normal = 8,
     VelocityMagnitude = 9,
     RockMaterial = 10,
+    LavaHeight = 11,
+    LavaTemperature = 12,
+    LavaVelocity = 13,
 }
 
 export interface TerrainDebugViewInputs {
