@@ -1138,13 +1138,20 @@ async function main() {
             snowLine: controls.SnowLine,
             slopeRockAmount: controls.SlopeRockAmount,
           });
-          // Update water source indicator overlay meshes
+          // Update water source indicator overlay meshes (terrain-conforming rings)
           const simState = appContext.simulationState;
-          sourceIndicatorOverlay?.update(waterSources.map(s => {
-            const uvPos: [number, number] = [s.position[0], s.position[1]];
-            const h = sampleHeightBilinear(s.position, simState.simres, simState.heightMapCpuBuf);
-            return { position: uvPos, size: s.size, worldY: h / simState.simres };
-          }));
+          const heightSampler = (u: number, v: number) => {
+            const uv = vec2.fromValues(u, v);
+            return sampleHeightBilinear(uv, simState.simres, simState.heightMapCpuBuf);
+          };
+          sourceIndicatorOverlay?.update(
+            waterSources.map(s => ({
+              position: [s.position[0], s.position[1]] as [number, number],
+              size: s.size,
+            })),
+            heightSampler,
+            simState.simres,
+          );
         }
         // Push per-frame control values to water material uniforms
         if (webgpuWaterMesh?.material) {
