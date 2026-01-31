@@ -1,3 +1,4 @@
+const _moduleLoadStart = performance.now();
 import {mat4, vec2, vec3, vec4} from 'gl-matrix';
 // @ts-ignore
 import Stats from 'stats-js';
@@ -99,9 +100,12 @@ function handleInteraction (buttons : number, x : number, y : number){
 // controlsConfig will be loaded from settings in main() function
 let controlsConfig: ControlsConfig;
 
+// Module-level cleanup callback set by main() for HMR dispose
+let _hmrCleanup: (() => void) | null = null;
+
 async function main() {
   const _t0 = performance.now();
-  const _tlog = (label: string) => console.log(`[Init Timing] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+  const _tlog = (label: string) => console.log(`[Init Timing] ${label}: ${(performance.now() - _t0).toFixed(0)}ms (module load: ${(_t0 - _moduleLoadStart).toFixed(0)}ms)`);
   // Create application context with state holders (composition root)
   appContext = createApp();
   _tlog('createApp');
@@ -164,6 +168,11 @@ async function main() {
     webgpuRendererWrapper = new WebGPURendererWrapper(canvas, appContext);
     await webgpuRendererWrapper.initialize();
     _tlog('renderer.initialize()');
+    // Register HMR cleanup so dispose runs before page reload
+    _hmrCleanup = () => {
+      webgpuRendererWrapper?.dispose();
+      webgpuRendererWrapper = null;
+    };
     webgpuDevice = webgpuRendererWrapper.getDevice();
     if (!webgpuDevice) {
       throw new Error('WebGPU device not available from renderer');
@@ -1078,11 +1087,12 @@ async function main() {
       // synchronous compilation that blocks the main thread and causes a white flash.
       if (!webgpuSceneCompileStarted) {
         webgpuSceneCompileStarted = true;
+        const compileStart = performance.now();
         const loadingText = document.getElementById('loading-text');
         if (loadingText) loadingText.textContent = 'Compiling shaders...';
         rendererThree?.compileAsync?.(webgpuScene, camera.threeCamera)?.then?.(() => {
           webgpuSceneCompileDone = true;
-          console.log('[WebGPU] Scene compiled — first render ready');
+          console.log(`[Init Timing] compileAsync: ${(performance.now() - compileStart).toFixed(0)}ms`);
           // Hide loading overlay after first render
           requestAnimationFrame(() => {
             const overlay = document.getElementById('terrain-loading-overlay');
@@ -1189,9 +1199,13 @@ async function main() {
   runtime.start();
 }
 
-// HMR: full reload on update so main() is never run twice in the same page (avoids double WebGPU init)
-const hot = (import.meta as { hot?: { accept: (cb: () => void) => void } }).hot;
+// HMR: clean up WebGPU resources before full reload to avoid device lost errors
+const hot = (import.meta as { hot?: { accept: (cb: () => void) => void; dispose?: (cb: () => void) => void } }).hot;
 if (hot) {
+  hot.dispose?.(() => {
+    // Dispose renderer to release WebGPU device before reload (prevents stale device errors)
+    _hmrCleanup?.();
+  });
   hot.accept(() => {
     window.location.reload();
   });
