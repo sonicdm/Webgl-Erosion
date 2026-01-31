@@ -29,6 +29,14 @@ export class WebGPUTexturePool {
     public sedimentAdvectATexture: GPUTexture;
     public sedimentAdvectBTexture: GPUTexture;
 
+    // Lava simulation textures (ping-pong pairs)
+    public readLavaTexture: GPUTexture;      // R=lavaHeight, G=temperature, B=viscosity, A=crustThickness
+    public writeLavaTexture: GPUTexture;
+    public readLavaFluxTexture: GPUTexture;  // R=fUp, G=fRight, B=fDown, A=fLeft
+    public writeLavaFluxTexture: GPUTexture;
+    public readLavaVelTexture: GPUTexture;   // R=velX, G=velY, B=speed, A=heat(derived)
+    public writeLavaVelTexture: GPUTexture;
+
     // Height map texture for importing external height maps
     public heightmapTexture: GPUTexture | null = null;
 
@@ -55,6 +63,12 @@ export class WebGPUTexturePool {
         this.writeSedimentBlendTexture = null as any;
         this.sedimentAdvectATexture = null as any;
         this.sedimentAdvectBTexture = null as any;
+        this.readLavaTexture = null as any;
+        this.writeLavaTexture = null as any;
+        this.readLavaFluxTexture = null as any;
+        this.writeLavaFluxTexture = null as any;
+        this.readLavaVelTexture = null as any;
+        this.writeLavaVelTexture = null as any;
     }
 
     /**
@@ -95,6 +109,12 @@ export class WebGPUTexturePool {
         this.writeSedimentBlendTexture = this.createSimulationTexture(this.simres, this.simres);
         this.sedimentAdvectATexture = this.createSimulationTexture(this.simres, this.simres);
         this.sedimentAdvectBTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.readLavaTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.writeLavaTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.readLavaFluxTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.writeLavaFluxTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.readLavaVelTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.writeLavaVelTexture = this.createSimulationTexture(this.simres, this.simres);
         this.zeroBuffer = null;
     }
 
@@ -123,6 +143,12 @@ export class WebGPUTexturePool {
         this.destroyTexture(this.writeSedimentBlendTexture);
         this.destroyTexture(this.sedimentAdvectATexture);
         this.destroyTexture(this.sedimentAdvectBTexture);
+        this.destroyTexture(this.readLavaTexture);
+        this.destroyTexture(this.writeLavaTexture);
+        this.destroyTexture(this.readLavaFluxTexture);
+        this.destroyTexture(this.writeLavaFluxTexture);
+        this.destroyTexture(this.readLavaVelTexture);
+        this.destroyTexture(this.writeLavaVelTexture);
 
         // Recreate textures with new size
         this.setup();
@@ -164,6 +190,7 @@ export class WebGPUTexturePool {
         this.writeTexture(this.writeSedimentBlendTexture, zero);
         this.writeTexture(this.sedimentAdvectATexture, zero);
         this.writeTexture(this.sedimentAdvectBTexture, zero);
+        this.clearLavaTextures();
     }
 
     /**
@@ -186,6 +213,20 @@ export class WebGPUTexturePool {
         this.writeTexture(this.writeSedimentBlendTexture, zero);
         this.writeTexture(this.sedimentAdvectATexture, zero);
         this.writeTexture(this.sedimentAdvectBTexture, zero);
+        this.clearLavaTextures();
+    }
+
+    /**
+     * Clear all lava textures to zero.
+     */
+    clearLavaTextures(): void {
+        const zero = this.getZeroBuffer();
+        this.writeTexture(this.readLavaTexture, zero);
+        this.writeTexture(this.writeLavaTexture, zero);
+        this.writeTexture(this.readLavaFluxTexture, zero);
+        this.writeTexture(this.writeLavaFluxTexture, zero);
+        this.writeTexture(this.readLavaVelTexture, zero);
+        this.writeTexture(this.writeLavaVelTexture, zero);
     }
 
     private getZeroBuffer(): Float32Array {
@@ -237,6 +278,12 @@ export class WebGPUTexturePool {
         this.destroyTexture(this.writeSedimentBlendTexture);
         this.destroyTexture(this.sedimentAdvectATexture);
         this.destroyTexture(this.sedimentAdvectBTexture);
+        this.destroyTexture(this.readLavaTexture);
+        this.destroyTexture(this.writeLavaTexture);
+        this.destroyTexture(this.readLavaFluxTexture);
+        this.destroyTexture(this.writeLavaFluxTexture);
+        this.destroyTexture(this.readLavaVelTexture);
+        this.destroyTexture(this.writeLavaVelTexture);
         this.destroyTexture(this.heightmapTexture);
     }
 
@@ -281,6 +328,24 @@ export class WebGPUTexturePool {
         const tmp = this.readTerrainFluxTexture;
         this.readTerrainFluxTexture = this.writeTerrainFluxTexture;
         this.writeTerrainFluxTexture = tmp;
+    }
+
+    swapLavaTextures(): void {
+        const tmp = this.readLavaTexture;
+        this.readLavaTexture = this.writeLavaTexture;
+        this.writeLavaTexture = tmp;
+    }
+
+    swapLavaFluxTextures(): void {
+        const tmp = this.readLavaFluxTexture;
+        this.readLavaFluxTexture = this.writeLavaFluxTexture;
+        this.writeLavaFluxTexture = tmp;
+    }
+
+    swapLavaVelTextures(): void {
+        const tmp = this.readLavaVelTexture;
+        this.readLavaVelTexture = this.writeLavaVelTexture;
+        this.writeLavaVelTexture = tmp;
     }
 
     setHeightMapTexture(texture: GPUTexture | null): void {

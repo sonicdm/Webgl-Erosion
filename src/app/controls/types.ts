@@ -112,4 +112,21 @@ export interface IAppControls {
     raycastMethod: 'heightmap' | 'bvh';
     'Reset Erosion Parameters'?: () => void;
     tesselations?: number;
+    // Lava simulation
+    lavaEnabled: boolean;
+    lavaViscosityScale: number;
+    lavaYieldStress: number;
+    lavaCoolingRate: number;
+    lavaProportionalCooling: number;
+    lavaSolidificationThreshold: number;
+    lavaRockFraction: number;
+    lavaThermalErosionRate: number;
+    lavaHeatScale: number;
+    lavaWaterInteraction: boolean;
+    lavaHeatRadius: number;
+    lavaEmissionTemp: number;
+    lavaCrustStrength: number;
+    lavaCrustGrowthRate: number;
+    lavaRockMeltThreshold: number;
+    lavaSourceCount: number;
 }

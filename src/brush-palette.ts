@@ -44,6 +44,7 @@ export const BRUSH_TYPES: BrushType[] = [
     { id: 4, name: 'Smooth', icon: '✨', color: '#9B59B6', shortcut: '4', description: 'Smooth terrain surface' },
     { id: 5, name: 'Flatten', icon: '📐', color: '#F39C12', shortcut: '5', description: 'Flatten to target height\n\nLeft Click: Flatten terrain to target height\nAlt+Click: Set target height to clicked location\nUse slider to manually set target height (0-500)' },
     { id: 6, name: 'Slope', icon: '📉', color: '#27AE60', shortcut: '6', description: 'Create slope between two points\n\nAlt+Click (first): Set start point\nAlt+Click (second): Set end point\nLeft Click: Apply slope after both points are set' },
+    { id: 7, name: 'Lava', icon: '🌋', color: '#E25822', shortcut: '7', description: 'Add/remove lava' },
 ];
 
 // Brush size presets
@@ -161,6 +162,7 @@ BRUSH TYPES:
 4 - Smooth ✨: Smooth terrain surface
 5 - Flatten 📐: Flatten to target height
 6 - Slope 📉: Create slope between points
+7 - Lava 🌋: Add/remove lava
 
 BRUSH OPERATIONS:
 Left Click: Add mode

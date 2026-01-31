@@ -31,6 +31,11 @@ export class SimulationStateHolder {
     private waterSourcePositions: Float32Array | null = null;
     private waterSourceSizes: Float32Array | null = null;
     private waterSourceStrengths: Float32Array | null = null;
+
+    // Reusable lava source buffers for WebGPU simulation (avoid per-frame allocations)
+    private lavaSourcePositions: Float32Array | null = null;
+    private lavaSourceSizes: Float32Array | null = null;
+    private lavaSourceStrengths: Float32Array | null = null;
     
     // WebGL context
     public glContext: WebGL2RenderingContext | null = null;
@@ -157,6 +162,31 @@ export class SimulationStateHolder {
             positions: this.waterSourcePositions,
             sizes: this.waterSourceSizes,
             strengths: this.waterSourceStrengths,
+        };
+    }
+
+    /**
+     * Get reusable lava source buffers sized for the given source count.
+     */
+    getLavaSourceBuffers(maxSources: number): {
+        positions: Float32Array;
+        sizes: Float32Array;
+        strengths: Float32Array;
+    } {
+        const positionLength = maxSources * 2;
+        if (!this.lavaSourcePositions || this.lavaSourcePositions.length !== positionLength) {
+            this.lavaSourcePositions = new Float32Array(positionLength);
+        }
+        if (!this.lavaSourceSizes || this.lavaSourceSizes.length !== maxSources) {
+            this.lavaSourceSizes = new Float32Array(maxSources);
+        }
+        if (!this.lavaSourceStrengths || this.lavaSourceStrengths.length !== maxSources) {
+            this.lavaSourceStrengths = new Float32Array(maxSources);
+        }
+        return {
+            positions: this.lavaSourcePositions,
+            sizes: this.lavaSourceSizes,
+            strengths: this.lavaSourceStrengths,
         };
     }
 

@@ -145,7 +145,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     const kcController = erosionpara.add(controls, 'Kc', 0.01, 0.5);
     const ksController = erosionpara.add(controls, 'Ks', 0.001, 0.2);
     const kdController = erosionpara.add(controls, 'Kd', 0.0001, 0.1);
-    erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10 });
+    erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10, lavaHeight: 11, lavaTemperature: 12, lavaVelocity: 13 });
     const advectionMethodController = erosionpara.add(controls, 'AdvectionMethod', { Semilagrangian: 0, MacCormack: 1 });
     const velocityMultiplierController = erosionpara.add(controls, 'VelocityMultiplier', 1.0, 5.0);
     erosionpara.add(controls, 'AdvectionSpeedScaling', 0.1, 3.0);
@@ -183,7 +183,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         config.raycast.method = value as 'heightmap' | 'bvh';
         saveSettings(config);
     });
-    const brushTypeController = terraineditor.add(controls, 'brushType', { NoBrush: 0, TerrainBrush: 1, WaterBrush: 2, RockBrush: 3, SmoothBrush: 4, FlattenBrush: 5, SlopeBrush: 6 });
+    const brushTypeController = terraineditor.add(controls, 'brushType', { NoBrush: 0, TerrainBrush: 1, WaterBrush: 2, RockBrush: 3, SmoothBrush: 4, FlattenBrush: 5, SlopeBrush: 6, LavaBrush: 7 });
     brushTypeController.onChange((value: number) => {
         // Reset slope state when switching brush types
         if (value !== 6) {
@@ -255,6 +255,25 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         }
     });
     
+    // Lava Parameters
+    var lavapara = gui.addFolder('Lava Parameters');
+    lavapara.add(controls, 'lavaEnabled').name('Enable Lava');
+    lavapara.add(controls, 'lavaViscosityScale', 0.1, 10.0).name('Viscosity Scale');
+    lavapara.add(controls, 'lavaYieldStress', 0.0, 2.0).name('Yield Stress');
+    lavapara.add(controls, 'lavaCoolingRate', 0.01, 1.0).name('Cooling Rate');
+    lavapara.add(controls, 'lavaProportionalCooling', 0.0, 0.1).name('Proportional Cooling');
+    lavapara.add(controls, 'lavaSolidificationThreshold', 0.05, 0.5).name('Solidification Temp');
+    lavapara.add(controls, 'lavaRockFraction', 0.0, 1.0).name('Rock Fraction');
+    lavapara.add(controls, 'lavaThermalErosionRate', 0.1, 2.0).name('Thermal Erosion');
+    lavapara.add(controls, 'lavaRockMeltThreshold', 0.3, 0.9).name('Rock Melt Temp');
+    lavapara.add(controls, 'lavaHeatScale', 0.1, 5.0).name('Heat Scale');
+    lavapara.add(controls, 'lavaWaterInteraction').name('Water Interaction');
+    lavapara.add(controls, 'lavaHeatRadius', 1, 4).step(1).name('Heat Radius');
+    lavapara.add(controls, 'lavaEmissionTemp', 0.5, 1.0).name('Emission Temp');
+    lavapara.add(controls, 'lavaCrustStrength', 0.1, 2.0).name('Crust Strength');
+    lavapara.add(controls, 'lavaCrustGrowthRate', 0.01, 0.5).name('Crust Growth');
+    lavapara.close();
+
     // Rendering Parameters
     var renderingpara = gui.addFolder('Rendering Parameters');
     renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);

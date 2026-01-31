@@ -99,7 +99,25 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         showScattering: true,
         enableBilateralBlur: true,
         AdvectionMethod: 1,
-        VelocityAdvectionMag: 0.2
+        VelocityAdvectionMag: 0.2,
+
+        // Lava simulation (speeds relative to water equivalents)
+        lavaEnabled: false,
+        lavaViscosityScale: 5.0,
+        lavaYieldStress: 0.5,
+        lavaCoolingRate: 0.1,
+        lavaProportionalCooling: 0.02,
+        lavaSolidificationThreshold: 0.15,
+        lavaRockFraction: 0.7,
+        lavaThermalErosionRate: 0.5,
+        lavaHeatScale: 2.0,
+        lavaWaterInteraction: true,
+        lavaHeatRadius: 2,
+        lavaEmissionTemp: 1.0,
+        lavaCrustStrength: 0.5,
+        lavaCrustGrowthRate: 0.1,
+        lavaRockMeltThreshold: 0.7,
+        lavaSourceCount: 0
     };
 
     if (actions.resetErosionParameters) {
