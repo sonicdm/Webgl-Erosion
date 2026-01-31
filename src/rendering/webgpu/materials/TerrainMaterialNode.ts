@@ -160,12 +160,6 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         if (params.lightDir !== undefined) this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
     }
 
-    /** Update water source indicator positions each frame (no-op: removed from shader for compile perf). */
-    updateSources(_sources: { position: [number, number]; size: number }[]): void {
-        // Source indicators removed from TSL graph to cut compile time.
-        // TODO: re-add as a separate overlay mesh if needed.
-    }
-
     /** getValueType() returns null for plain arrays; use Vector2 so WGSL gets type 'vec2'. */
     private static toVector2(v: [number, number] | any): Vector2 {
         if (v != null && typeof (v as Vector2).x === 'number' && typeof (v as Vector2).y === 'number') return v as Vector2;
