@@ -29,11 +29,11 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 
 ### Phase 4 — Terrain Generation + GUI Parity
 - Status: In Progress
-- Notes: WebGPU main view: single device, pool→Three.js copy each frame, TerrainMaterialNode/WaterMaterialNode, main loop uses WebGPURenderer when available. **Troubleshooting:** Grey/white terrain: ensure copy runs (console: `[WebGPU] Pool → Three.js texture copy active, 8 textures`). Backend textures are created on first compile; skip log on first frames is normal. **Testing:** WebGPU path requires a browser with WebGPU (Chrome with GPU); MCP/headless often reports "No available adapters" and app exits before main loop.
+- Notes: WebGPU main view: single device, pool→Three.js copy each frame, TerrainMaterialNode/WaterMaterialNode, main loop uses WebGPURenderer. **Fix (Jan 30):** Resolved `Uniform "null" not declared` — TerrainMaterialNode now always creates a valid `simresUniform` (never null) so WGSLNodeBuilder never receives type null. **Cleanup (Jan 30):** Removed WebGL render/sim fallback from `main.ts`; heightmap import/export now uses WebGPU readback only; readback cadence scales with resolution. **Troubleshooting:** Grey/white terrain: ensure copy runs (console: `[WebGPU] Pool → Three.js texture copy active, 8 textures`). Backend textures are created on first compile; skip log on first frames is normal. **Testing:** WebGPU path requires a browser with WebGPU (Chrome with GPU); MCP/headless often reports "No available adapters" and app exits before main loop.
 
 ### Phase 5 — Hybrid BVH + CPU Mesh
-- Status: Pending
-- Notes: Fixed-resolution raycast mesh + tiled BVH refit.
+- Status: In Progress
+- Notes: Raycast/BVH UV orientation aligned with PlaneGeometry (V flip) to fix brush alignment; BVH geometry sampling now matches render UVs. Fixed-resolution raycast mesh + tiled BVH refit ongoing.
 
 ### Phase 6 — Validation + Tooling
 - Status: Pending
@@ -76,6 +76,18 @@ Detailed phase/workstream logs live in `docs/refactor-webgpu-tsl/progress/`.
 - Tests + MCP verification — January 30, 2026
   - CI: `npm run test:ci` — 23 suites, 112 tests passing
   - MCP (user-browser-devtools): navigated to http://localhost:8080 (200 OK), full-page screenshot saved, visible text "Generating Terrain..." confirms app loads and terrain flow runs
+- WebGPU-only runtime enforcement — January 30, 2026
+  - Removed WebGL render/sim fallback from `src/main.ts`
+  - Heightmap import/export uses WebGPU readback path (chunked staging)
+  - Readback throttling now scales with simulation resolution
+- Raycast alignment + pool sync buffers — January 30, 2026
+  - Raycast/BVH world→UV mapping now matches PlaneGeometry V orientation
+  - BVH geometry UV sampling flipped to match render-space heightmap
+  - Pool→Three sync textures reuse a shared zero buffer to reduce CPU allocations
+- WebGPU limits + heightmap import orientation — January 30, 2026
+  - Request maxBufferSize from adapter to prevent 2048+ upload failures
+  - WebGPURenderer now uses the shared device from capability check
+  - Heightmap cache flips X on import to fix mirrored heightmaps
 - Phase 3 — Simulation Pipeline Port (January 29, 2026)
   - Ported water height (alterwaterhight-frag.glsl), sediment (sediment-frag.glsl), sediment advection simple + MacCormack (sediadvect/maccormack), max slippage (maxslippageheight-frag.glsl), thermal flux/apply (thermalterrainflux/thermalapply-frag.glsl), average smoothing (average-frag.glsl) to WGSL compute in ComputeNodePipeline
   - Wired all passes in SimulatePerStepWebGPU with correct controls (VelocityMultiplier, thermalTalusAngleScale, ErosionMode, etc.) and texture swaps

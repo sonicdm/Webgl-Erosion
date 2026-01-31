@@ -8,6 +8,7 @@ export interface WebGPUCapability {
     supported: boolean;
     adapter?: GPUAdapter;
     device?: GPUDevice;
+    requiredLimits?: GPURequiredLimits;
     fallbackReason?: string;
 }
 
@@ -53,16 +54,33 @@ async function runWebGPUCapabilityCheck(): Promise<WebGPUCapability> {
         }
 
         try {
-            // Use default limits so device creation succeeds on more adapters.
-            // Large readback (e.g. simres 4096) is handled by chunked staging in webgpu-terrain-readback.
+            if (!adapter.features.has('float32-filterable')) {
+                return {
+                    supported: false,
+                    adapter: adapter,
+                    fallbackReason: 'WebGPU adapter does not support required feature: float32-filterable.'
+                };
+            }
+
+            // Request the highest available maxBufferSize so large uploads (e.g. 2048+ sync textures)
+            // don't trip the default 256MB limit.
+            const requiredLimits: GPURequiredLimits = {
+                maxBufferSize: adapter.limits.maxBufferSize,
+            };
+
+            // Request all supported features so WebGPURenderer has parity with its default behavior.
+            const requiredFeatures = Array.from(adapter.features);
+
             const device = await adapter.requestDevice({
-                requiredFeatures: ['float32-filterable'],
+                requiredFeatures,
+                requiredLimits,
             });
 
             return {
                 supported: true,
                 adapter: adapter,
-                device: device
+                device: device,
+                requiredLimits,
             };
         } catch (deviceError) {
             return {

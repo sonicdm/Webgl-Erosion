@@ -1,5 +1,5 @@
 import { Texture } from 'three';
-import { float, normalize, texture, uv, vec2, vec3, vec4 } from 'three/tsl';
+import { clamp, float, normalize, texture, uv, vec2, vec3, vec4 } from 'three/tsl';
 
 export interface TerrainSamplingInputs {
     uv?: any;
@@ -106,11 +106,14 @@ export class TerrainSamplingNode {
         }
         const simresNode = typeof simres === 'number' ? float(simres) : simres;
         const eps = float(1).div(simresNode);
-        const cur = texture(heightmap, uvNode);
-        const r = texture(heightmap, uvNode.add(vec2(eps, 0)));
-        const l = texture(heightmap, uvNode.add(vec2(eps.negate(), 0)));
-        const t = texture(heightmap, uvNode.add(vec2(0, eps)));
-        const b = texture(heightmap, uvNode.add(vec2(0, eps.negate())));
+        // Clamp neighbor UVs so edge vertices never sample outside the heightmap.
+        // Without this, UV ± eps at the border produces clamped reads → distorted normals → spikes.
+        const safeMin = eps;
+        const safeMax = float(1).sub(eps);
+        const r = texture(heightmap, clamp(uvNode.add(vec2(eps, 0)), safeMin, safeMax));
+        const l = texture(heightmap, clamp(uvNode.add(vec2(eps.negate(), 0)), safeMin, safeMax));
+        const t = texture(heightmap, clamp(uvNode.add(vec2(0, eps)), safeMin, safeMax));
+        const b = texture(heightmap, clamp(uvNode.add(vec2(0, eps.negate())), safeMin, safeMax));
         const rawNor = vec3(l.x.sub(r.x), float(2), t.x.sub(b.x));
         const nor = normalize(rawNor.negate());
         return vec4(nor, float(1));

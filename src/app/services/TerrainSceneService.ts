@@ -24,10 +24,10 @@ export interface TerrainGeneratorComputeLike {
 /**
  * Terrain scene actions: loadScene, reset, setTerrainRandom.
  * These become the stable actions passed into createControls(ctx, actions).
- * loadScene implementation is injected (GL-dependent); reset and setTerrainRandom use holders + optional refs.
+ * loadScene implementation is injected (optional); reset and setTerrainRandom use holders + optional refs.
  */
 export class TerrainSceneService {
-    private loadSceneImpl: ((gl: WebGL2RenderingContext) => void) | null = null;
+    private loadSceneImpl: (() => void) | null = null;
 
     constructor(
         private appContext: AppContext,
@@ -38,20 +38,15 @@ export class TerrainSceneService {
         }
     ) {}
 
-    /** Set the loadScene implementation (GL-bound; called from main/createRuntime). */
-    setLoadSceneImpl(impl: (gl: WebGL2RenderingContext) => void): void {
+    /** Set the loadScene implementation (optional; called from main/createRuntime). */
+    setLoadSceneImpl(impl: () => void): void {
         this.loadSceneImpl = impl;
     }
 
-    /** Load scene geometry (square, plane, waterPlane). No-op if no GL context or impl. */
+    /** Load scene geometry (optional). No-op if no impl. */
     loadScene(): void {
-        const gl = this.appContext.simulationState.glContext;
-        if (!gl) {
-            console.warn('[TerrainSceneService] WebGL2 context not available');
-            return;
-        }
         if (this.loadSceneImpl) {
-            this.loadSceneImpl(gl);
+            this.loadSceneImpl();
         }
     }
 

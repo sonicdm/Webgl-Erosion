@@ -1,10 +1,10 @@
 import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
-import { LegacyTexturePool } from '../simulation/LegacyTexturePool';
+import { WebGPUTexturePool } from '../simulation/WebGPUTexturePool';
 import { heightmapCache } from '../terrain/HeightmapCache';
+import { readHeightmapFromTexture } from './webgpu-terrain-readback';
 import {
     getBufferSize,
     getMaxHeightForScale,
-    decodeFromImageData,
     encodeToGrayscaleImageData
 } from '../app/heightmap/HeightmapContract';
 
@@ -39,13 +39,32 @@ function resolveControls(controlsOrGetter: ControlsOrGetter): Controls {
 }
 
 export function createHeightMapLoader(
-    gl_context: WebGL2RenderingContext,
     simulationState: SimulationStateHolder,
-    texturePool: LegacyTexturePool,
+    webgpuDevice: GPUDevice,
+    webgpuTexturePool: WebGPUTexturePool,
     controlsOrGetter: ControlsOrGetter,
     callbacks?: HeightmapLoaderCallbacks
 ) {
     const getControls = () => resolveControls(controlsOrGetter);
+    async function readCurrentHeightmap(): Promise<Float32Array | null> {
+        const currentRes = simulationState.simres;
+        const bufferSize = getBufferSize(currentRes);
+        if (!reusableHeightDataBuffer || reusableHeightDataBuffer.length !== bufferSize) {
+            reusableHeightDataBuffer = new Float32Array(bufferSize);
+        }
+        try {
+            await readHeightmapFromTexture(
+                webgpuDevice,
+                webgpuTexturePool.readTerrainTexture,
+                reusableHeightDataBuffer
+            );
+            return reusableHeightDataBuffer;
+        } catch (error) {
+            console.error('[Heightmap] WebGPU readback failed:', error);
+            return null;
+        }
+    }
+
     function loadHeightMap() {
         const input = document.createElement('input');
         input.type = 'file';
@@ -95,41 +114,6 @@ export function createHeightMapLoader(
                         heightmapCache.storeFromImage(imageData.data, simulationState.simres, simulationState.simres, file.name);
                     }
 
-                    // Reuse or create heightData buffer (only reallocate if size changed)
-                    const bufferSize = getBufferSize(simulationState.simres);
-                    if (!reusableHeightDataBuffer || reusableHeightDataBuffer.length !== bufferSize) {
-                        reusableHeightDataBuffer = new Float32Array(bufferSize);
-                    }
-                    const heightData = reusableHeightDataBuffer;
-
-                    // Convert image data to height map via single source of truth
-                    const maxHeight = getMaxHeightForScale(getControls().TerrainHeight);
-                    decodeFromImageData(
-                        imageData.data,
-                        simulationState.simres,
-                        simulationState.simres,
-                        maxHeight,
-                        heightData
-                    );
-
-                    // Create or update height map texture
-                    let heightmap_tex = texturePool.getHeightMapTexture();
-                    if (!heightmap_tex) {
-                        heightmap_tex = gl_context.createTexture();
-                    }
-
-                    gl_context.bindTexture(gl_context.TEXTURE_2D, heightmap_tex);
-                    gl_context.texImage2D(gl_context.TEXTURE_2D, 0, gl_context.RGBA32F,
-                        simulationState.simres, simulationState.simres, 0, gl_context.RGBA, gl_context.FLOAT, heightData);
-                    gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.LINEAR);
-                    gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MAG_FILTER, gl_context.LINEAR);
-                    gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.CLAMP_TO_EDGE);
-                    gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_T, gl_context.CLAMP_TO_EDGE);
-                    gl_context.bindTexture(gl_context.TEXTURE_2D, null);
-
-                    // Store the height map texture
-                    texturePool.setHeightMapTexture(heightmap_tex);
-
                     // Auto-switch to imported heightmap mode if available
                     if (callbacks?.setTerrainBaseType) {
                         callbacks.setTerrainBaseType(HEIGHTMAP_BASE_TYPE_ID);
@@ -151,37 +135,19 @@ export function createHeightMapLoader(
     }
 
     function clearHeightMap() {
-        const heightmap_tex = texturePool.getHeightMapTexture();
-        if (heightmap_tex) {
-            gl_context.deleteTexture(heightmap_tex);
-            texturePool.setHeightMapTexture(null);
-        }
         // Also clear the heightmap cache
         heightmapCache.clear();
         simulationState.setTerrainGeometryDirty(true);
         console.log('Height map and cache cleared, using procedural generation');
     }
 
-    function exportHeightMapPNG() {
-        if (!texturePool.read_terrain_tex || !texturePool.frame_buffer) {
-            console.error('Terrain texture or framebuffer not available for export');
+    async function exportHeightMapPNG() {
+        const heightData = await readCurrentHeightmap();
+        if (!heightData) {
             return;
         }
 
-        // Get current resolution from simulation state
         const currentRes = simulationState.simres;
-
-        // Create temporary buffer for reading heightmap data (contract buffer size)
-        const bufferSize = getBufferSize(currentRes);
-        const heightData = new Float32Array(bufferSize);
-
-        // Read terrain texture from GPU
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, texturePool.frame_buffer);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, texturePool.read_terrain_tex, 0);
-        gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
-        gl_context.readPixels(0, 0, currentRes, currentRes, gl_context.RGBA, gl_context.FLOAT, heightData);
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
-
         const maxHeight = getMaxHeightForScale(getControls().TerrainHeight);
 
         // Reuse canvas if available, create new one only if needed or size changed
@@ -235,25 +201,11 @@ export function createHeightMapLoader(
         }, 'image/png');
     }
 
-    function exportHeightMapRaw() {
-        if (!texturePool.read_terrain_tex || !texturePool.frame_buffer) {
-            console.error('Terrain texture or framebuffer not available for export');
+    async function exportHeightMapRaw() {
+        const heightData = await readCurrentHeightmap();
+        if (!heightData) {
             return;
         }
-
-        // Get current resolution from simulation state
-        const currentRes = simulationState.simres;
-
-        // Create temporary buffer for reading heightmap data (contract buffer size)
-        const bufferSize = getBufferSize(currentRes);
-        const heightData = new Float32Array(bufferSize);
-
-        // Read terrain texture from GPU
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, texturePool.frame_buffer);
-        gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, texturePool.read_terrain_tex, 0);
-        gl_context.readBuffer(gl_context.COLOR_ATTACHMENT0);
-        gl_context.readPixels(0, 0, currentRes, currentRes, gl_context.RGBA, gl_context.FLOAT, heightData);
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, null);
 
         // Create binary blob with Float32Array data (contract format: RGBA32F)
         const blob = new Blob([heightData.buffer], { type: 'application/octet-stream' });
@@ -278,6 +230,7 @@ export function createHeightMapLoader(
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
 
+        const currentRes = simulationState.simres;
         console.log(`Height map exported as ${filename} (raw binary, ${currentRes}x${currentRes} RGBA Float32)`);
     }
 
@@ -357,7 +310,7 @@ export function createHeightMapLoader(
         pngButton.onmouseover = () => pngButton.style.background = '#5BA3F5';
         pngButton.onmouseout = () => pngButton.style.background = '#4A90E2';
         pngButton.onclick = () => {
-            exportHeightMapPNG();
+            void exportHeightMapPNG();
             document.body.removeChild(modal);
         };
         buttonContainer.appendChild(pngButton);
@@ -379,7 +332,7 @@ export function createHeightMapLoader(
         rawButton.onmouseover = () => rawButton.style.background = '#5BA3F5';
         rawButton.onmouseout = () => rawButton.style.background = '#4A90E2';
         rawButton.onclick = () => {
-            exportHeightMapRaw();
+            void exportHeightMapRaw();
             document.body.removeChild(modal);
         };
         buttonContainer.appendChild(rawButton);

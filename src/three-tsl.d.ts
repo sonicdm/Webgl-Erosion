@@ -19,6 +19,7 @@ declare module 'three/tsl' {
     export function pow(x: any, y: any): any;
     export function abs(x: any): any;
     export function length(x: any): any;
+    export function length(x: any): any;
     export function dot(a: any, b: any): any;
     export function normalize(x: any): any;
     export function uniform(value: any): any;

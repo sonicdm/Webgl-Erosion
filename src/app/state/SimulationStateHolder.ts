@@ -26,6 +26,11 @@ export class SimulationStateHolder {
     
     // Flag to track if heightmap buffer is fresh (just read after terrain generation)
     public heightMapBufIsFresh: boolean = false;
+
+    // Reusable water source buffers for WebGPU simulation (avoid per-frame allocations)
+    private waterSourcePositions: Float32Array | null = null;
+    private waterSourceSizes: Float32Array | null = null;
+    private waterSourceStrengths: Float32Array | null = null;
     
     // WebGL context
     public glContext: WebGL2RenderingContext | null = null;
@@ -128,6 +133,31 @@ export class SimulationStateHolder {
     
     shouldUpdateGeometry(): boolean {
         return this.enableBVHUpdates && (this.geometryNeedsUpdate || this.geometryUpdateCounter >= this.geometryUpdateInterval);
+    }
+
+    /**
+     * Get reusable water source buffers sized for the given source count.
+     */
+    getWaterSourceBuffers(maxSources: number): {
+        positions: Float32Array;
+        sizes: Float32Array;
+        strengths: Float32Array;
+    } {
+        const positionLength = maxSources * 2;
+        if (!this.waterSourcePositions || this.waterSourcePositions.length !== positionLength) {
+            this.waterSourcePositions = new Float32Array(positionLength);
+        }
+        if (!this.waterSourceSizes || this.waterSourceSizes.length !== maxSources) {
+            this.waterSourceSizes = new Float32Array(maxSources);
+        }
+        if (!this.waterSourceStrengths || this.waterSourceStrengths.length !== maxSources) {
+            this.waterSourceStrengths = new Float32Array(maxSources);
+        }
+        return {
+            positions: this.waterSourcePositions,
+            sizes: this.waterSourceSizes,
+            strengths: this.waterSourceStrengths,
+        };
     }
 
     /**

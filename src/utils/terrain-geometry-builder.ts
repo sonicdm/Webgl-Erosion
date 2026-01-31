@@ -10,18 +10,20 @@ import { sampleHeightBilinear } from './raycast';
  * @param simres - Simulation resolution (heightmap size)
  * @param heightMapBuffer - CPU buffer containing height data (Float32Array)
  * @param scale - Scale factor for terrain (default: 1.0)
+ * @param meshResolution - Grid resolution for BVH mesh (default: simres)
  * @returns Three.js BufferGeometry ready for BVH building
  */
 export function createTerrainGeometry(
     simres: number,
     heightMapBuffer: Float32Array,
-    scale: number = 1.0
+    scale: number = 1.0,
+    meshResolution: number = simres
 ): BufferGeometry {
     const geometry = new BufferGeometry();
     
     // Calculate number of vertices (grid size)
-    const width = simres;
-    const height = simres;
+    const width = meshResolution;
+    const height = meshResolution;
     const numVertices = width * height;
     
     // Create position array (x, y, z for each vertex)
@@ -36,14 +38,14 @@ export function createTerrainGeometry(
     const uv = vec2.create();
     for (let z = 0; z < height; z++) {
         for (let x = 0; x < width; x++) {
-            // Calculate UV coordinates in [0, 1] range
-            // Match Plane geometry UV calculation: uvs are x * normalize where normalize = 1.0 / width
+            // Calculate UV coordinates in [0, 1] range (match PlaneGeometry: v is flipped)
             const u = x / (width - 1);
             const v = z / (height - 1);
+            const vFlipped = 1 - v;
             
             // Use bilinear interpolation to sample height (matches shader texture() and heightmap raycast)
             uv[0] = u;
-            uv[1] = v;
+            uv[1] = vFlipped;
             const heightValue = sampleHeightBilinear(uv, simres, heightMapBuffer);
             
             // Convert height to world space (matching terrain-vert.glsl calculation)
@@ -65,7 +67,7 @@ export function createTerrainGeometry(
             // Store UV coordinates for this vertex (for accurate interpolation)
             const uvIdx = (z * width + x) * 2;
             uvs[uvIdx] = u;
-            uvs[uvIdx + 1] = v;
+            uvs[uvIdx + 1] = vFlipped;
         }
     }
     
@@ -104,12 +106,14 @@ export function createTerrainGeometry(
  * @param simres - Simulation resolution
  * @param heightMapBuffer - Updated height data
  * @param scale - Scale factor
+ * @param meshResolution - Grid resolution for BVH mesh (default: simres)
  */
 export function updateTerrainGeometry(
     geometry: BufferGeometry,
     simres: number,
     heightMapBuffer: Float32Array,
-    scale: number = 1.0
+    scale: number = 1.0,
+    meshResolution: number = simres
 ): void {
     const positionAttribute = geometry.getAttribute('position') as BufferAttribute;
     const uvAttribute = geometry.getAttribute('uv') as BufferAttribute;
@@ -121,8 +125,8 @@ export function updateTerrainGeometry(
     
     const positions = positionAttribute.array as Float32Array;
     const uvs = uvAttribute ? uvAttribute.array as Float32Array : null;
-    const width = simres;
-    const height = simres;
+    const width = meshResolution;
+    const height = meshResolution;
     
     // Update vertex positions using bilinear interpolation
     let posIdx = 0;
@@ -132,10 +136,11 @@ export function updateTerrainGeometry(
         for (let x = 0; x < width; x++) {
             const u = x / (width - 1);
             const v = z / (height - 1);
+            const vFlipped = 1 - v;
             
             // Use bilinear interpolation to match shader sampling
             uv[0] = u;
-            uv[1] = v;
+            uv[1] = vFlipped;
             const heightValue = sampleHeightBilinear(uv, simres, heightMapBuffer);
             
             const worldHeight = heightValue / simres;
@@ -150,7 +155,7 @@ export function updateTerrainGeometry(
             // Update UV coordinates if they exist
             if (uvs) {
                 uvs[uvIdx++] = u;
-                uvs[uvIdx++] = v;
+                uvs[uvIdx++] = vFlipped;
             }
         }
     }

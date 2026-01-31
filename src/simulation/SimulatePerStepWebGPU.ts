@@ -37,10 +37,11 @@ export function SimulatePerStepWebGPU(
 
     const simres = appContext.simulationState.simres;
 
-    // Prepare reusable arrays for water sources (matching main.ts pattern)
-    const reusableSourcePositions = new Float32Array(MAX_WATER_SOURCES * 2);
-    const reusableSourceSizes = new Float32Array(MAX_WATER_SOURCES);
-    const reusableSourceStrengths = new Float32Array(MAX_WATER_SOURCES);
+    // Prepare reusable arrays for water sources (avoid per-frame allocations)
+    const reusableSourceBuffers = appContext.simulationState.getWaterSourceBuffers(MAX_WATER_SOURCES);
+    const reusableSourcePositions = reusableSourceBuffers.positions;
+    const reusableSourceSizes = reusableSourceBuffers.sizes;
+    const reusableSourceStrengths = reusableSourceBuffers.strengths;
     
     // Populate water sources from water-sources system
     const sourceCount = getWaterSourceCount();

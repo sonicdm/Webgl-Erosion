@@ -277,38 +277,80 @@ export class ComputeNodePipeline extends ComputePass {
             );
         }
 
-        // Create or update uniform buffers
-        const uniformData = new Float32Array([
-            uniforms.time,
-            uniforms.rainDegree,
-            uniforms.simRes,
-            ...uniforms.mouseWorldPos,
-            ...uniforms.mouseWorldDir,
-            0.0, // padding for vec3 alignment
-            uniforms.brushSize,
-            uniforms.brushStrength,
-            uniforms.brushType,
-            uniforms.brushPressed,
-            ...uniforms.brushPos,
-            uniforms.brushOperation,
-            uniforms.rainErosion,
-            uniforms.rainErosionStrength,
-            uniforms.rainErosionDropSize,
-            uniforms.flattenTargetHeight,
-            ...uniforms.slopeStartPos,
-            ...uniforms.slopeEndPos,
-            uniforms.slopeActive,
-            uniforms.sourceCount,
-            0.0, // padding
-        ]);
+        // Pack uniform buffer with correct WGSL struct alignment.
+        // The Uniforms struct contains vec4 (align 16), vec3 (align 16), vec2 (align 8),
+        // and i32 members that MUST be written with correct byte patterns (not as floats).
+        // Using DataView to write each field at its exact byte offset.
+        const RAIN_UNIFORM_BYTE_SIZE = 128; // struct size padded to multiple of 16
+        const uniformArrayBuffer = new ArrayBuffer(RAIN_UNIFORM_BYTE_SIZE);
+        const view = new DataView(uniformArrayBuffer);
+        const LE = true; // little-endian
+
+        // f32 scalars (offset 0-8)
+        view.setFloat32(0, uniforms.time, LE);
+        view.setFloat32(4, uniforms.rainDegree, LE);
+        view.setFloat32(8, uniforms.simRes, LE);
+        // byte 12: implicit padding for vec4 (16-byte) alignment
+
+        // vec4<f32> u_MouseWorldPos (offset 16)
+        view.setFloat32(16, uniforms.mouseWorldPos[0], LE);
+        view.setFloat32(20, uniforms.mouseWorldPos[1], LE);
+        view.setFloat32(24, uniforms.mouseWorldPos[2], LE);
+        view.setFloat32(28, uniforms.mouseWorldPos[3], LE);
+
+        // vec3<f32> u_MouseWorldDir (offset 32, align 16)
+        view.setFloat32(32, uniforms.mouseWorldDir[0], LE);
+        view.setFloat32(36, uniforms.mouseWorldDir[1], LE);
+        view.setFloat32(40, uniforms.mouseWorldDir[2], LE);
+
+        // f32 scalars after vec3 (offset 44-48)
+        view.setFloat32(44, uniforms.brushSize, LE);
+        view.setFloat32(48, uniforms.brushStrength, LE);
+
+        // i32 fields — MUST use setInt32 so bit pattern is correct for GPU integer comparison
+        view.setInt32(52, uniforms.brushType, LE);
+        view.setInt32(56, uniforms.brushPressed, LE);
+
+        // byte 60: implicit padding for vec2 (8-byte) alignment
+
+        // vec2<f32> u_BrushPos (offset 64)
+        view.setFloat32(64, uniforms.brushPos[0], LE);
+        view.setFloat32(68, uniforms.brushPos[1], LE);
+
+        // i32 fields (offset 72-76)
+        view.setInt32(72, uniforms.brushOperation, LE);
+        view.setInt32(76, uniforms.rainErosion, LE);
+
+        // f32 scalars (offset 80-88)
+        view.setFloat32(80, uniforms.rainErosionStrength, LE);
+        view.setFloat32(84, uniforms.rainErosionDropSize, LE);
+        view.setFloat32(88, uniforms.flattenTargetHeight, LE);
+
+        // byte 92: implicit padding for vec2 (8-byte) alignment
+
+        // vec2<f32> u_SlopeStartPos (offset 96)
+        view.setFloat32(96, uniforms.slopeStartPos[0], LE);
+        view.setFloat32(100, uniforms.slopeStartPos[1], LE);
+
+        // vec2<f32> u_SlopeEndPos (offset 104)
+        view.setFloat32(104, uniforms.slopeEndPos[0], LE);
+        view.setFloat32(108, uniforms.slopeEndPos[1], LE);
+
+        // i32 fields (offset 112-116)
+        view.setInt32(112, uniforms.slopeActive, LE);
+        view.setInt32(116, uniforms.sourceCount, LE);
+
+        // _padding (offset 120)
+        view.setFloat32(120, 0.0, LE);
+        // bytes 124-127: struct padding to 128
 
         let uniformBuffer = this.uniformBuffers.get('rain');
-        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+        if (!uniformBuffer || uniformBuffer.size < RAIN_UNIFORM_BYTE_SIZE) {
             if (uniformBuffer) uniformBuffer.destroy();
-            uniformBuffer = createUniformBuffer(device, uniformData, 'rain-uniforms');
+            uniformBuffer = createUniformBuffer(device, new Float32Array(uniformArrayBuffer), 'rain-uniforms');
             this.uniformBuffers.set('rain', uniformBuffer);
         } else {
-            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+            device.queue.writeBuffer(uniformBuffer, 0, uniformArrayBuffer);
         }
 
         // Create source data buffer
@@ -952,7 +994,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var avgDiff = (terraintop.x + terrainright.x + terrainbottom.x + terrainleft.x) * 0.25 - terraincur.x;
     avgDiff = 10.0 * max(abs(avgDiff) - maxLocalDiff, 0.0);
 
-    textureStore(writeMaxSlippage, coord, vec4<f32>(max(_maxHeightDiff - avgDiff, 0.0), 0.0, 0.0, 1.0));
+    // Boundary: at edges, use max slippage (no thermal erosion) to prevent artifacts from out-of-bounds reads
+    let dim = vec2<f32>(f32(textureDimensions(readTerrain).x), f32(textureDimensions(readTerrain).y));
+    let uv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+    let div = 1.0 / uniforms.u_SimRes;
+    var result = max(_maxHeightDiff - avgDiff, 0.0);
+    if (uv.x <= div || uv.x >= 1.0 - 2.0 * div || uv.y <= div || uv.y >= 1.0 - 2.0 * div) {
+        result = _maxHeightDiff;
+    }
+
+    textureStore(writeMaxSlippage, coord, vec4<f32>(result, 0.0, 0.0, 1.0));
 }
 `;
 
@@ -1005,6 +1056,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         newFlow = newFlow * outfactor;
     }
 
+    // Boundary protection: zero thermal flux at edges to prevent erosion from out-of-bounds reads
+    let dim = vec2<f32>(f32(textureDimensions(readTerrain).x), f32(textureDimensions(readTerrain).y));
+    let uv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+    let div = 1.0 / uniforms.u_SimRes;
+    if (uv.x <= div || uv.x >= 1.0 - 2.0 * div || uv.y <= div || uv.y >= 1.0 - 2.0 * div) {
+        newFlow = vec4<f32>(0.0);
+    }
+
     textureStore(writeTerrainFlux, coord, newFlow);
 }
 `;
@@ -1043,7 +1102,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let curTerrain = textureLoad(readTerrain, coord, 0);
 
-    textureStore(writeTerrain, coord, vec4<f32>(curTerrain.x + tdelta, curTerrain.y, curTerrain.z, curTerrain.w));
+    // Boundary protection: skip thermal erosion at edges
+    let dim = vec2<f32>(f32(textureDimensions(readTerrain).x), f32(textureDimensions(readTerrain).y));
+    let uv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+    let div = 1.0 / uniforms.u_SimRes;
+    var safeDelta = tdelta;
+    if (uv.x <= div || uv.x >= 1.0 - 2.0 * div || uv.y <= div || uv.y >= 1.0 - 2.0 * div) {
+        safeDelta = 0.0;
+    }
+
+    textureStore(writeTerrain, coord, vec4<f32>(curTerrain.x + safeDelta, curTerrain.y, curTerrain.z, curTerrain.w));
 }
 `;
 
@@ -1109,6 +1177,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         ((abs(tl_d) > threathhold && abs(br_d) > threathhold) && tl_d * br_d > 0.0)) {
         cur_h = (cur.x * curWeight + top.x + right.x + bottom.x + left.x + topright.x * diagonalWeight + topleft.x * diagonalWeight + bottomleft.x * diagonalWeight + bottomright.x * diagonalWeight) / (4.0 * (1.0 + diagonalWeight) + curWeight);
         col = 1.0;
+    }
+
+    // Boundary protection: skip smoothing at edges to prevent artifacts from out-of-bounds reads
+    let dim = vec2<f32>(f32(textureDimensions(readTerrain).x), f32(textureDimensions(readTerrain).y));
+    let uv = (vec2<f32>(global_id.xy) + 0.5) / dim;
+    let div = 1.0 / uniforms.u_SimRes;
+    if (uv.x <= div || uv.x >= 1.0 - 2.0 * div || uv.y <= div || uv.y >= 1.0 - 2.0 * div) {
+        cur_h = cur.x;
+        col = 0.0;
     }
 
     textureStore(writeTerrain, coord, vec4<f32>(cur_h, cur.y, cur.z, cur.w));

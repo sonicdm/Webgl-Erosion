@@ -17,6 +17,79 @@ export function setOriginalBrushOperation(value: number | null): void {
     defaultOriginalBrushOperation = value;
 }
 
+/**
+ * Perform a fresh raycast from the given event's mouse coordinates using the current camera.
+ * Returns the UV position on the terrain, or null if the raycast misses.
+ */
+function freshRaycastFromEvent(
+    event: MouseEvent | PointerEvent,
+    context: BrushContext
+): vec2 | null {
+    const canvas = document.getElementById('canvas') as HTMLCanvasElement;
+    if (!canvas) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    const normalizedX = (event.clientX - rect.left) / rect.width;
+    const normalizedY = (event.clientY - rect.top) / rect.height;
+
+    context.camera.update(context.controlsConfig.camera);
+
+    const viewProj = mat4.create();
+    mat4.multiply(viewProj, context.camera.projectionMatrix, context.camera.viewMatrix);
+    const invViewProj = mat4.create();
+    mat4.invert(invViewProj, viewProj);
+
+    const mousePoint = vec4.create();
+    const mousePointEnd = vec4.create();
+    mousePoint[0] = 2.0 * normalizedX - 1.0;
+    mousePoint[1] = 1.0 - 2.0 * normalizedY;
+    mousePoint[2] = -1.0;
+    mousePoint[3] = 1.0;
+    mousePointEnd[0] = 2.0 * normalizedX - 1.0;
+    mousePointEnd[1] = 1.0 - 2.0 * normalizedY;
+    mousePointEnd[2] = -0.0;
+    mousePointEnd[3] = 1.0;
+
+    vec4.transformMat4(mousePoint, mousePoint, invViewProj);
+    vec4.transformMat4(mousePointEnd, mousePointEnd, invViewProj);
+    mousePoint[0] /= mousePoint[3];
+    mousePoint[1] /= mousePoint[3];
+    mousePoint[2] /= mousePoint[3];
+    mousePointEnd[0] /= mousePointEnd[3];
+    mousePointEnd[1] /= mousePointEnd[3];
+    mousePointEnd[2] /= mousePointEnd[3];
+
+    const rayDir = vec3.create();
+    rayDir[0] = mousePointEnd[0] - mousePoint[0];
+    rayDir[1] = mousePointEnd[1] - mousePoint[1];
+    rayDir[2] = mousePointEnd[2] - mousePoint[2];
+    vec3.normalize(rayDir, rayDir);
+
+    const rayOrigin = vec3.fromValues(mousePoint[0], mousePoint[1], mousePoint[2]);
+
+    const freshPos = vec2.create();
+    freshPos[0] = -10.0;
+    freshPos[1] = -10.0;
+
+    if ((context.controls as any).raycastMethod === 'bvh' && context.terrainState.terrainBVH && context.terrainState.terrainGeometry) {
+        const hit = rayCastBVH(rayOrigin, rayDir, context.terrainState.terrainBVH, context.terrainState.terrainGeometry, freshPos);
+        if (!hit) {
+            const heightmapPos = vec2.create();
+            rayCast(rayOrigin, rayDir, context.simulationState.simres, context.simulationState.heightMapCpuBuf, heightmapPos);
+            freshPos[0] = heightmapPos[0];
+            freshPos[1] = heightmapPos[1];
+        }
+    } else {
+        rayCast(rayOrigin, rayDir, context.simulationState.simres, context.simulationState.heightMapCpuBuf, freshPos);
+    }
+
+    const isValidUV = freshPos[0] >= 0.0 && freshPos[0] <= 1.0 &&
+                      freshPos[1] >= 0.0 && freshPos[1] <= 1.0 &&
+                      freshPos[0] !== -10.0 && freshPos[1] !== -10.0;
+
+    return isValidUV ? freshPos : null;
+}
+
 /** Injectable getter/setter for original brush operation (modifier restore). */
 export interface OriginalBrushOperationHolder {
     get(): number | null;
@@ -63,10 +136,17 @@ export function handleBrushMouseDown(
     }
     
     let brushPressed = 1;
-    
+
     // Convert brushType to number (it might be a string from UI control)
     const brushTypeNum = Number(controls.brushType);
-    
+
+    // Fresh raycast on EVERY brush activation to avoid stale posTemp from last tick.
+    // This ensures the first brush application frame uses the correct click position.
+    const freshPos = freshRaycastFromEvent(event, context);
+    if (freshPos) {
+        controls.posTemp = freshPos;
+    }
+
     // Check if secondary brush modifier is pressed (configurable, default Alt)
     const secondaryModifier = controlsConfig.modifiers.brushSecondary;
     const isSecondaryPressed = isModifierPressed(secondaryModifier, event);
@@ -77,101 +157,21 @@ export function handleBrushMouseDown(
     if (isSecondaryPressed) {
         if (brushTypeNum === 5) {
             // Flatten: Secondary modifier+click should set target height and NOT activate brush
-            // Store original operation if not already stored (for restoration on release)
             if (getOrig() === null) {
                 setOrig(controls.brushOperation);
             }
             controls.brushOperation = 1; // Secondary button (temporary override)
-            
-            // Perform a fresh raycast using the event's mouse coordinates
-            // This ensures we get the correct position for the click, not stale data from tick()
-            const canvas = document.getElementById('canvas') as HTMLCanvasElement;
-            if (!canvas) {
+
+            // Fresh raycast to get accurate click position
+            const freshPos = freshRaycastFromEvent(event, context);
+            if (!freshPos) {
                 event.preventDefault();
                 event.stopPropagation();
                 event.stopImmediatePropagation();
                 brushPressed = 0;
                 return { shouldActivate: false, brushPressed: 0 };
             }
-            
-            const rect = canvas.getBoundingClientRect();
-            const normalizedX = (event.clientX - rect.left) / rect.width;
-            const normalizedY = (event.clientY - rect.top) / rect.height;
-            
-            
-            // Perform fresh raycast using event coordinates and current camera matrices
-            // Update camera first to ensure matrices are current
-            context.camera.update(context.controlsConfig.camera);
-            
-            // Calculate ray from mouse coordinates (same logic as tick())
-            const viewProj = mat4.create();
-            mat4.multiply(viewProj, context.camera.projectionMatrix, context.camera.viewMatrix);
-            const invViewProj = mat4.create();
-            mat4.invert(invViewProj, viewProj);
-            
-            const mousePoint = vec4.create();
-            const mousePointEnd = vec4.create();
-            mousePoint[0] = 2.0 * normalizedX - 1.0;
-            mousePoint[1] = 1.0 - 2.0 * normalizedY;
-            mousePoint[2] = -1.0;
-            mousePoint[3] = 1.0;
-            mousePointEnd[0] = 2.0 * normalizedX - 1.0;
-            mousePointEnd[1] = 1.0 - 2.0 * normalizedY;
-            mousePointEnd[2] = -0.0;
-            mousePointEnd[3] = 1.0;
-            
-            
-            vec4.transformMat4(mousePoint, mousePoint, invViewProj);
-            vec4.transformMat4(mousePointEnd, mousePointEnd, invViewProj);
-            mousePoint[0] /= mousePoint[3];
-            mousePoint[1] /= mousePoint[3];
-            mousePoint[2] /= mousePoint[3];
-            mousePointEnd[0] /= mousePointEnd[3];
-            mousePointEnd[1] /= mousePointEnd[3];
-            mousePointEnd[2] /= mousePointEnd[3];
-            
-            const rayDir = vec3.create();
-            rayDir[0] = mousePointEnd[0] - mousePoint[0];
-            rayDir[1] = mousePointEnd[1] - mousePoint[1];
-            rayDir[2] = mousePointEnd[2] - mousePoint[2];
-            vec3.normalize(rayDir, rayDir);
-            
-            const rayOrigin = vec3.fromValues(mousePoint[0], mousePoint[1], mousePoint[2]);
-            
-            
-            // Perform raycast
-            const freshPos = vec2.create();
-            freshPos[0] = -10.0;
-            freshPos[1] = -10.0;
-            
-            if ((controls as any).raycastMethod === 'bvh' && context.terrainState.terrainBVH && context.terrainState.terrainGeometry) {
-                const hit = rayCastBVH(rayOrigin, rayDir, context.terrainState.terrainBVH, context.terrainState.terrainGeometry, freshPos);
-                if (!hit) {
-                    const heightmapPos = vec2.create();
-                    rayCast(rayOrigin, rayDir, context.simulationState.simres, context.simulationState.heightMapCpuBuf, heightmapPos);
-                    freshPos[0] = heightmapPos[0];
-                    freshPos[1] = heightmapPos[1];
-                }
-            } else {
-                rayCast(rayOrigin, rayDir, context.simulationState.simres, context.simulationState.heightMapCpuBuf, freshPos);
-            }
-            
-            
-            // Validate fresh raycast result
-            const isValidUV = freshPos[0] >= 0.0 && freshPos[0] <= 1.0 &&
-                              freshPos[1] >= 0.0 && freshPos[1] <= 1.0 &&
-                              freshPos[0] !== -10.0 && freshPos[1] !== -10.0;
-            
-            
-            if (!isValidUV) {
-                // Don't activate brush, just set target
-                event.preventDefault();
-                event.stopPropagation();
-                event.stopImmediatePropagation();
-                brushPressed = 0;
-                return { shouldActivate: false, brushPressed: 0 };
-            }
-            
+
             // Read height from fresh raycast position using bilinear interpolation
             const brushUV = vec2.fromValues(freshPos[0], freshPos[1]);
             
@@ -226,7 +226,7 @@ export function handleBrushMouseDown(
             
         } else if (brushTypeNum === 6) {
             // Slope: Alt+click sets START point - DON'T change brushOperation for slope brush
-            // Alt is only used to set the start point, not to change operation mode
+            // posTemp is already fresh from the raycast at top of handleBrushMouseDown
             controls.slopeStartPos = vec2.clone(controls.posTemp);
             
             // Check if end point was already set

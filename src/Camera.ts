@@ -151,7 +151,7 @@ class Camera {
   }
 
   updateProjectionMatrix() {
-    mat4.perspective(this.projectionMatrix, this.fovy, this.aspectRatio, this.near, this.far);
+    mat4.perspective(this.projectionMatrix, this.fovy * Math.PI / 180, this.aspectRatio, this.near, this.far);
     if (this.threeCamera) {
       this.threeCamera.aspect = this.aspectRatio;
       this.threeCamera.updateProjectionMatrix();

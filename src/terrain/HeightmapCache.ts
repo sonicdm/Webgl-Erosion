@@ -47,17 +47,23 @@ class HeightmapCacheManager {
         let min = Infinity;
         let max = -Infinity;
 
-        // Convert RGBA image data to grayscale heights (0-1 range)
-        for (let i = 0; i < size; i++) {
-            const r = imageData[i * 4];
-            const g = imageData[i * 4 + 1];
-            const b = imageData[i * 4 + 2];
-            // Standard grayscale conversion
-            const gray = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
-            data[i] = gray;
+        // Convert RGBA image data to grayscale heights (0-1 range).
+        // Flip X to match terrain UV orientation (imported heightmaps were mirrored).
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const srcIndex = (y * width + x) * 4;
+                const r = imageData[srcIndex];
+                const g = imageData[srcIndex + 1];
+                const b = imageData[srcIndex + 2];
+                // Standard grayscale conversion
+                const gray = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
+                const dstX = width - 1 - x;
+                const dstIndex = y * width + dstX;
+                data[dstIndex] = gray;
 
-            if (gray < min) min = gray;
-            if (gray > max) max = gray;
+                if (gray < min) min = gray;
+                if (gray > max) max = gray;
+            }
         }
 
         this.cache = {

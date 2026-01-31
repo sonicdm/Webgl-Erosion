@@ -22,12 +22,13 @@ export interface PoolSyncTextures {
 /**
  * Create DataTextures with rgba32float-compatible format (RGBAFormat + FloatType)
  * so the WebGPU backend creates GPUTextures we can copy into from the pool.
+ * Uses a shared zero buffer to avoid per-texture CPU allocations at high simres.
  */
 export function createPoolSyncTextures(simres: number): PoolSyncTextures {
+  const sharedZeroData = new Float32Array(simres * simres * 4);
   const createFloatTexture = (): DataTexture => {
-    // Backend uploads via writeTexture; null data causes "Overload resolution failed". Use zeroed buffer.
-    const data = new Float32Array(simres * simres * 4);
-    const tex = new DataTexture(data, simres, simres);
+    // Reuse a single zero buffer across textures to avoid huge per-texture allocations.
+    const tex = new DataTexture(sharedZeroData, simres, simres);
     tex.format = RGBAFormat;
     tex.type = FloatType;
     tex.minFilter = tex.magFilter = LinearFilter;

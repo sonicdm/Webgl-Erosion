@@ -84,7 +84,8 @@ export function rayCastBVH(
         // Convert to UV space [0, 1]
         // Inverse of: worldX = (u - 0.5) * scale, so u = worldX / scale + 0.5
         let u = worldX + 0.5;
-        let v = worldZ + 0.5;
+        // PlaneGeometry uv.v is flipped after rotateX(-PI/2): v = 0.5 - worldZ
+        let v = 0.5 - worldZ;
         
         // Clamp to valid range [0, 1]
         u = Math.max(0, Math.min(1, u));

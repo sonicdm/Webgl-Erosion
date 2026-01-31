@@ -1,6 +1,7 @@
 import { MeshBVH, SAH } from 'three-mesh-bvh';
 import { createTerrainGeometry } from '../../utils/terrain-geometry-builder';
 import type { SimulationStateHolder } from '../state/SimulationStateHolder';
+import type { ConfigHolder } from '../state/ConfigHolder';
 import type { TerrainStateHolder } from '../state/TerrainStateHolder';
 
 /**
@@ -11,7 +12,8 @@ import type { TerrainStateHolder } from '../state/TerrainStateHolder';
 export class TerrainGeometryUpdater {
     constructor(
         private terrainState: TerrainStateHolder,
-        private simulationState: SimulationStateHolder
+        private simulationState: SimulationStateHolder,
+        private configHolder: ConfigHolder
     ) {}
 
     /**
@@ -39,7 +41,14 @@ export class TerrainGeometryUpdater {
 
         this.terrainState.setTerrainBVHBuildInProgress(true);
 
-        const geometry = createTerrainGeometry(simres, heightmapBuffer, scale);
+        // Use simres as mesh resolution for 1:1 correspondence between
+        // heightmap texels and BVH mesh vertices (accurate raycasting).
+        const geometry = createTerrainGeometry(
+            simres,
+            heightmapBuffer,
+            scale,
+            simres
+        );
         this.terrainState.setTerrainGeometry(geometry);
 
         const bvh = new MeshBVH(geometry, {

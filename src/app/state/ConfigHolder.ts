@@ -10,6 +10,9 @@ export class ConfigHolder {
     /** Shadow map resolution (e.g. for legacy WebGL path) */
     public readonly shadowMapResolution: number;
 
+    /** Fixed resolution for CPU raycast/BVH mesh (matches render mesh segments + 1) */
+    public readonly raycastMeshResolution: number;
+
     /** Max heightmap buffer counter — read heightmap to CPU every N frames when brush idle */
     public readonly maxHeightmapBufCounter: number;
 
@@ -25,12 +28,14 @@ export class ConfigHolder {
         maxHeightmapBufCounter?: number;
         activeHeightmapReadInterval?: number;
         hoverHeightmapReadInterval?: number;
+        raycastMeshResolution?: number;
     }) {
         this.defaultSimres = options?.defaultSimres ?? 1024;
         this.shadowMapResolution = options?.shadowMapResolution ?? 4096;
         this.maxHeightmapBufCounter = options?.maxHeightmapBufCounter ?? 200;
         this.activeHeightmapReadInterval = options?.activeHeightmapReadInterval ?? 2;
         this.hoverHeightmapReadInterval = options?.hoverHeightmapReadInterval ?? 4;
+        this.raycastMeshResolution = options?.raycastMeshResolution ?? 256;
     }
 
     /**
@@ -43,20 +48,19 @@ export class ConfigHolder {
         simres: number,
         heightMapBufCounter: number
     ): boolean {
+        const scale = this.getResolutionScale(simres);
         if (brushPressed) {
-            const scale = this.getResolutionScale(simres);
             return heightMapBufCounter % (this.activeHeightmapReadInterval * scale) === 0;
         }
         if (brushVisible) {
-            const scale = this.getResolutionScale(simres);
             return heightMapBufCounter % (this.hoverHeightmapReadInterval * scale) === 0;
         }
-        return heightMapBufCounter >= this.maxHeightmapBufCounter;
+        return heightMapBufCounter >= this.maxHeightmapBufCounter * scale;
     }
 
     private getResolutionScale(simres: number): number {
         const basePixels = 1024 * 1024;
         const currentPixels = simres * simres;
-        return Math.max(1, Math.round(currentPixels / basePixels));
+        return Math.max(1, Math.ceil(currentPixels / basePixels));
     }
 }

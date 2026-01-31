@@ -32,14 +32,15 @@ export class WebGPURendererWrapper {
             // Check WebGPU capability
             const capability = await checkWebGPUSupport();
             
-            if (!capability.supported) {
+            if (!capability.supported || !capability.device) {
                 throw new Error(`WebGPU not supported: ${capability.fallbackReason || 'Unknown reason'}`);
             }
 
-            // Create WebGPURenderer
+            // Create WebGPURenderer (use shared device so limits/features match compute).
             this.renderer = new WebGPURenderer({
                 canvas: this.canvas,
-                antialias: true
+                antialias: true,
+                device: capability.device
             });
 
             // Initialize the renderer (async operation)
