@@ -1,6 +1,6 @@
 import { Vector2, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, pow, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, pow, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -45,6 +45,10 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
     private sourcePosUniforms: any[] = [];
     private sourceSizeUniforms: any[] = [];
     private lightDirUniform: any;
+    private grassLineUniform: any;
+    private rockLineUniform: any;
+    private snowLineUniform: any;
+    private slopeRockAmountUniform: any;
     private inputs: TerrainMaterialNodeInputs;
 
     constructor(
@@ -68,6 +72,10 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         this.showFlowTraceUniform = uniform(inputs.showFlowTrace ? 1 : 0);
         this.showSedimentTraceUniform = uniform(inputs.showSedimentTrace !== false ? 1 : 0);
         this.lightDirUniform = uniform(new Vector3(0.4, 0.8, 0.0));
+        this.grassLineUniform = uniform(0.10);
+        this.rockLineUniform = uniform(0.50);
+        this.snowLineUniform = uniform(0.70);
+        this.slopeRockAmountUniform = uniform(1.0);
         // Water source indicator uniforms (up to 8 sources displayed)
         this.sourceCountUniform = uniform(0);
         const MAX_DISPLAYED_SOURCES = 8;
@@ -129,12 +137,20 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         showFlowTrace?: boolean;
         showSedimentTrace?: boolean;
         lightDir?: [number, number, number];
+        grassLine?: number;
+        rockLine?: number;
+        snowLine?: number;
+        slopeRockAmount?: number;
     }): void {
         if (params.snowRange !== undefined) this.snowRangeUniform.value = params.snowRange;
         if (params.forestRange !== undefined) this.forestRangeUniform.value = params.forestRange;
         if (params.terrainPalette !== undefined) this.terrainPaletteUniform.value = params.terrainPalette;
         if (params.maxHeight !== undefined) this.maxHeightUniform.value = params.maxHeight;
         if (params.debugMode !== undefined) this.debugModeUniform.value = params.debugMode;
+        if (params.grassLine !== undefined) this.grassLineUniform.value = params.grassLine;
+        if (params.rockLine !== undefined) this.rockLineUniform.value = params.rockLine;
+        if (params.snowLine !== undefined) this.snowLineUniform.value = params.snowLine;
+        if (params.slopeRockAmount !== undefined) this.slopeRockAmountUniform.value = params.slopeRockAmount;
         if (params.showFlowTrace !== undefined) this.showFlowTraceUniform.value = params.showFlowTrace ? 1 : 0;
         if (params.showSedimentTrace !== undefined) this.showSedimentTraceUniform.value = params.showSedimentTrace ? 1 : 0;
         if (params.lightDir !== undefined) this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
@@ -187,6 +203,10 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             forestRange: this.forestRangeUniform,
             terrainPalette: this.terrainPaletteUniform,
             maxHeight: this.maxHeightUniform,
+            grassLine: this.grassLineUniform,
+            rockLine: this.rockLineUniform,
+            snowLine: this.snowLineUniform,
+            slopeRockAmount: this.slopeRockAmountUniform,
         });
         const shadowCoord = inputs.shadowCoord ?? vec3(sampling.uv, float(1));
         const shadow = this.controller.getShadowNode({
@@ -245,13 +265,19 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             litColor = mix(litColor, litColor.add(sourceGlowCol.mul(srcGlow.mul(0.5))), srcActive.mul(srcGlow));
         }
 
-        // --- Flow trace overlay (legacy: yellowish where water has flowed) ---
+        // --- Flow trace overlay ---
         // sedimentBlend accumulates over time where water flows, fades when dry.
-        // Legacy: sedimentTrace = 1 - exp(-sval*300), mixed with khaki color.
+        // Adaptive: on light terrain (sand/snow) darken the trace for contrast;
+        // on dark terrain (grass/rock) use bright khaki.
         const flowTraceEnabled = this.showFlowTraceUniform.equal(1);
         const sval = sampling.sedimentBlend; // accumulated flow history
         const flowIntensity = float(1).sub(pow(float(2.718), sval.mul(-300).clamp(-10, 0)));
-        const flowColor = vec3(240 / 255, 230 / 255, 140 / 255); // khaki/yellow
+        // Approximate luminance of the lit terrain
+        const terrainLum = litColor.x.mul(0.299).add(litColor.y.mul(0.587)).add(litColor.z.mul(0.114));
+        // Bright terrain → dark brown trace; dark terrain → bright khaki trace
+        const flowColorBright = vec3(240 / 255, 230 / 255, 140 / 255); // khaki
+        const flowColorDark = vec3(0.35, 0.25, 0.10); // dark brown
+        const flowColor = mix(flowColorBright, flowColorDark, smoothstep(float(0.35), float(0.55), terrainLum));
         const flowBlended = mix(litColor, flowColor.mul(lamb).add(ambientCol), flowIntensity.mul(1.5).clamp(0, 0.85));
         litColor = flowTraceEnabled.select(flowBlended, litColor);
 

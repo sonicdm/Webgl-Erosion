@@ -1100,6 +1100,10 @@ async function main() {
           showFlowTrace: controls.ShowFlowTrace,
           showSedimentTrace: controls.SedimentTrace,
           lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
+          grassLine: controls.GrassLine,
+          rockLine: controls.RockLine,
+          snowLine: controls.SnowLine,
+          slopeRockAmount: controls.SlopeRockAmount,
         });
         // Pass water source positions for red glow indicators
         terrainMat.updateSources(waterSources.map(s => ({

@@ -8,14 +8,22 @@ export interface TerrainPaletteInputs {
     normal: any;
     /** Rock material value from heightmap (B channel), 0-1 */
     rock: any;
-    /** Controls snow line height (GUI parameter) */
+    /** Controls snow line height (GUI parameter, legacy — prefer snowLine) */
     snowRange: any;
-    /** Controls forest/grass steepness threshold (GUI parameter) */
+    /** Controls forest/grass steepness threshold (GUI parameter, legacy — prefer slopeRockAmount) */
     forestRange: any;
     /** Palette variant selector (0=default, 1=desert, 2=extended range) */
     terrainPalette: any;
     /** Max terrain height for normalization (terrainHeight * 120, default 240) */
     maxHeight?: any;
+    /** Normalised height where grass starts blending in (0-0.5, default 0.10) */
+    grassLine?: any;
+    /** Normalised height where rock starts blending in (0.2-0.9, default 0.50) */
+    rockLine?: any;
+    /** Normalised height where snow starts blending in (0.3-1.0, default 0.70) */
+    snowLine?: any;
+    /** How aggressively slopes show rock (0-3, default 1.0) */
+    slopeRockAmount?: any;
 }
 
 export interface TerrainPaletteResult {
@@ -68,13 +76,15 @@ export class TerrainPaletteNode {
         const rawHeight = this.ensureFloatNode(inputs.height, 0);
         const normal = inputs.normal ?? vec3(0, 1, 0);
         const rock = this.ensureFloatNode(inputs.rock, 0);
-        const snowRange = this.ensureFloatNode(inputs.snowRange, 1);
-        const forestRange = this.ensureFloatNode(inputs.forestRange, 1);
         const terrainPalette = this.ensureFloatNode(inputs.terrainPalette, 0);
-        // maxHeight = terrainHeight * 120 (default 2*120=240).
-        // Dividing by maxHeight normalises to 0..1 independent of simres.
         const maxH = this.ensureFloatNode(inputs.maxHeight ?? 240, 240);
         const normHeight = clamp(rawHeight.div(maxH), 0, 1);
+
+        // Layer control uniforms (from GUI or defaults)
+        const grassLine = this.ensureFloatNode(inputs.grassLine, 0.10);
+        const rockLine = this.ensureFloatNode(inputs.rockLine, 0.50);
+        const snowLineParam = this.ensureFloatNode(inputs.snowLine, 0.70);
+        const slopeRockAmt = this.ensureFloatNode(inputs.slopeRockAmount, 1.0);
 
         // --- Procedural colour constants ---
         const sandCol   = vec3(0.76, 0.70, 0.50);
@@ -83,44 +93,47 @@ export class TerrainPaletteNode {
         const snowCol   = vec3(0.95, 0.95, 0.97);
         const dirtCol   = vec3(0.50, 0.44, 0.35);
 
-        // --- Height-based multi-band blending (THREE.Terrain smoothstep style) ---
-        // Start with sand (base)
+        // --- Height-based multi-band blending ---
+        // Bands are driven by grassLine, rockLine, snowLine uniforms.
+        // Each band has a smoothstep in-transition (~0.10 wide) and out-transition.
         let baseColor = sandCol;
 
-        // Grass band: blends in 0.05–0.15, blends out 0.55–0.70
-        const grassIn = smoothstep(float(0.05), float(0.15), normHeight);
-        const grassOut = smoothstep(float(0.55), float(0.70), normHeight);
+        // Grass band: blends in at grassLine, blends out approaching rockLine
+        const grassStart = grassLine.sub(float(0.02));
+        const grassEnd = grassLine.add(float(0.08));
+        const grassOutStart = rockLine.sub(float(0.05));
+        const grassOutEnd = rockLine.add(float(0.10));
+        const grassIn = smoothstep(grassStart, grassEnd, normHeight);
+        const grassOut = smoothstep(grassOutStart, grassOutEnd, normHeight);
         const grassBlend = clamp(grassIn.mul(float(1).sub(grassOut)), 0, 1);
         baseColor = mix(baseColor, grassCol, grassBlend);
 
-        // Rock band: blends in 0.40–0.60, blends out 0.80–0.95
-        const rockIn = smoothstep(float(0.40), float(0.60), normHeight);
-        const rockOut = smoothstep(float(0.80), float(0.95), normHeight);
+        // Rock band: blends in at rockLine, blends out approaching snowLine
+        const rockStart = rockLine.sub(float(0.05));
+        const rockEnd = rockLine.add(float(0.10));
+        const rockOutStart = snowLineParam.sub(float(0.05));
+        const rockOutEnd = snowLineParam.add(float(0.10));
+        const rockIn = smoothstep(rockStart, rockEnd, normHeight);
+        const rockOut = smoothstep(rockOutStart, rockOutEnd, normHeight);
         const rockHeightBlend = clamp(rockIn.mul(float(1).sub(rockOut)), 0, 1);
         baseColor = mix(baseColor, rockMid, rockHeightBlend);
 
-        // Snow band: blends in based on snowRange — higher snowRange pushes snow line up
-        // Default snowRange=1 → snow starts at 0.70.  snowRange=3 → starts higher.
-        const snowStart = float(0.60).add(snowRange.mul(float(0.10)));
-        const snowEnd = snowStart.add(float(0.15));
+        // Snow band: blends in at snowLine
+        const snowStart = snowLineParam.sub(float(0.05));
+        const snowEnd = snowLineParam.add(float(0.10));
         const snowBlend = clamp(smoothstep(snowStart, snowEnd, normHeight), 0, 1);
         baseColor = mix(baseColor, snowCol, snowBlend);
 
-        // --- Slope-based rock override (THREE.Terrain style) ---
-        // Slope: angle between surface normal and up vector.
-        // Our normal points DOWN for flat terrain, so use abs(normal.y) directly.
-        // abs(normal.y) = 1 → flat, abs(normal.y) = 0 → cliff
+        // --- Slope-based rock override ---
         const cosSlope = clamp(abs(normal.y), 0, 1);
-        // Convert to slope angle: acos(cosSlope) where 0 = flat, PI/2 = vertical
-        // THREE.Terrain uses smoothstep(27°, 45°, slope) → radians 0.471, 0.785
         const slopeAngle = acos(cosSlope);
         const slopeFactor = smoothstep(float(0.47), float(0.79), slopeAngle);
-        // forestRange controls how aggressively slopes show rock (higher = more slope rock)
-        const slopeRock = clamp(slopeFactor.mul(forestRange), 0, 1);
+        const slopeRock = clamp(slopeFactor.mul(slopeRockAmt), 0, 1);
         baseColor = mix(baseColor, rockMid, slopeRock);
 
         // Blend dirt into flat low areas (below grass line)
-        const dirtBlend = clamp(float(1).sub(normHeight.div(float(0.06))), 0, 1);
+        const dirtThresh = grassLine.mul(float(0.6));
+        const dirtBlend = clamp(float(1).sub(normHeight.div(dirtThresh)), 0, 1);
         baseColor = mix(baseColor, dirtCol, dirtBlend.mul(float(0.4)));
 
         // --- Terrain palette variant ---

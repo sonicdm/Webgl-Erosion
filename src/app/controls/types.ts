@@ -95,6 +95,11 @@ export interface IAppControls {
     TerrainPlatte: number;
     SnowRange: number;
     ForestRange: number;
+    // Terrain layer controls (normalised height 0-1)
+    GrassLine: number;
+    RockLine: number;
+    SnowLine: number;
+    SlopeRockAmount: number;
     lightPosX: number;
     lightPosY: number;
     lightPosZ: number;

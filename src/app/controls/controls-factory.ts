@@ -72,6 +72,10 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         TerrainPlatte: 1,
         SnowRange: 0,
         ForestRange: 0,
+        GrassLine: 0.10,
+        RockLine: 0.50,
+        SnowLine: 0.70,
+        SlopeRockAmount: 1.0,
 
         brushType: 2,
         brushSize: 4,

@@ -263,6 +263,11 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
     renderingpara.add(controls, 'ShowFlowTrace');
     renderingpara.add(controls, 'SedimentTrace');
+    var terrainLayers = renderingpara.addFolder('Terrain Layers');
+    terrainLayers.add(controls, 'GrassLine', 0.0, 0.5).step(0.01).name('Grass Line');
+    terrainLayers.add(controls, 'RockLine', 0.2, 0.9).step(0.01).name('Rock Line');
+    terrainLayers.add(controls, 'SnowLine', 0.3, 1.0).step(0.01).name('Snow Line');
+    terrainLayers.add(controls, 'SlopeRockAmount', 0.0, 3.0).step(0.1).name('Slope Rock');
     var renderingparalightpos = renderingpara.addFolder('sunPos/Dir');
     renderingparalightpos.add(controls, 'lightPosX', -1.0, 1.0);
     renderingparalightpos.add(controls, 'lightPosY', 0.0, 1.0);

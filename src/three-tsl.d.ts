@@ -25,8 +25,15 @@ declare module 'three/tsl' {
     export function uniform(value: any): any;
     export function depth(value?: any): any;
     export function sub(a: any, b: any): any;
+    export function max(a: any, b: any): any;
+    export function min(a: any, b: any): any;
+    export function smoothstep(edge0: any, edge1: any, x: any): any;
+    export function acos(x: any): any;
+    export function reflect(incident: any, normal: any): any;
     export const positionLocal: any;
+    export const positionWorld: any;
     export const normalLocal: any;
+    export const cameraPosition: any;
     const __all: Record<string, any>;
     export default __all;
 }

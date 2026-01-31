@@ -1,6 +1,6 @@
 import { Texture, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { cameraPosition, clamp, dot, float, max, mix, normalize, normalLocal, positionLocal, positionWorld, pow, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { cameraPosition, clamp, dot, float, max, min, mix, normalize, normalLocal, positionLocal, positionWorld, pow, reflect, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
 
 export interface WaterMaterialNodeInputs {
     /** Heightmap texture (R=height, G=water, B=rock, A=baseRockHeight) */
@@ -109,19 +109,20 @@ export class WaterMaterialNode extends MeshBasicNodeMaterial {
         const halfway = normalize(lightDir.add(viewDir));
 
         // --- Specular highlight ---
-        // Legacy used pow 333 but point-sampled compute heights are noisier
-        // than bilinear-filtered GLSL, so soften to 150 to reduce stripe artifacts
+        // Softened from legacy pow(333) to reduce grid-aligned stripe artifacts
+        // from point-sampled compute heights (noisier than bilinear GLSL)
         const spec = pow(max(dot(waterNormal, halfway), float(0)), float(150));
 
-        // --- Fresnel reflection (bias=0.2, scale=0.15, pow=12) ---
-        // Softened from legacy (scale=0.2, pow=22) to reduce grid-aligned banding
-        const fresnelBase = float(1).add(dot(viewDir, waterNormal.negate()));
+        // --- Fresnel reflection ---
+        // Schlick-like approximation: bias=0.2, scale=0.2, pow=22 (legacy values)
+        const fresnelBase = clamp(float(1).add(dot(viewDir, waterNormal.negate())), 0, 1);
         const fresnel = clamp(
-            float(0.2).add(float(0.15).mul(pow(fresnelBase, float(12)))),
+            float(0.2).add(float(0.2).mul(pow(fresnelBase, float(22)))),
             0, 1
         );
-        // Sky color for reflection
-        const reflectedSky = mix(vec3(0.6, 0.6, 0.6), vec3(0.3, 0.5, 0.9), clamp(halfway.y, 0, 1));
+        // Sky color for reflection — use reflected view direction for spatial coherence
+        const reflectDir = reflect(viewDir.negate(), waterNormal);
+        const reflectedSky = mix(vec3(0.6, 0.6, 0.6), vec3(0.3, 0.5, 0.9), clamp(reflectDir.y, 0, 1));
 
         // --- Depth-based opacity ---
         // Scale water level to a perceptual depth; clamp to reasonable range
@@ -136,26 +137,17 @@ export class WaterMaterialNode extends MeshBasicNodeMaterial {
             vec3(0.0, 0.3, 0.5)     // standard deep blue
         );
 
-        // --- Sediment coloring (legacy: red for low sediment → blue for high) ---
-        const sedimentAmount = inputs.sedimentMap
-            ? clamp(texture(inputs.sedimentMap, curUv).x.mul(2), 0, 1)
-            : float(0);
-        const sedimentTint = mix(vec3(0.8, 0.0, 0.0), vec3(0.0, 0.0, 0.8), sedimentAmount);
-        // Blend sediment tint into base color when sediment is present
-        const tintedBase = mix(baseColor, sedimentTint, clamp(sedimentAmount.mul(0.6), 0, 0.7));
-
-        // --- Combine ---
-        const waterColor = tintedBase
+        // --- Combine: base + Fresnel sky reflection + specular (matches legacy) ---
+        const waterColor = baseColor
             .add(fresnel.mul(reflectedSky))
             .add(vec3(spec, spec, spec));
 
         // Opacity: deeper = more opaque; specular adds slight extra opacity
-        // Kill very shallow water (< ~0.5 texel worth) to prevent thin-film artifacts
-        const minWaterThreshold = float(0.3);
-        const shallowFade = clamp(waterLevel.mul(float(180)).div(this.simresUniform).div(minWaterThreshold), 0, 1);
-        const opacity = clamp(
+        // Gentle shallow fade to prevent single-pixel water noise at edges
+        const shallowFade = clamp(waterLevel.mul(float(180)).div(this.simresUniform).mul(float(5)), 0, 1);
+        const opacity = min(
             float(1.8).add(spec).mul(this.waterTransparencyUniform).mul(dpVal).mul(shallowFade),
-            0, 1
+            float(1)
         );
 
         this.colorNode = waterColor;
