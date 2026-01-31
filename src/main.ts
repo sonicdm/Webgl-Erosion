@@ -9,7 +9,7 @@ import { setupGUI, GUIControllers } from './gui/gui-setup';
 import { createEventHandlers } from './events/event-handlers';
 import { updateBrushState, BrushContext, BrushControls, getOriginalBrushOperation, setOriginalBrushOperation } from './brush-handler';
 import { updatePaletteSelection } from './brush-palette';
-import { rayCast } from './utils/raycast';
+import { rayCast, sampleHeightBilinear } from './utils/raycast';
 import { rayCastBVH } from './utils/bvh-raycast';
 import { waterSources } from './utils/water-sources';
 import { updateTerrainGeometry } from './utils/terrain-geometry-builder';
@@ -1139,10 +1139,12 @@ async function main() {
             slopeRockAmount: controls.SlopeRockAmount,
           });
           // Update water source indicator overlay meshes
-          sourceIndicatorOverlay?.update(waterSources.map(s => ({
-            position: [s.position[0], s.position[1]] as [number, number],
-            size: s.size,
-          })));
+          const simState = appContext.simulationState;
+          sourceIndicatorOverlay?.update(waterSources.map(s => {
+            const uvPos: [number, number] = [s.position[0], s.position[1]];
+            const h = sampleHeightBilinear(s.position, simState.simres, simState.heightMapCpuBuf);
+            return { position: uvPos, size: s.size, worldY: h / simState.simres };
+          }));
         }
         // Push per-frame control values to water material uniforms
         if (webgpuWaterMesh?.material) {

@@ -5,6 +5,7 @@ import { float, vec3 } from 'three/tsl';
 export interface SourceIndicatorData {
     position: [number, number]; // UV [0,1]
     size: number;
+    worldY: number; // terrain height in world space (height / simres)
 }
 
 /**
@@ -61,7 +62,7 @@ export class SourceIndicatorOverlay {
                 const radius = 0.01 * src.size;
                 const worldX = src.position[0] - 0.5;
                 const worldZ = 0.5 - src.position[1];
-                mesh.position.set(worldX, 0.002, worldZ);
+                mesh.position.set(worldX, src.worldY + 0.001, worldZ);
                 mesh.scale.set(radius, radius, radius);
                 mesh.visible = true;
             } else {
