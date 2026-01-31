@@ -920,13 +920,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 `;
 
-    // MacCormack correction (maccormack-frag.glsl)
+    // MacCormack correction (maccormack-frag.glsl) + sediment blend update
     private MACCORMACK_CORRECTION_SHADER = `
 @group(0) @binding(0) var readVel: texture_2d<f32>;
 @group(0) @binding(1) var readSediment: texture_2d<f32>;
 @group(0) @binding(2) var readSedimentAdvectA: texture_2d<f32>;
 @group(0) @binding(3) var readSedimentAdvectB: texture_2d<f32>;
 @group(0) @binding(4) var writeSediment: texture_storage_2d<rgba32float, write>;
+
+@group(0) @binding(6) var readTerrain: texture_2d<f32>;
+@group(0) @binding(7) var readSedimentBlend: texture_2d<f32>;
+@group(0) @binding(8) var writeSedimentBlend: texture_storage_2d<rgba32float, write>;
 
 struct Uniforms {
     u_SimRes: f32,
@@ -964,6 +968,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     res = clamp(res, clampMin, clampMax);
 
     textureStore(writeSediment, coord, vec4<f32>(res, 0.0, 0.0, 1.0));
+
+    // Sediment blend accumulation (flow trace data) — matches simple advection formula
+    let curTerrain = textureLoad(readTerrain, coord, 0);
+    let curSediVal = sediment * curTerrain.y * 0.1;
+    let sediBlendVal = textureLoad(readSedimentBlend, coord, 0).x;
+    let newSediBlendVal = (sediBlendVal * 1660.0 + curSediVal) / 1661.0;
+    textureStore(writeSedimentBlend, coord, vec4<f32>(newSediBlendVal, 0.0, 0.0, 1.0));
 }
 `;
 
@@ -1547,6 +1558,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     createSampledTextureLayoutEntry(3),
                     createStorageTextureLayoutEntry(4, 'write-only'),
                     createUniformBufferLayoutEntry(5),
+                    createSampledTextureLayoutEntry(6),
+                    createSampledTextureLayoutEntry(7),
+                    createStorageTextureLayoutEntry(8, 'write-only'),
                 ]);
                 this.maccormackCorrectionPipeline = this.createComputePipeline(
                     this.MACCORMACK_CORRECTION_SHADER,
@@ -1630,6 +1644,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 createSampledTextureBinding(texturePool.sedimentAdvectBTexture, 3),
                 createStorageTextureBinding(texturePool.writeSedimentTexture, 4),
                 { binding: 5, resource: { buffer: correctionUniformBuffer } },
+                createSampledTextureBinding(texturePool.readTerrainTexture, 6),
+                createSampledTextureBinding(texturePool.readSedimentBlendTexture, 7),
+                createStorageTextureBinding(texturePool.writeSedimentBlendTexture, 8),
             ]));
             pass3.dispatchWorkgroups(workgroupX, workgroupY, 1);
             pass3.end();

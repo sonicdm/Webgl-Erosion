@@ -87,30 +87,37 @@ export class WaterMaterialNode extends MeshBasicNodeMaterial {
         const displacementY = totalHeight.div(this.simresUniform).add(float(0.0002));
         this.positionNode = positionLocal.add(normalLocal.mul(displacementY));
 
-        // --- Water surface normal from heightmap neighbors ---
-        // Sample total height (terrain+water) at neighboring texels
+        // --- Water surface normal via 4-neighbor central differences ---
+        // Samples left/right/top/bottom for a symmetric, smooth normal.
+        // The 2-neighbor cross-product approach creates asymmetric normals
+        // that produce grid-aligned stripe artifacts with high specular.
         const hmR = texture(inputs.heightmap, curUv.add(vec2(eps, float(0))));
+        const hmL = texture(inputs.heightmap, curUv.add(vec2(eps.negate(), float(0))));
         const hmT = texture(inputs.heightmap, curUv.add(vec2(float(0), eps)));
-        const curTotal = terrainHeight.add(waterLevel);
+        const hmB = texture(inputs.heightmap, curUv.add(vec2(float(0), eps.negate())));
+        // Total surface height = terrain + water at each neighbor
+        const lTotal = hmL.x.add(hmL.y);
         const rTotal = hmR.x.add(hmR.y);
         const tTotal = hmT.x.add(hmT.y);
-        // Cross product of tangent vectors gives normal (matches legacy calnor)
-        const n1 = normalize(vec3(float(-1), curTotal.sub(rTotal), float(0)));
-        const n2 = normalize(vec3(float(-1), tTotal.sub(rTotal), float(1)));
-        const waterNormal = normalize(n1.cross(n2)).negate();
+        const bTotal = hmB.x.add(hmB.y);
+        // Central difference: (left-right, 2.0, bottom-top), normalized
+        const waterNormal = normalize(vec3(lTotal.sub(rTotal), float(2), bTotal.sub(tTotal)));
 
         // --- View and light vectors ---
         const viewDir = normalize(cameraPosition.sub(positionWorld));
         const lightDir = normalize(this.lightDirUniform);
         const halfway = normalize(lightDir.add(viewDir));
 
-        // --- Specular highlight (legacy: pow 333 for tight, bright specular) ---
-        const spec = pow(max(dot(waterNormal, halfway), float(0)), float(333));
+        // --- Specular highlight ---
+        // Legacy used pow 333 but point-sampled compute heights are noisier
+        // than bilinear-filtered GLSL, so soften to 150 to reduce stripe artifacts
+        const spec = pow(max(dot(waterNormal, halfway), float(0)), float(150));
 
-        // --- Fresnel reflection (legacy: bias=0.2, scale=0.2, pow=22) ---
+        // --- Fresnel reflection (bias=0.2, scale=0.15, pow=12) ---
+        // Softened from legacy (scale=0.2, pow=22) to reduce grid-aligned banding
         const fresnelBase = float(1).add(dot(viewDir, waterNormal.negate()));
         const fresnel = clamp(
-            float(0.2).add(float(0.2).mul(pow(fresnelBase, float(22)))),
+            float(0.2).add(float(0.15).mul(pow(fresnelBase, float(12)))),
             0, 1
         );
         // Sky color for reflection
