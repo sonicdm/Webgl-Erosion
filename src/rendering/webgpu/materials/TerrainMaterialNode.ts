@@ -245,7 +245,6 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const lamb = max(dot(surfaceNormal, lightDir), float(0));
         const ambientCol = vec3(0.01, 0.01, 0.01);
 
-        // Use .toVar() so litColor can be assigned inside the Loop
         let litColor = palette.color.mul(shadow.shadowFactor).mul(lamb).add(ambientCol);
 
         // Brush overlay — ring + fill. Color comes from a single uniform (set in updateBrush).
@@ -263,11 +262,14 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const brushIntensity = ringFactor.mul(0.95).add(insideFill);
         const brushActiveFloat = brushType.greaterThan(0).select(float(1), float(0));
         const brushBlend = brushActiveFloat.mul(brushIntensity);
-        litColor = mix(litColor, litColor.add(brushCol), brushBlend);
+        litColor = litColor.add(brushCol.mul(brushBlend));
 
         // --- Water source indicators (red glow, unrolled over DataTexture) ---
         // Each iteration reads one texel from the 16×1 source data texture.
         // Inactive sources at (-10,-10) with size=0 naturally produce 0 glow.
+        // IMPORTANT: use litColor.add(c.mul(t)) instead of mix(litColor, litColor.add(c), t)
+        // because mix(a, a+c, t) = a + c*t algebraically, but the mix form references litColor
+        // twice per iteration, causing exponential node traversal in TSL (2^N paths).
         const sourceGlowCol = vec3(0.8, 0.15, 0.1);
         const srcTex = texture(this.sourceDataTexture);
         const MAX_SOURCES = 16;
@@ -275,9 +277,9 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             const srcUv = vec2((i + 0.5) / MAX_SOURCES, 0.5);
             const srcData = srcTex.uv(srcUv);
             const srcDist = length(sampling.uv.sub(vec2(srcData.x, srcData.y)));
-            const srcRadius = float(0.01).mul(srcData.z).max(float(0.0001)); // avoid div-by-zero
-            const srcGlow = float(1).sub(srcDist.div(srcRadius)).clamp(0, 1).mul(srcData.w); // w=active
-            litColor = mix(litColor, litColor.add(sourceGlowCol.mul(0.5)), srcGlow);
+            const srcRadius = float(0.01).mul(srcData.z).max(float(0.0001));
+            const srcGlow = float(1).sub(srcDist.div(srcRadius)).clamp(0, 1).mul(srcData.w);
+            litColor = litColor.add(sourceGlowCol.mul(0.5).mul(srcGlow));
         }
 
         // --- Flow trace overlay ---
