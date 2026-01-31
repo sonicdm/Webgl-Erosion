@@ -100,8 +100,11 @@ function handleInteraction (buttons : number, x : number, y : number){
 let controlsConfig: ControlsConfig;
 
 async function main() {
+  const _t0 = performance.now();
+  const _tlog = (label: string) => console.log(`[Init Timing] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
   // Create application context with state holders (composition root)
   appContext = createApp();
+  _tlog('createApp');
 
   // Terrain scene service: loadScene, reset, setTerrainRandom (stable actions for createControls)
   terrainSceneService = new TerrainSceneService(appContext, {
@@ -155,9 +158,12 @@ async function main() {
 
 
   // Initialize WebGPU renderer first; get device from it for compute and pool (single device)
+  const initLoadingText = document.getElementById('loading-text');
   try {
+    if (initLoadingText) initLoadingText.textContent = 'Initializing WebGPU...';
     webgpuRendererWrapper = new WebGPURendererWrapper(canvas, appContext);
     await webgpuRendererWrapper.initialize();
+    _tlog('renderer.initialize()');
     webgpuDevice = webgpuRendererWrapper.getDevice();
     if (!webgpuDevice) {
       throw new Error('WebGPU device not available from renderer');
@@ -166,11 +172,13 @@ async function main() {
     webgpuComputePipeline = new ComputeNodePipeline(webgpuDevice);
     webgpuTexturePool = new WebGPUTexturePool(webgpuDevice, appContext.simulationState.simres, appContext.configHolder.shadowMapResolution);
     webgpuTexturePool.setup();
+    _tlog('compute pipeline + texture pool');
 
     // Initialize terrain generator compute pipeline
     terrainGeneratorCompute = new TerrainGeneratorCompute(webgpuDevice);
     await terrainGeneratorCompute.initialize();
     terrainGeneratorCompute.setRandomSeed(); // Set initial random seed
+    _tlog('terrain generator init');
 
     webgpuScene = new Scene();
     webgpuRendererWrapper.setClearColor(0, 0, 0, 1);
@@ -181,6 +189,9 @@ async function main() {
     webgpuPoolSyncTextures = createPoolSyncTextures(simres);
 
     // Terrain plane with TerrainMaterialNode (samples pool via sync textures)
+    if (initLoadingText) initLoadingText.textContent = 'Building materials...';
+    // Yield so browser can paint the loading text before heavy sync material construction
+    await new Promise<void>(r => requestAnimationFrame(() => r()));
     // Render mesh uses fixed segment count for performance; BVH uses full simres for accuracy.
     const webgpuTerrainSegments = appContext.configHolder.raycastMeshResolution - 1;
     const webgpuTerrainGeometry = new PlaneGeometry(1, 1, webgpuTerrainSegments, webgpuTerrainSegments);
@@ -225,6 +236,7 @@ async function main() {
     webgpuScene.add(skyMesh);
     (webgpuScene as any)._skyMesh = skyMesh; // Stash reference for per-frame updates
 
+    _tlog('materials + scene setup');
     console.log('[WebGPU] Renderer, compute pipeline, texture pool, and terrain generator initialized');
   } catch (error) {
     console.error('[WebGPU] Failed to initialize:', error);
@@ -290,6 +302,7 @@ async function main() {
   };
   controls = createControls(appContext, actions);
   const { gui, controllers } = setupGUI(controls);
+  _tlog('controls + GUI setup');
   const { brushTypeController, brushSizeController, brushStrengthController, brushOperationController } = controllers;
   controllersRef = controllers;
 
@@ -491,6 +504,7 @@ async function main() {
   let initialWebGPUReadbackRequested = false;
   let webgpuTerrainGeneratedOnce = false;
 
+  _tlog('tick() defined — starting render loop');
   function tick() {
     stats.begin();
     
@@ -562,6 +576,8 @@ async function main() {
         } else {
             if (loadingOverlay) {
                 loadingOverlay.classList.add('visible');
+                const lt = document.getElementById('loading-text');
+                if (lt) lt.textContent = 'Generating Terrain...';
                 // Force initial render of overlay
                 void loadingOverlay.offsetHeight;
             } else {
@@ -1058,20 +1074,28 @@ async function main() {
       webgpuRendererWrapper.setSize(window.innerWidth, window.innerHeight);
       const rendererThree = webgpuRendererWrapper.getRenderer() as any;
       const backend = rendererThree?.backend;
-      // Force backend to create our textures (needed before copy); run once
+      // Compile shaders asynchronously; don't render until done to avoid
+      // synchronous compilation that blocks the main thread and causes a white flash.
       if (!webgpuSceneCompileStarted) {
         webgpuSceneCompileStarted = true;
+        const loadingText = document.getElementById('loading-text');
+        if (loadingText) loadingText.textContent = 'Compiling shaders...';
         rendererThree?.compileAsync?.(webgpuScene, camera.threeCamera)?.then?.(() => {
           webgpuSceneCompileDone = true;
+          console.log('[WebGPU] Scene compiled — first render ready');
+          // Hide loading overlay after first render
+          requestAnimationFrame(() => {
+            const overlay = document.getElementById('terrain-loading-overlay');
+            if (overlay) overlay.classList.remove('visible');
+          });
         })?.catch?.(() => {
           webgpuSceneCompileDone = true;
+          const overlay = document.getElementById('terrain-loading-overlay');
+          if (overlay) overlay.classList.remove('visible');
         });
-        // Fallback: start copying after a short delay even if compile hasn't resolved (first render may have created textures)
-        setTimeout(() => {
-          webgpuSceneCompileDone = true;
-        }, 500);
       }
-      if (backend?.device) {
+      // Only copy and render once compilation is done
+      if (webgpuSceneCompileDone && backend?.device) {
         copyPoolToThreeTextures(
           backend,
           webgpuTexturePool,
@@ -1079,54 +1103,57 @@ async function main() {
           appContext.simulationState.simres
         );
       }
-      if (webgpuTerrainMesh?.material) {
-        const terrainMat = webgpuTerrainMesh.material as unknown as TerrainMaterialNode;
-        const brushPosValid = reusablePos[0] >= 0 && reusablePos[0] <= 1 && reusablePos[1] >= 0 && reusablePos[1] <= 1;
-        // Raycast now outputs render-space UVs (PlaneGeometry v is flipped after rotateX).
-        const overlayU = reusablePos[0];
-        const overlayV = reusablePos[1];
-        terrainMat.updateBrush(
-          [overlayU, overlayV],
-          brushPosValid ? controls.brushSize : 0,
-          controls.brushType
-        );
-        // Push per-frame control values to terrain material uniforms
-        terrainMat.updateUniforms({
-          snowRange: controls.SnowRange,
-          forestRange: controls.ForestRange,
-          terrainPalette: controls.TerrainPlatte,
-          maxHeight: (controls?.TerrainHeight ?? 2) * 120,
-          debugMode: controls.TerrainDebug,
-          showFlowTrace: controls.ShowFlowTrace,
-          showSedimentTrace: controls.SedimentTrace,
-          lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
-          grassLine: controls.GrassLine,
-          rockLine: controls.RockLine,
-          snowLine: controls.SnowLine,
-          slopeRockAmount: controls.SlopeRockAmount,
-        });
-        // Pass water source positions for red glow indicators
-        terrainMat.updateSources(waterSources.map(s => ({
-          position: [s.position[0], s.position[1]] as [number, number],
-          size: s.size,
-        })));
+      // Skip uniform updates and rendering until async compilation finishes
+      if (webgpuSceneCompileDone) {
+        if (webgpuTerrainMesh?.material) {
+          const terrainMat = webgpuTerrainMesh.material as unknown as TerrainMaterialNode;
+          const brushPosValid = reusablePos[0] >= 0 && reusablePos[0] <= 1 && reusablePos[1] >= 0 && reusablePos[1] <= 1;
+          // Raycast now outputs render-space UVs (PlaneGeometry v is flipped after rotateX).
+          const overlayU = reusablePos[0];
+          const overlayV = reusablePos[1];
+          terrainMat.updateBrush(
+            [overlayU, overlayV],
+            brushPosValid ? controls.brushSize : 0,
+            controls.brushType
+          );
+          // Push per-frame control values to terrain material uniforms
+          terrainMat.updateUniforms({
+            snowRange: controls.SnowRange,
+            forestRange: controls.ForestRange,
+            terrainPalette: controls.TerrainPlatte,
+            maxHeight: (controls?.TerrainHeight ?? 2) * 120,
+            debugMode: controls.TerrainDebug,
+            showFlowTrace: controls.ShowFlowTrace,
+            showSedimentTrace: controls.SedimentTrace,
+            lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
+            grassLine: controls.GrassLine,
+            rockLine: controls.RockLine,
+            snowLine: controls.SnowLine,
+            slopeRockAmount: controls.SlopeRockAmount,
+          });
+          // Pass water source positions for red glow indicators
+          terrainMat.updateSources(waterSources.map(s => ({
+            position: [s.position[0], s.position[1]] as [number, number],
+            size: s.size,
+          })));
+        }
+        // Push per-frame control values to water material uniforms
+        if (webgpuWaterMesh?.material) {
+          const waterMat = webgpuWaterMesh.material as unknown as WaterMaterialNode;
+          waterMat.updateUniforms({
+            waterTransparency: controls.WaterTransparency,
+            lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
+          });
+        }
+        // Update sky sun position
+        const skyMesh = (webgpuScene as any)?._skyMesh;
+        if (skyMesh?.material) {
+          (skyMesh.material as SkyMaterialNode).updateUniforms({
+            lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
+          });
+        }
+        webgpuRendererWrapper.render(webgpuScene, camera.threeCamera);
       }
-      // Push per-frame control values to water material uniforms
-      if (webgpuWaterMesh?.material) {
-        const waterMat = webgpuWaterMesh.material as unknown as WaterMaterialNode;
-        waterMat.updateUniforms({
-          waterTransparency: controls.WaterTransparency,
-          lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
-        });
-      }
-      // Update sky sun position
-      const skyMesh = (webgpuScene as any)?._skyMesh;
-      if (skyMesh?.material) {
-        (skyMesh.material as SkyMaterialNode).updateUniforms({
-          lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
-        });
-      }
-      webgpuRendererWrapper.render(webgpuScene, camera.threeCamera);
     }
 
     stats.end();

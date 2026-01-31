@@ -91,8 +91,9 @@ export class TerrainGeneratorCompute {
             code: terrainGenerateShader,
         });
 
-        // Create compute pipeline
-        this.pipeline = this.device.createComputePipeline({
+        // Create compute pipeline asynchronously to avoid blocking main thread
+        // during WGSL compilation of the 868-line terrain generator shader.
+        this.pipeline = await this.device.createComputePipelineAsync({
             label: 'Terrain Generator Compute Pipeline',
             layout: pipelineLayout,
             compute: {

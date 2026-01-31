@@ -73,7 +73,6 @@ export class WaterMaterialNode extends MeshBasicNodeMaterial {
             return;
         }
 
-        const eps = float(1).div(this.simresUniform);
         const curUv = uv();
         const hm = texture(inputs.heightmap, curUv);
         const terrainHeight = hm.x;
@@ -88,13 +87,13 @@ export class WaterMaterialNode extends MeshBasicNodeMaterial {
         this.positionNode = positionLocal.add(normalLocal.mul(displacementY));
 
         // --- Water surface normal via 4-neighbor central differences ---
-        // Samples left/right/top/bottom for a symmetric, smooth normal.
-        // The 2-neighbor cross-product approach creates asymmetric normals
-        // that produce grid-aligned stripe artifacts with high specular.
-        const hmR = texture(inputs.heightmap, curUv.add(vec2(eps, float(0))));
-        const hmL = texture(inputs.heightmap, curUv.add(vec2(eps.negate(), float(0))));
-        const hmT = texture(inputs.heightmap, curUv.add(vec2(float(0), eps)));
-        const hmB = texture(inputs.heightmap, curUv.add(vec2(float(0), eps.negate())));
+        // Uses 2-texel offset to average out per-texel noise from point-sampled
+        // compute heights, preventing grid-aligned stripe artifacts in specular.
+        const eps2 = float(2).div(this.simresUniform);
+        const hmR = texture(inputs.heightmap, curUv.add(vec2(eps2, float(0))));
+        const hmL = texture(inputs.heightmap, curUv.add(vec2(eps2.negate(), float(0))));
+        const hmT = texture(inputs.heightmap, curUv.add(vec2(float(0), eps2)));
+        const hmB = texture(inputs.heightmap, curUv.add(vec2(float(0), eps2.negate())));
         // Total surface height = terrain + water at each neighbor
         const lTotal = hmL.x.add(hmL.y);
         const rTotal = hmR.x.add(hmR.y);
@@ -109,15 +108,16 @@ export class WaterMaterialNode extends MeshBasicNodeMaterial {
         const halfway = normalize(lightDir.add(viewDir));
 
         // --- Specular highlight ---
-        // Softened from legacy pow(333) to reduce grid-aligned stripe artifacts
-        // from point-sampled compute heights (noisier than bilinear GLSL)
-        const spec = pow(max(dot(waterNormal, halfway), float(0)), float(150));
+        // pow(80): low enough to smooth over per-texel normal noise from
+        // point-sampled compute heights, while still giving a visible glint.
+        const spec = pow(max(dot(waterNormal, halfway), float(0)), float(80));
 
         // --- Fresnel reflection ---
-        // Schlick-like approximation: bias=0.2, scale=0.2, pow=22 (legacy values)
+        // Schlick-like: bias=0.15, scale=0.15, pow=8 — softer than legacy to
+        // avoid amplifying per-texel normal noise into visible banding.
         const fresnelBase = clamp(float(1).add(dot(viewDir, waterNormal.negate())), 0, 1);
         const fresnel = clamp(
-            float(0.2).add(float(0.2).mul(pow(fresnelBase, float(22)))),
+            float(0.15).add(float(0.15).mul(pow(fresnelBase, float(8)))),
             0, 1
         );
         // Sky color for reflection — use reflected view direction for spatial coherence
