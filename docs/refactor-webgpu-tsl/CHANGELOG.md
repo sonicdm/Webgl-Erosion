@@ -348,6 +348,27 @@ Key issues introduced:
 - Base colors unchanged — still the same 5-stage ramp (black, dark red, red, orange, yellow)
 **Visual effect:** Lava at T=0.6 is now orange (was red). Lava at T=0.8 is now yellow-orange (was just entering orange). Source lava at T=1.0 is bright yellow-white. More time spent in the visually appealing orange-yellow range before cooling to red/black.
 
+### Change 28: Live color ramp controls + GUI cleanup
+**Files:** `src/rendering/webgpu/materials/LavaMaterialNode.ts`, `src/app/controls/controls-factory.ts`, `src/gui/gui-setup.ts`, `src/main.ts`
+**Why:** Color ramp shift (Change 27) didn't have the desired effect — user wanted interactive control. Also, the flat list of 20+ lava parameters was hard to navigate.
+**Changes:**
+- **Live color ramp uniforms** (`LavaMaterialNode.ts`):
+  - Added `orangeTempUniform` and `yellowTempUniform` as TSL uniforms
+  - Smoothstep thresholds now derived from these uniforms: t1/t2 offset from orangeTemp, t3 from orangeTemp, t4 from yellowTemp
+  - `updateUniforms()` extended to accept `orangeTemp` and `yellowTemp`
+  - Changes are instant — no graph rebuild needed
+- **New controls**: `lavaOrangeTemp` (default 0.45, range 0.2-0.7), `lavaYellowTemp` (default 0.65, range 0.4-0.9)
+- **Per-frame update** (`main.ts`): passes `orangeTemp` and `yellowTemp` from controls to lava material each frame
+- **GUI reorganized into subfolders**:
+  - **Flow**: Viscosity, Yield Stress, Visc-Temp Curve, Source Temp
+  - **Cooling**: Surface Cooling, Thin-Edge Cooling, Ambient Cooling, Solidify Temp, Rock Fraction, Conductivity
+  - **Crust**: Barrier Strength, Growth Rate, Re-melt Temp, Insulation
+  - **Erosion**: Erosion Rate, Max Per Step, Speed Clamp, Rock Melt Temp
+  - **Color Ramp**: Orange Starts, Yellow Starts
+  - **Water**: Enabled, Heat Radius, Heat Scale
+  - **Reset Defaults** button (renamed from "Apply Test Preset")
+- Test preset updated with `lavaOrangeTemp: 0.45`, `lavaYellowTemp: 0.65`
+
 ### Files modified across sessions 2+3:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — viscDamp on accel only + yield stress + crust barrier
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — lateral exposure, flow heat retention, velocity-gated solidification

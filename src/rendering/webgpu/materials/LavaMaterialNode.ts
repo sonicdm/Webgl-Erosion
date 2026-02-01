@@ -13,6 +13,10 @@ export interface LavaMaterialNodeInputs {
     simres?: number;
     /** Light direction */
     lightDir?: [number, number, number];
+    /** Temperature threshold where orange dominates (default 0.45) */
+    orangeTemp?: number;
+    /** Temperature threshold where yellow dominates (default 0.65) */
+    yellowTemp?: number;
 }
 
 /**
@@ -32,6 +36,8 @@ export interface LavaMaterialNodeInputs {
 export class LavaMaterialNode extends MeshBasicNodeMaterial {
     private simresUniform: any;
     private lightDirUniform: any;
+    private orangeTempUniform: any;
+    private yellowTempUniform: any;
     private inputs: LavaMaterialNodeInputs;
 
     constructor(inputs: LavaMaterialNodeInputs = {}) {
@@ -43,6 +49,8 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
             inputs.lightDir?.[1] ?? 0.8,
             inputs.lightDir?.[2] ?? 0.0
         ));
+        this.orangeTempUniform = uniform(inputs.orangeTemp ?? 0.45);
+        this.yellowTempUniform = uniform(inputs.yellowTemp ?? 0.65);
 
         this.transparent = true;
         this.depthWrite = true;
@@ -60,9 +68,17 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
 
     updateUniforms(params: {
         lightDir?: [number, number, number];
+        orangeTemp?: number;
+        yellowTemp?: number;
     }): void {
         if (params.lightDir !== undefined) {
             this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
+        }
+        if (params.orangeTemp !== undefined) {
+            this.orangeTempUniform.value = params.orangeTemp;
+        }
+        if (params.yellowTemp !== undefined) {
+            this.yellowTempUniform.value = params.yellowTemp;
         }
     }
 
@@ -127,12 +143,13 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const colOrange = vec3(1.0, 0.45, 0.05);        // bright orange
         const colYellow = vec3(1.0, 0.85, 0.35);        // incandescent white/yellow
 
-        // Smooth interpolation between stages
-        // Shifted down so orange/yellow appear earlier — lava spends most time in T=0.4-0.8
-        const t1 = smoothstep(float(0.25), float(0.35), T); // black → dark red
-        const t2 = smoothstep(float(0.35), float(0.45), T); // dark red → red
-        const t3 = smoothstep(float(0.45), float(0.60), T); // red → orange
-        const t4 = smoothstep(float(0.65), float(0.85), T); // orange → yellow
+        // Smooth interpolation between stages — thresholds derived from GUI-tunable uniforms
+        const orangeT = this.orangeTempUniform;
+        const yellowT = this.yellowTempUniform;
+        const t1 = smoothstep(orangeT.sub(0.20), orangeT.sub(0.10), T); // black → dark red
+        const t2 = smoothstep(orangeT.sub(0.10), orangeT, T);           // dark red → red
+        const t3 = smoothstep(orangeT, orangeT.add(0.15), T);           // red → orange
+        const t4 = smoothstep(yellowT, yellowT.add(0.20), T);           // orange → yellow
 
         let baseColor = mix(colBlack, colDarkRed, t1);
         baseColor = mix(baseColor, colRed, t2);

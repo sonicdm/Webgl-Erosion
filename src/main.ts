@@ -1196,6 +1196,8 @@ async function main() {
           const lavaMat = webgpuLavaMesh.material as unknown as LavaMaterialNode;
           lavaMat.updateUniforms({
             lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
+            orangeTemp: controls.lavaOrangeTemp ?? 0.45,
+            yellowTemp: controls.lavaYellowTemp ?? 0.65,
           });
         }
         // Update sky sun position
