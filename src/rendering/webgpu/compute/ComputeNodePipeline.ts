@@ -1256,6 +1256,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     private lavaThermalErosionBindGroupLayout: GPUBindGroupLayout | null = null;
     private lavaCoolingPipeline: GPUComputePipeline | null = null;
     private lavaCoolingBindGroupLayout: GPUBindGroupLayout | null = null;
+    private lavaThermalTransferPipeline: GPUComputePipeline | null = null;
+    private lavaThermalTransferBindGroupLayout: GPUBindGroupLayout | null = null;
     private lavaWaterInteractionPipeline: GPUComputePipeline | null = null;
     private lavaWaterInteractionBindGroupLayout: GPUBindGroupLayout | null = null;
 
@@ -2515,6 +2517,183 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         const commandEncoder = device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaHeightVelPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
+    }
+
+    /**
+     * Lava-lava layered thermal transfer pass.
+     * Handles heat conduction between lava layers: incoming hot lava over cooler lava,
+     * lateral heat diffusion, crust-suppressed mixing, and re-mobilization.
+     */
+    lavaThermalTransferPass(
+        texturePool: WebGPUTexturePool,
+        uniforms: {
+            simRes: number;
+            kCond: number;
+            crustMixSuppression: number;
+            softeningTemp: number;
+            timestep: number;
+        }
+    ): void {
+        const device = this.device;
+
+        if (!this.lavaThermalTransferPipeline) {
+            const SHADER = `
+@group(0) @binding(0) var readLava: texture_2d<f32>;
+@group(0) @binding(1) var readLavaVel: texture_2d<f32>;
+@group(0) @binding(2) var writeLava: texture_storage_2d<rgba32float, write>;
+
+struct Uniforms {
+    u_SimRes: f32,
+    u_KCond: f32,
+    u_CrustMixSuppression: f32,
+    u_SofteningTemp: f32,
+    u_timestep: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+};
+
+@group(0) @binding(3) var<uniform> uniforms: Uniforms;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let simRes = i32(uniforms.u_SimRes);
+    let coord = vec2<i32>(global_id.xy);
+
+    // Bounds check
+    if (coord.x >= simRes || coord.y >= simRes) {
+        return;
+    }
+
+    let lava = textureLoad(readLava, coord, 0);
+    let vel = textureLoad(readLavaVel, coord, 0);
+
+    var H = lava.r;       // lava height
+    var T = lava.g;       // temperature
+    var visc = lava.b;    // viscosity
+    var C = lava.a;       // crust thickness
+
+    let deltaH = vel.a;   // volume change from advection (from pass 3)
+
+    // No lava: write zeros
+    if (H < 0.0001) {
+        textureStore(writeLava, coord, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        return;
+    }
+
+    // --- Mixing suppression by crust ---
+    // Thick crust prevents incoming hot lava from freely mixing with cooler lava below
+    let mixFactor = clamp(1.0 - C * uniforms.u_CrustMixSuppression, 0.0, 1.0);
+
+    // --- Conduction from incoming lava ---
+    // When deltaH > 0, new lava arrived. Estimate incoming temperature from neighbors.
+    if (deltaH > 0.001 && H > 0.001) {
+        // Clamp neighbor coords to bounds
+        let top = clamp(coord + vec2<i32>(0, 1), vec2<i32>(0), vec2<i32>(simRes - 1));
+        let right = clamp(coord + vec2<i32>(1, 0), vec2<i32>(0), vec2<i32>(simRes - 1));
+        let bottom = clamp(coord + vec2<i32>(0, -1), vec2<i32>(0), vec2<i32>(simRes - 1));
+        let left = clamp(coord + vec2<i32>(-1, 0), vec2<i32>(0), vec2<i32>(simRes - 1));
+
+        let topLava = textureLoad(readLava, top, 0);
+        let rightLava = textureLoad(readLava, right, 0);
+        let bottomLava = textureLoad(readLava, bottom, 0);
+        let leftLava = textureLoad(readLava, left, 0);
+
+        // Weighted average neighbor temperature (by height as proxy for contribution)
+        let totalNeighborH = topLava.r + rightLava.r + bottomLava.r + leftLava.r;
+        var T_in = T; // fallback
+        if (totalNeighborH > 0.001) {
+            T_in = (topLava.g * topLava.r + rightLava.g * rightLava.r +
+                    bottomLava.g * bottomLava.r + leftLava.g * leftLava.r) / totalNeighborH;
+        }
+
+        // Heat transfer: bounded conduction proportional to new material fraction
+        let heightFactor = min(deltaH / H, 0.5);
+        let dT = uniforms.u_KCond * (T_in - T) * uniforms.u_timestep * heightFactor * mixFactor;
+        T = T + dT;
+    }
+
+    // --- Lateral conduction (even through crust, but reduced) ---
+    // Pure 4-neighbor heat diffusion
+    {
+        let top = clamp(coord + vec2<i32>(0, 1), vec2<i32>(0), vec2<i32>(simRes - 1));
+        let right = clamp(coord + vec2<i32>(1, 0), vec2<i32>(0), vec2<i32>(simRes - 1));
+        let bottom = clamp(coord + vec2<i32>(0, -1), vec2<i32>(0), vec2<i32>(simRes - 1));
+        let left = clamp(coord + vec2<i32>(-1, 0), vec2<i32>(0), vec2<i32>(simRes - 1));
+
+        let topT = textureLoad(readLava, top, 0);
+        let rightT = textureLoad(readLava, right, 0);
+        let bottomT = textureLoad(readLava, bottom, 0);
+        let leftT = textureLoad(readLava, left, 0);
+
+        var neighborCount: f32 = 0.0;
+        var avgNeighborTemp: f32 = 0.0;
+        if (topT.r > 0.001) { avgNeighborTemp += topT.g; neighborCount += 1.0; }
+        if (rightT.r > 0.001) { avgNeighborTemp += rightT.g; neighborCount += 1.0; }
+        if (bottomT.r > 0.001) { avgNeighborTemp += bottomT.g; neighborCount += 1.0; }
+        if (leftT.r > 0.001) { avgNeighborTemp += leftT.g; neighborCount += 1.0; }
+
+        if (neighborCount > 0.0) {
+            avgNeighborTemp /= neighborCount;
+            // Crust reduces but never blocks conduction entirely
+            let crustConductionFactor = max(0.1, 1.0 - C * 2.0);
+            let lateralDT = uniforms.u_KCond * 0.25 * (avgNeighborTemp - T) * uniforms.u_timestep * crustConductionFactor;
+            T = T + lateralDT;
+        }
+    }
+
+    // --- Re-mobilization ---
+    // If temperature exceeds softening threshold, crust melts and flow resumes
+    if (T > uniforms.u_SofteningTemp && C > 0.001) {
+        let meltRate = (T - uniforms.u_SofteningTemp) / (1.0 - uniforms.u_SofteningTemp + 0.001);
+        C = max(0.0, C - meltRate * uniforms.u_timestep * 0.5);
+    }
+
+    T = clamp(T, 0.0, 1.5); // allow slight superheat from mixing
+
+    textureStore(writeLava, coord, vec4<f32>(H, T, visc, C));
+}
+`;
+            this.lavaThermalTransferBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),
+                createSampledTextureLayoutEntry(1),
+                createStorageTextureLayoutEntry(2, 'write-only'),
+                createUniformBufferLayoutEntry(3),
+            ]);
+            this.lavaThermalTransferPipeline = this.createComputePipeline(
+                SHADER, 'main', this.lavaThermalTransferBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.simRes, uniforms.kCond, uniforms.crustMixSuppression,
+            uniforms.softeningTemp, uniforms.timestep, 0, 0, 0,
+        ]);
+
+        let uniformBuffer = this.uniformBuffers.get('lavaThermalTransfer');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'lavaThermalTransfer-uniforms');
+            this.uniformBuffers.set('lavaThermalTransfer', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.lavaThermalTransferBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readLavaTexture, 0),
+            createSampledTextureBinding(texturePool.readLavaVelTexture, 1),
+            createStorageTextureBinding(texturePool.writeLavaTexture, 2),
+            { binding: 3, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.lavaThermalTransferPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();

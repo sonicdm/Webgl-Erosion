@@ -231,6 +231,16 @@ export function SimulatePerStepWebGPU(
         texturePool.swapLavaTextures();
         texturePool.swapLavaVelTextures();
 
+        // 9c2. Lava-Lava Thermal Transfer (conduction + mixing + re-mobilization)
+        computePipeline.lavaThermalTransferPass(texturePool, {
+            simRes: simres,
+            kCond: controls.lavaKCond,
+            crustMixSuppression: controls.lavaCrustMixSuppression,
+            softeningTemp: controls.lavaSofteningTemp,
+            timestep: controls.timestep,
+        });
+        texturePool.swapLavaTextures();
+
         // 9d. Lava Thermal Erosion (bounded: speed clamp + per-step cap)
         computePipeline.lavaThermalErosionPass(texturePool, {
             simRes: simres,
