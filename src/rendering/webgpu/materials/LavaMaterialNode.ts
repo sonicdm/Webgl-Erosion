@@ -7,7 +7,7 @@ export interface LavaMaterialNodeInputs {
     heightmap?: Texture;
     /** Lava map texture (R=lavaHeight, G=temperature, B=viscosity, A=crustThickness) */
     lavaMap?: Texture;
-    /** Lava velocity map texture (R=velX, G=velY, B=speed, A=heat) */
+    /** Lava velocity map texture (R=velX, G=velY, B=speed, A=deltaH) */
     lavaVelocityMap?: Texture;
     /** Simulation resolution */
     simres?: number;
@@ -18,7 +18,16 @@ export interface LavaMaterialNodeInputs {
 /**
  * Lava material using Three.js NodeMaterial (TSL).
  * Renders lava as a transparent plane displaced above terrain+water.
- * Uses heat-based coloring with crust darkening and incandescent glow.
+ *
+ * Temperature-driven 5-stage color ramp:
+ *   >0.90 (>1150°C): white/yellow
+ *   0.70-0.90 (1000-1150°C): bright orange
+ *   0.45-0.70 (650-1000°C): red
+ *   0.35-0.45 (500-650°C): dark red/brown
+ *   <0.35 (solid): black basalt
+ *
+ * Emissive glow from hot lava, black crust with glowing cracks.
+ * Manual Lambertian lighting (project has no scene lights).
  */
 export class LavaMaterialNode extends MeshBasicNodeMaterial {
     private simresUniform: any;
@@ -74,12 +83,9 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const lavaHeight = lava.x;
         const temperature = lava.y;
         const crustThickness = lava.w;
-        // Heat derived from speed (was in lavaVel.w, now lavaVel.w = deltaH for thermal transfer)
         const speed = lavaVel ? lavaVel.z : float(0);
-        const heat = clamp(speed.mul(float(2.0)).add(temperature).mul(float(0.5)), 0, 1);
 
         // --- Vertex displacement: lava sits on top of terrain + water ---
-        // Small upward bias (0.0004) prevents Z-fighting
         const totalHeight = terrainHeight.add(waterLevel).add(lavaHeight);
         const displacementY = totalHeight.div(this.simresUniform).add(float(0.0004));
         this.positionNode = positionLocal.add(normalLocal.mul(displacementY));
@@ -100,44 +106,56 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const bTotal = hmB.x.add(hmB.y).add(lB.x);
         const lavaNormal = normalize(vec3(lTotal.sub(rTotal), float(2), bTotal.sub(tTotal)));
 
-        // --- View and light ---
+        // --- Lighting ---
         const viewDir = normalize(cameraPosition.sub(positionWorld));
         const lightDir = normalize(this.lightDirUniform);
         const surfaceNormal = lavaNormal.negate();
         const lamb = max(dot(surfaceNormal, lightDir), float(0.15));
 
-        // --- Lava coloring based on temperature/heat ---
-        // Hot lava: bright orange-yellow, cool: dark basalt
-        const basaltColor = vec3(0.15, 0.12, 0.10);  // cool solidified rock
-        const hotLavaColor = vec3(1.0, 0.35, 0.05);   // molten orange
-        const whiteHotColor = vec3(1.0, 0.85, 0.3);   // white-hot center
+        // --- 5-stage temperature color ramp ---
+        // Normalized T: 1.0 ≈ 1150°C emission temperature
+        const blackColor = vec3(0.05, 0.04, 0.03);        // <0.35: solid basalt
+        const darkRedColor = vec3(0.3, 0.05, 0.02);       // 0.35-0.45: dark red/brown
+        const redColor = vec3(0.85, 0.12, 0.02);           // 0.45-0.70: red hot
+        const orangeColor = vec3(1.0, 0.45, 0.05);         // 0.70-0.90: bright orange
+        const yellowColor = vec3(1.0, 0.85, 0.35);         // >0.90: white/yellow
 
-        // Use heat (from velocity) combined with temperature for color
-        const effectiveHeat = clamp(heat.mul(0.5).add(temperature.mul(0.5)), 0, 1);
+        // Smooth transitions between stages
+        const t1 = clamp(temperature.sub(0.35).div(0.10), 0, 1);  // black → dark red
+        const t2 = clamp(temperature.sub(0.45).div(0.25), 0, 1);  // dark red → red
+        const t3 = clamp(temperature.sub(0.70).div(0.20), 0, 1);  // red → orange
+        const t4 = clamp(temperature.sub(0.90).div(0.10), 0, 1);  // orange → yellow
 
-        // Two-stage color blend: basalt → hot orange → white-hot
-        const moltenColor = mix(hotLavaColor, whiteHotColor, clamp(effectiveHeat.sub(0.5).mul(2.0), 0, 1));
-        let lavaColor = mix(basaltColor, moltenColor, clamp(effectiveHeat.mul(2.0), 0, 1));
+        const ramp1 = mix(blackColor, darkRedColor, t1);
+        const ramp2 = mix(ramp1, redColor, t2);
+        const ramp3 = mix(ramp2, orangeColor, t3);
+        const baseColor = mix(ramp3, yellowColor, t4);
 
-        // Crust rendering: thicker crust darkens the surface
-        // Cracks in crust reveal hot lava beneath
+        // --- Crust rendering: black crust over hot interior ---
         const crustFactor = clamp(crustThickness.mul(5.0), 0, 1);
-        const crustDarkening = mix(lavaColor, basaltColor.mul(lamb), crustFactor);
+        const crustColor = mix(baseColor, blackColor, crustFactor);
 
-        // Temperature modulates crack visibility - hotter = more cracks showing through
-        const crackReveal = clamp(temperature.mul(crustFactor), 0, 1);
-        lavaColor = mix(crustDarkening, lavaColor, crackReveal.mul(0.5));
+        // --- Cracks: where crust is present but temperature is high, reveal hot lava ---
+        // crackIntensity is high when: crust is thick AND temperature is still hot
+        const crackIntensity = clamp(temperature.sub(0.3).mul(crustFactor).mul(2.5), 0, 1);
+        const surfaceColor = mix(crustColor, baseColor, crackIntensity.mul(0.7));
 
-        // Emission: hot lava glows (not affected by lighting)
-        const emissiveIntensity = clamp(effectiveHeat.mul(effectiveHeat), 0, 1);
-        const emissiveColor = moltenColor.mul(emissiveIntensity.mul(0.8));
+        // --- Emissive glow (not affected by lighting direction) ---
+        // Onset at T=0.35, quadratic ramp for natural falloff
+        const emissiveStrength = clamp(temperature.sub(0.35), 0, 1);
+        const emissiveColor = baseColor.mul(emissiveStrength.mul(emissiveStrength).mul(1.5));
 
-        // Final color: lit surface + emissive glow
-        const finalColor = lavaColor.mul(lamb).add(emissiveColor);
+        // --- Flow heat glow: fast-flowing lava glows brighter ---
+        const flowHeat = clamp(speed.mul(float(0.3)), 0, 1);
+        const flowGlow = orangeColor.mul(flowHeat.mul(float(0.2)));
 
-        // Channel overflow for incandescence (from Three.js lava shader)
-        // When red is very hot, bleed into green/blue for white-hot appearance
-        // (Approximated in TSL with smooth blending since we can't do channel mutation)
+        // --- Fresnel rim glow for hot edges ---
+        const NdotV = max(dot(surfaceNormal, viewDir), float(0));
+        const fresnel = pow(float(1).sub(NdotV), float(3));
+        const rimGlow = orangeColor.mul(fresnel.mul(emissiveStrength).mul(float(0.3)));
+
+        // --- Final composite: lit surface + emissive + flow glow + rim ---
+        const finalColor = surfaceColor.mul(lamb).add(emissiveColor).add(flowGlow).add(rimGlow);
 
         // --- Opacity: based on lava height with shallow edge fade ---
         const depthScaled = clamp(lavaHeight.mul(float(180)).div(this.simresUniform), 0, 4);
