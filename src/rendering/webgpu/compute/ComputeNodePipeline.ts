@@ -2992,7 +2992,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     /**
      * Lava-water interaction pass.
-     * Contact solidification, water evaporation, and heat radius effects.
+     * Enhanced mutual exclusion, quench crust, contact solidification, heat radius evaporation.
      */
     lavaWaterInteractionPass(
         texturePool: WebGPUTexturePool,
@@ -3003,6 +3003,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             solidificationThreshold: number;
             rockFraction: number;
             waterEvapRate: number;
+            timestep: number;
         }
     ): void {
         const device = this.device;
@@ -3021,8 +3022,8 @@ struct Uniforms {
     u_SolidificationThreshold: f32,
     u_RockFraction: f32,
     u_WaterEvapRate: f32,
+    u_Timestep: f32,
     _pad0: f32,
-    _pad1: f32,
 };
 
 @group(0) @binding(4) var<uniform> uniforms: Uniforms;
@@ -3043,12 +3044,36 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rock = terrain.b;
     var baseRock = terrain.a;
 
-    // Direct contact: lava and water in same cell
+    // --- MUTUAL EXCLUSION: capacity-based ---
+    // Lava and water cannot occupy the same cell volume.
+    // Lava is denser (~2700 kg/m³ vs ~1000 kg/m³) — it takes priority.
+    let CELL_CAPACITY = 1.0;
+    let totalFluid = lavaHeight + water;
+    if (totalFluid > CELL_CAPACITY && lavaHeight > 0.001 && water > 0.001) {
+        let excess = totalFluid - CELL_CAPACITY;
+        water = max(0.0, water - excess);
+    }
+
+    // --- FLOW BLOCKING: thick lava displaces water underneath ---
+    if (lavaHeight > 0.05 && water > 0.001) {
+        let displace = min(water, lavaHeight * 0.3 * uniforms.u_Timestep);
+        water = max(0.0, water - displace);
+    }
+
+    // --- DIRECT CONTACT: quench cooling + rapid crust formation ---
     if (lavaHeight > 0.001 && water > 0.001) {
         let contactAmount = min(water, lavaHeight * 0.1) * 0.5;
         water = max(0.0, water - contactAmount);
-        temperature = max(0.0, temperature - contactAmount * 10.0);
 
+        // Quench cooling — much more aggressive than ambient
+        let quenchCooling = contactAmount * 10.0;
+        temperature = max(0.0, temperature - quenchCooling);
+
+        // Rapid quench crust formation on contact
+        crustThickness += contactAmount * 3.0;
+        crustThickness = min(crustThickness, lavaHeight * 0.5);
+
+        // Immediate solidification if quenched below threshold
         if (temperature < uniforms.u_SolidificationThreshold * 2.0) {
             let solidAmount = min(lavaHeight * 0.1, lavaHeight);
             terrainHeight += solidAmount;
@@ -3057,11 +3082,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 baseRock = terrainHeight;
             }
             lavaHeight = max(0.0, lavaHeight - solidAmount);
-            crustThickness = max(crustThickness, solidAmount);
         }
     }
 
-    // Heat radius: nearby lava heats this cell's water
+    // --- HEAT RADIUS: nearby lava evaporates water ---
     if (water > 0.001) {
         var nearbyHeat: f32 = 0.0;
         let radius = uniforms.u_HeatRadius;
@@ -3079,10 +3103,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         if (nearbyHeat > 0.01) {
-            water = max(0.0, water - nearbyHeat * uniforms.u_WaterEvapRate * 0.5);
+            water = max(0.0, water - nearbyHeat * uniforms.u_WaterEvapRate * 0.5 * uniforms.u_Timestep);
         }
     }
 
+    // --- NUMERICAL GUARD: zero out lava channels below epsilon ---
     if (lavaHeight < 0.0001) {
         lavaHeight = 0.0;
         temperature = 0.0;
@@ -3117,7 +3142,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         v.setFloat32(12, uniforms.solidificationThreshold, LE);
         v.setFloat32(16, uniforms.rockFraction, LE);
         v.setFloat32(20, uniforms.waterEvapRate, LE);
-        v.setFloat32(24, 0.0, LE);
+        v.setFloat32(24, uniforms.timestep, LE);
         v.setFloat32(28, 0.0, LE);
 
         let uniformBuffer = this.uniformBuffers.get('lavaWaterInteraction');

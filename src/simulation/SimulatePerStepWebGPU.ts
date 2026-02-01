@@ -267,7 +267,7 @@ export function SimulatePerStepWebGPU(
         texturePool.swapLavaTextures();
         texturePool.swapTerrainTextures();
 
-        // 9f. Lava-Water Interaction
+        // 9f. Lava-Water Interaction (mutual exclusion + quench crust + evaporation)
         if (controls.lavaWaterInteraction) {
             computePipeline.lavaWaterInteractionPass(texturePool, {
                 simRes: simres,
@@ -276,6 +276,7 @@ export function SimulatePerStepWebGPU(
                 solidificationThreshold: controls.lavaSolidificationThreshold,
                 rockFraction: controls.lavaRockFraction,
                 waterEvapRate: controls.EvaporationConstant,
+                timestep: controls.timestep,
             });
             texturePool.swapLavaTextures();
             texturePool.swapTerrainTextures();
