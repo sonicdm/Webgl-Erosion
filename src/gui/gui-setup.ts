@@ -278,6 +278,34 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavapara.add(controls, 'lavaViscTempScale', 1.0, 10.0).name('Visc Temp Scale');
     lavapara.add(controls, 'lavaMaxErosionPerStep', 0.0001, 0.01).name('Max Erosion/Step');
     lavapara.add(controls, 'lavaErosionSpeedClamp', 1.0, 20.0).name('Erosion Speed Clamp');
+    // Dev: Lava test preset — sets tuned parameters for lava flow testing
+    lavapara.add({
+        applyLavaTestPreset: () => {
+            controls.lavaViscosityScale = 3.0;
+            controls.lavaYieldStress = 0.2;
+            controls.lavaCoolingRate = 0.05;
+            controls.lavaProportionalCooling = 0.01;
+            controls.lavaSolidificationThreshold = 0.15;
+            controls.lavaRockFraction = 0.7;
+            controls.lavaThermalErosionRate = 0.3;
+            controls.lavaRockMeltThreshold = 0.7;
+            controls.lavaEmissionTemp = 1.0;
+            controls.lavaCrustStrength = 0.4;
+            controls.lavaCrustGrowthRate = 0.08;
+            controls.lavaSofteningTemp = 0.6;
+            controls.lavaKCond = 0.3;
+            controls.lavaCrustMixSuppression = 2.0;
+            controls.lavaAmbientCoolingRate = 0.03;
+            controls.lavaViscTempScale = 4.0;
+            controls.lavaMaxErosionPerStep = 0.002;
+            controls.lavaErosionSpeedClamp = 5.0;
+            controls.lavaWaterInteraction = true;
+            controls.lavaHeatRadius = 2;
+            // Refresh GUI to show updated values
+            gui.controllersRecursive().forEach((c: any) => c.updateDisplay?.());
+            console.log('[LAVA_SIM] Applied lava test preset');
+        }
+    }, 'applyLavaTestPreset').name('Apply Test Preset');
     lavapara.close();
 
     // Rendering Parameters

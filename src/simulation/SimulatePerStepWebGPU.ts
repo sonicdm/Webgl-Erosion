@@ -9,6 +9,7 @@ import { AppContext } from '../app/context';
 import type { IAppControls } from '../app/controls/types';
 import { getWaterSourceCount, waterSources, MAX_WATER_SOURCES } from '../utils/water-sources';
 import { getLavaSourceCount, lavaSources, MAX_LAVA_SOURCES } from '../utils/lava-sources';
+import { lavaLogger, LogCategory } from '../utils/rate-limited-logger';
 
 /**
  * Execute one complete simulation step using WebGPU compute shaders.
@@ -280,6 +281,12 @@ export function SimulatePerStepWebGPU(
             });
             texturePool.swapLavaTextures();
             texturePool.swapTerrainTextures();
+        }
+
+        // 9g. Lava diagnostics (rate-limited logging)
+        if (lavaSourceCount > 0) {
+            lavaLogger.log(LogCategory.LAVA_SIM, 'step',
+                `sources=${lavaSourceCount} dt=${controls.timestep.toFixed(4)} viscScale=${controls.lavaViscosityScale} erosionCap=${controls.lavaMaxErosionPerStep}`);
         }
     }
 
