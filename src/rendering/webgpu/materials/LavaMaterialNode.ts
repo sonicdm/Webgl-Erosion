@@ -198,13 +198,39 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const crackedSurface = mix(surfaceColor, baseColor, crackIntensity);
         const litColor = crackedSurface.mul(lamb).add(emissiveColor);
 
-        // --- Speed-based heat glow (frictional heating from velocity) ---
+        // --- Flow-aligned surface detail + speed-based heat glow ---
         let finalColor = litColor;
         if (inputs.lavaVelocityMap) {
             const vel = texture(inputs.lavaVelocityMap, safeUv);
             const speed = vel.z;
+            const velX = vel.x;
+            const velY = vel.y;
+
+            // Flow-aligned anisotropic noise: stretched along velocity, compressed perpendicular.
+            // Creates ropy pahoehoe texture on slow flows, stretched streaks on fast flows.
+            const flowScale = float(120);
+            const flowUv = safeUv.mul(flowScale);
+
+            // Project UV along flow direction and perpendicular
+            // flowDir ~= (velX, velY) normalized, but use raw for stretching effect
+            const speedFactor = clamp(speed.mul(5), 0, 1); // how much to stretch
+            // Stretch along flow: compress perpendicular by speed
+            const stretchedU = flowUv.x.add(velX.mul(flowScale).mul(0.3));
+            const stretchedV = flowUv.y.add(velY.mul(flowScale).mul(0.3));
+            const flowNoise = fract(sin(
+                dot(vec2(stretchedU, stretchedV), vec2(17.239, 43.157))
+            ).mul(28461.327));
+
+            // Subtle modulation: 0.92-1.08 range, stronger with speed
+            const detailStrength = mix(float(0.02), float(0.08), speedFactor);
+            const flowDetail = float(1).sub(detailStrength).add(flowNoise.mul(detailStrength.mul(2)));
+
+            // Apply flow detail to surface color (not emissive — just surface texture)
+            finalColor = litColor.mul(flowDetail);
+
+            // Speed-based heat glow (frictional heating)
             const heatGlow = clamp(speed.mul(0.3), 0, 0.15);
-            finalColor = litColor.add(vec3(heatGlow, heatGlow.mul(0.3), float(0)));
+            finalColor = finalColor.add(vec3(heatGlow, heatGlow.mul(0.3), float(0)));
         }
 
         // --- Opacity: solid where there's lava, fades at thin edges ---

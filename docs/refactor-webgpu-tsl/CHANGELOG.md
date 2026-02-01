@@ -253,6 +253,20 @@ Key issues introduced:
 - Cracks disappear as crust melts through at T>0.8 (no crust to crack)
 - Produces the characteristic "lava with glowing cracks" appearance
 
+### Change 22: Flow-aligned procedural surface detail
+**File:** `src/rendering/webgpu/materials/LavaMaterialNode.ts`
+**Why:** Lava surface was perfectly smooth. Real lava has flow banding (pahoehoe ropy texture, aa jagged surface) depending on speed and viscosity.
+**Changes:**
+- Added anisotropic noise using velocity direction: UV coordinates stretched along flow direction
+- Speed-dependent stretching: fast flow = elongated streaks, slow flow = subtle ripples
+- Subtle color modulation (0.92-1.08 range) — not overwhelming, just adds surface texture
+- Applied to lit surface color only (not emissive, to avoid glow artifacts)
+- Uses existing velocity map sampling (no additional texture reads)
+**Visual effect:**
+- Moving lava shows directional flow lines/streaks
+- Stationary lava has subtle random surface variation
+- Effect strengthens with flow speed
+
 ### Files modified this session:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — rewritten (stripped to water pattern + viscDamp on accel only + temperature-dependent yield stress)
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — velocity-gated solidification, strong flow heat retention, reduced cooling rates
