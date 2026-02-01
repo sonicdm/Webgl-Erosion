@@ -336,6 +336,18 @@ Key issues introduced:
 
 **Physics basis:** Real lava at eruption temperature (~1200°C) has enough thermal energy to melt through thin crust barriers. Only cooled, viscous lava is redirected by levees (Tomita 2024 §3). Thin residual films evaporate/degas rather than forming solid deposits.
 
+### Change 27: Shift color ramp warmer — orange/yellow appear earlier
+**File:** `src/rendering/webgpu/materials/LavaMaterialNode.ts`
+**Why:** User feedback: "it should be a little more orange at higher temps, it's taking a long time to get to that really recognizable yellow/orange goodness." Reference: Fagradalsfjall eruption footage — active channels are vivid orange-yellow, not red.
+**Changes:**
+- Shifted all smoothstep thresholds down so warmer colors appear at lower temperatures:
+  - black → dark red: `(0.30, 0.40)` → `(0.25, 0.35)`
+  - dark red → red: `(0.40, 0.50)` → `(0.35, 0.45)`
+  - red → orange: `(0.55, 0.75)` → `(0.45, 0.60)` (biggest shift — orange now dominant at T=0.6+)
+  - orange → yellow: `(0.80, 0.95)` → `(0.65, 0.85)` (yellow visible at T=0.75+, not just T=0.9+)
+- Base colors unchanged — still the same 5-stage ramp (black, dark red, red, orange, yellow)
+**Visual effect:** Lava at T=0.6 is now orange (was red). Lava at T=0.8 is now yellow-orange (was just entering orange). Source lava at T=1.0 is bright yellow-white. More time spent in the visually appealing orange-yellow range before cooling to red/black.
+
 ### Files modified across sessions 2+3:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — viscDamp on accel only + yield stress + crust barrier
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — lateral exposure, flow heat retention, velocity-gated solidification

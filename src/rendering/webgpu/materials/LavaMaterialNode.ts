@@ -128,10 +128,11 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const colYellow = vec3(1.0, 0.85, 0.35);        // incandescent white/yellow
 
         // Smooth interpolation between stages
-        const t1 = smoothstep(float(0.30), float(0.40), T); // black → dark red
-        const t2 = smoothstep(float(0.40), float(0.50), T); // dark red → red
-        const t3 = smoothstep(float(0.55), float(0.75), T); // red → orange
-        const t4 = smoothstep(float(0.80), float(0.95), T); // orange → yellow
+        // Shifted down so orange/yellow appear earlier — lava spends most time in T=0.4-0.8
+        const t1 = smoothstep(float(0.25), float(0.35), T); // black → dark red
+        const t2 = smoothstep(float(0.35), float(0.45), T); // dark red → red
+        const t3 = smoothstep(float(0.45), float(0.60), T); // red → orange
+        const t4 = smoothstep(float(0.65), float(0.85), T); // orange → yellow
 
         let baseColor = mix(colBlack, colDarkRed, t1);
         baseColor = mix(baseColor, colRed, t2);
