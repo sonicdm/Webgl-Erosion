@@ -133,12 +133,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         lavaHeight -= solidAmount;
     }
 
-    // Clean up: any negligible lava left is fully solidified
+    // Clean up: negligible lava remnants are discarded (not added to terrain).
+    // Adding thin films to terrain creates mounding artifacts over thousands of steps.
     if (lavaHeight < 0.001) {
-        if (lavaHeight > 0.0001) {
-            terrainHeight += lavaHeight;
-            rock = min(1.0, rock + lavaHeight * uniforms.u_RockFraction);
-        }
         crustThickness = 0.0;
         temperature = 0.0;
         viscosity = 0.0;

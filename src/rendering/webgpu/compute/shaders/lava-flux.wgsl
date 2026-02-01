@@ -79,14 +79,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Crust barrier (Tomita 2024 — solidification-driven morphology):
     // Thick crust at a neighbor acts as a structural barrier that redirects flow.
-    // Hot lava must exceed both the Bingham yield stress AND the neighbor's crust resistance
-    // to push into that cell. This creates levees: crusted margins physically block flow,
-    // forcing it into the hotter uncrusted channel.
-    let crustStr = uniforms.u_CrustStrength;
-    let topBarrier = yieldThreshold + topL.a * crustStr;
-    let rightBarrier = yieldThreshold + rightL.a * crustStr;
-    let bottomBarrier = yieldThreshold + bottomL.a * crustStr;
-    let leftBarrier = yieldThreshold + leftL.a * crustStr;
+    // However, hot lava can thermally override neighbor crust — it melts through.
+    // Only cooled lava is fully blocked by crusted margins, creating levees.
+    let temperature = curLava.g;
+    let thermalOverride = clamp(temperature * 2.0 - 0.5, 0.0, 1.0); // 0 at T<0.25, 1 at T>0.75
+    let effectiveCrustStr = uniforms.u_CrustStrength * (1.0 - thermalOverride);
+    let topBarrier = yieldThreshold + topL.a * effectiveCrustStr;
+    let rightBarrier = yieldThreshold + rightL.a * effectiveCrustStr;
+    let bottomBarrier = yieldThreshold + bottomL.a * effectiveCrustStr;
+    let leftBarrier = yieldThreshold + leftL.a * effectiveCrustStr;
 
     if (abs(Htop) < topBarrier) { ftop = 0.0; }
     if (abs(Hright) < rightBarrier) { fright = 0.0; }

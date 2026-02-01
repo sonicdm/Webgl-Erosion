@@ -316,6 +316,26 @@ Key issues introduced:
 
 **Net effect:** Lava cools faster (visible cooling in ~15-20 sec) but solidifies to terrain much slower. Erosion is gentle rather than channel-carving. Source area drains properly without rock deposit buildup.
 
+### Change 26: Hot lava overtopping + mounding artifact fix
+**Files:** `src/rendering/webgpu/compute/shaders/lava-flux.wgsl`, `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl`
+**Why:** User feedback: "still mounding a bit if the cooling rate slider is touched at all", "lava is not overtopping cooler lava". Two root causes:
+1. Crust barrier in flux shader blocked ALL flow into crusted cells — even hot lava couldn't push past cooled margins
+2. Thin-film cleanup (lavaHeight < 0.001) was adding remnants to terrain height, creating visible square bumps on solidified surfaces over thousands of steps
+
+**Changes:**
+- **Thermal override for crust barrier** (`lava-flux.wgsl`):
+  - Added `thermalOverride = clamp(T * 2.0 - 0.5, 0, 1)` — scales from 0 at T<0.25 to 1 at T>0.75
+  - `effectiveCrustStr = crustStrength * (1 - thermalOverride)` — hot lava ignores neighbor crust
+  - Hot lava (T > 0.75): zero crust barrier, flows freely over/into crusted cells
+  - Cool lava (T < 0.25): full crust barrier, respects levees
+  - This preserves levee formation for cooled margins while allowing fresh hot lava to overtop
+- **Removed thin-film terrain addition** (`lava-cooling.wgsl`):
+  - Cleanup section no longer adds `lavaHeight < 0.001` remnants to terrain
+  - These micro-deposits accumulated into visible mounding artifacts (square bumps on solidified surface)
+  - Thin films are simply discarded — only the proper solidification path (T < threshold) adds terrain
+
+**Physics basis:** Real lava at eruption temperature (~1200°C) has enough thermal energy to melt through thin crust barriers. Only cooled, viscous lava is redirected by levees (Tomita 2024 §3). Thin residual films evaporate/degas rather than forming solid deposits.
+
 ### Files modified across sessions 2+3:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — viscDamp on accel only + yield stress + crust barrier
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — lateral exposure, flow heat retention, velocity-gated solidification
