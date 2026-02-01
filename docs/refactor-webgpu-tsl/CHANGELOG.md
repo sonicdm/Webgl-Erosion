@@ -227,6 +227,15 @@ Key issues introduced:
 - Combined with M2's lateral exposure cooling, creates full levee cycle: cool edges → form crust → block flow → channelize
 **Physics basis:** Tomita 2024 §3: "solidification at the flow margin creates raised levees... subsequent flows are confined between these levees."
 
+### Change 20: Enhanced thermal transfer — substrate conduction + re-mobilization viscosity
+**Files:** `src/rendering/webgpu/compute/shaders/lava-thermal-transfer.wgsl`, `src/rendering/webgpu/compute/ComputeNodePipeline.ts`
+**Why:** The thermal transfer pass didn't account for hot lava flowing over recently solidified rock. Griffiths 2000 and Tomita 2024 describe layered flow behavior where the substrate acts as a heat sink.
+**Changes:**
+- Added `readTerrain` texture at binding 4 to thermal transfer pass (pipeline + shader)
+- **Substrate conduction**: when lava sits on rock (terrain.b > 0.05), heat conducts downward proportional to rock fraction and temperature difference. Crust partially insulates (min 20% conduction).
+- **Enhanced re-mobilization**: when reheated lava melts crust, also actively reduce viscosity toward the temperature-appropriate value (`mix` toward target viscosity). Previously only crust was melted, leaving high viscosity from the cooled state.
+**Physics basis:** Griffiths 2000 §4: hot lava flowing over cooled substrate loses heat by conduction into the underlying deposit. Tomita 2024 §4: re-mobilization of partly solidified lava when overrun by fresh hot flow.
+
 ### Files modified this session:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — rewritten (stripped to water pattern + viscDamp on accel only + temperature-dependent yield stress)
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — velocity-gated solidification, strong flow heat retention, reduced cooling rates
