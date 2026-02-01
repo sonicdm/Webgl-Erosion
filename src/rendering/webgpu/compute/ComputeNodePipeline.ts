@@ -2369,7 +2369,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pipeLen: number;
             timestep: number;
             pipeArea: number;
-            heatScale: number;
             velAdvMag: number;
         }
     ): void {
@@ -2388,10 +2387,10 @@ struct Uniforms {
     u_PipeLen: f32,
     u_timestep: f32,
     u_PipeArea: f32,
-    u_HeatScale: f32,
     u_VelAdvMag: f32,
     _pad0: f32,
     _pad1: f32,
+    _pad2: f32,
 };
 
 @group(0) @binding(5) var<uniform> uniforms: Uniforms;
@@ -2454,7 +2453,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let speed = length(vel);
-    let heat = clamp(speed * uniforms.u_HeatScale, 0.0, 1.0);
 
     // Temperature advection: incoming lava carries its temperature
     var newTemp = cur.g;
@@ -2470,8 +2468,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         newTemp = mix(cur.g, tempIn, inFrac);
     }
 
+    // Store deltaH (volume change from advection) in .w for thermal transfer pass
+    let deltaH = d2 - d1;
+
     textureStore(writeLava, coord, vec4<f32>(d2, newTemp, cur.b, cur.a));
-    textureStore(writeLavaVel, coord, vec4<f32>(vel.x, vel.y, speed, heat));
+    textureStore(writeLavaVel, coord, vec4<f32>(vel.x, vel.y, speed, deltaH));
 }
 `;
             this.lavaHeightVelBindGroupLayout = this.createBindGroupLayout([
@@ -2489,7 +2490,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         const uniformData = new Float32Array([
             uniforms.simRes, uniforms.pipeLen, uniforms.timestep, uniforms.pipeArea,
-            uniforms.heatScale, uniforms.velAdvMag, 0.0, 0.0,
+            uniforms.velAdvMag, 0.0, 0.0, 0.0,
         ]);
 
         let uniformBuffer = this.uniformBuffers.get('lavaHeightVel');

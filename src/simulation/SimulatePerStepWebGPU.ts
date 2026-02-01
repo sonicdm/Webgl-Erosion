@@ -220,13 +220,12 @@ export function SimulatePerStepWebGPU(
         });
         texturePool.swapLavaFluxTextures();
 
-        // 9c. Lava Height/Velocity Update
+        // 9c. Lava Height/Velocity Update (stores deltaH in vel.w for thermal transfer)
         computePipeline.lavaHeightVelPass(texturePool, {
             simRes: simres,
             pipeLen: controls.pipelen,
             timestep: controls.timestep,
             pipeArea: controls.pipeAra,
-            heatScale: controls.lavaHeatScale,
             velAdvMag: controls.VelocityAdvectionMag * 0.5,
         });
         texturePool.swapLavaTextures();

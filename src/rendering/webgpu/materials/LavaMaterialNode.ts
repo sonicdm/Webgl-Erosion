@@ -74,7 +74,9 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const lavaHeight = lava.x;
         const temperature = lava.y;
         const crustThickness = lava.w;
-        const heat = lavaVel ? lavaVel.w : temperature;
+        // Heat derived from speed (was in lavaVel.w, now lavaVel.w = deltaH for thermal transfer)
+        const speed = lavaVel ? lavaVel.z : float(0);
+        const heat = clamp(speed.mul(float(2.0)).add(temperature).mul(float(0.5)), 0, 1);
 
         // --- Vertex displacement: lava sits on top of terrain + water ---
         // Small upward bias (0.0004) prevents Z-fighting
