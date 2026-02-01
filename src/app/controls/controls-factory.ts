@@ -127,7 +127,8 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaMaxErosionPerStep: 0.0003,
         lavaErosionSpeedClamp: 3.0,
         lavaOrangeTemp: 540,
-        lavaYellowTemp: 780
+        lavaYellowTemp: 780,
+        lavaEmissiveStrength: 0.35
     };
 
     if (actions.resetErosionParameters) {

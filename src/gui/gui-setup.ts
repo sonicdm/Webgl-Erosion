@@ -292,6 +292,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     var lavaColor = lavapara.addFolder('Color Ramp');
     lavaColor.add(controls, 'lavaOrangeTemp', 240, 840).step(10).name('Orange °C');
     lavaColor.add(controls, 'lavaYellowTemp', 480, 1080).step(10).name('Yellow °C');
+    lavaColor.add(controls, 'lavaEmissiveStrength', 0.0, 1.5).step(0.05).name('Emissive Glow');
 
     // Water interaction
     var lavaWater = lavapara.addFolder('Water');
@@ -324,6 +325,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             controls.lavaHeatRadius = 2;
             controls.lavaOrangeTemp = 540;
             controls.lavaYellowTemp = 780;
+            controls.lavaEmissiveStrength = 0.35;
             gui.controllersRecursive().forEach((c: any) => c.updateDisplay?.());
             console.log('[LAVA_SIM] Applied lava test preset');
         }

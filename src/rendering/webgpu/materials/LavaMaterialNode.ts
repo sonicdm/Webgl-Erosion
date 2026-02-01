@@ -17,6 +17,8 @@ export interface LavaMaterialNodeInputs {
     orangeTemp?: number;
     /** Temperature threshold where yellow dominates (default 0.65) */
     yellowTemp?: number;
+    /** Emissive glow strength (default 0.35) */
+    emissiveStrength?: number;
 }
 
 /**
@@ -38,6 +40,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
     private lightDirUniform: any;
     private orangeTempUniform: any;
     private yellowTempUniform: any;
+    private emissiveStrengthUniform: any;
     private inputs: LavaMaterialNodeInputs;
 
     constructor(inputs: LavaMaterialNodeInputs = {}) {
@@ -51,6 +54,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         ));
         this.orangeTempUniform = uniform(inputs.orangeTemp ?? 0.45);
         this.yellowTempUniform = uniform(inputs.yellowTemp ?? 0.65);
+        this.emissiveStrengthUniform = uniform(inputs.emissiveStrength ?? 0.35);
 
         this.transparent = true;
         this.depthWrite = true;
@@ -70,6 +74,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         lightDir?: [number, number, number];
         orangeTemp?: number;
         yellowTemp?: number;
+        emissiveStrength?: number;
     }): void {
         if (params.lightDir !== undefined) {
             this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
@@ -79,6 +84,9 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         }
         if (params.yellowTemp !== undefined) {
             this.yellowTempUniform.value = params.yellowTemp;
+        }
+        if (params.emissiveStrength !== undefined) {
+            this.emissiveStrengthUniform.value = params.emissiveStrength;
         }
     }
 
@@ -141,7 +149,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const colDarkRed = vec3(0.3, 0.05, 0.02);      // dark red/brown
         const colRed = vec3(0.8, 0.15, 0.02);           // cherry red
         const colOrange = vec3(1.0, 0.45, 0.05);        // bright orange
-        const colYellow = vec3(1.0, 0.85, 0.35);        // incandescent white/yellow
+        const colYellow = vec3(1.0, 0.75, 0.3);          // incandescent yellow-orange
 
         // Smooth interpolation between stages — thresholds derived from GUI-tunable uniforms
         const orangeT = this.orangeTempUniform;
@@ -203,12 +211,12 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         // Emissive intensity ramps up above solidification temperature.
         const emissiveThreshold = float(0.3);
         const emissiveT = clamp(T.sub(emissiveThreshold).div(float(1).sub(emissiveThreshold)), 0, 1);
-        const emissiveIntensity = emissiveT.mul(emissiveT).mul(1.5);
+        const emissiveIntensity = emissiveT.mul(emissiveT).mul(this.emissiveStrengthUniform);
         // Crust suppresses emission except at cracks
         const crustEmissionBlock = float(1).sub(crustDarkening.mul(0.7));
         // Cracks get full emissive regardless of crust darkening
         const baseEmissive = baseColor.mul(emissiveIntensity).mul(crustEmissionBlock);
-        const crackEmissive = crackGlow.mul(emissiveIntensity.mul(1.5));
+        const crackEmissive = crackGlow.mul(emissiveIntensity.mul(1.2));
         const emissiveColor = max(baseEmissive, crackEmissive);
 
         // --- Final color: lit surface + crack glow + emissive ---
@@ -247,7 +255,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
             finalColor = litColor.mul(flowDetail);
 
             // Speed-based heat glow (frictional heating)
-            const heatGlow = clamp(speed.mul(0.3), 0, 0.15);
+            const heatGlow = clamp(speed.mul(0.15), 0, 0.06);
             finalColor = finalColor.add(vec3(heatGlow, heatGlow.mul(0.3), float(0)));
         }
 

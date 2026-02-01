@@ -407,3 +407,25 @@ Key issues introduced:
 - `main.ts`: Added `/1200` conversion for `orangeTemp` and `yellowTemp` passed to lava material, updated fallback values from 0-1 to °C
 
 **Effect**: Temperature sliders now show meaningful physical values. Moving "Orange °C" from 540 to 400 visibly shifts the color ramp. The color ramp controls now have full dynamic range instead of being nearly inert.
+
+---
+
+## Change 30: Fix emissive blowout + add Emissive Glow slider
+
+**Problem**: Lava rendered as near-white because the emissive term (1.5× base color) plus Lambertian lighting pushed values far above 1.0. At T=1.0: colYellow(1.0,0.85,0.35) × lamb + colYellow × 1.5 ≈ (2.0, 1.7, 0.7) — display clips to (1.0, 1.0, 0.7) = washed-out white. No amount of color ramp adjustment could fix it. An initial attempt at Reinhard tone mapping (color/(1+color)) compressed mid-tones too aggressively, making lava the same color as terrain.
+
+**Solution**:
+1. Reduced emissive multiplier from 1.5 → 0.35 (now uniform-driven)
+2. Reduced colYellow brightness: (1.0, 0.85, 0.35) → (1.0, 0.75, 0.3) — less G/B headroom consumed, so emissive doesn't clip
+3. Reduced crack emissive multiplier: 1.5 → 1.2
+4. Reduced speed heat glow: 0.3/0.15 → 0.15/0.06
+5. Removed Reinhard tone mapping (too aggressive for this use case)
+6. Added `lavaEmissiveStrength` as a live GUI slider (0.0–1.5, default 0.35)
+
+**Math at T=1.0 with new values** (lamb=0.7):
+- emissive = (1.0, 0.75, 0.3) × 0.35 = (0.35, 0.26, 0.105)
+- lit = (0.7, 0.525, 0.21) + (0.35, 0.26, 0.105) = (1.05, 0.785, 0.315)
+- Only R clips slightly → warm yellow-orange, not white
+
+**Files**: `LavaMaterialNode.ts`, `controls-factory.ts`, `gui-setup.ts`, `main.ts`
+**New control**: Emissive Glow slider in Lava > Color Ramp (0.0–1.5, step 0.05)
