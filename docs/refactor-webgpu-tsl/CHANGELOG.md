@@ -213,6 +213,20 @@ Key issues introduced:
 - Naturally produces channelized flow morphology
 **Physics basis:** Griffiths 2000 §2: "the edges of the flow, being thinner and more exposed, cool fastest, forming solid levees that confine the flow into a channel."
 
+### Change 19: Crust as structural flow barrier (levees)
+**File:** `src/rendering/webgpu/compute/shaders/lava-flux.wgsl`
+**Why:** Crust affected viscosity via yield stress but didn't directly block flow. Tomita 2024 shows solidification-driven morphology requires cooled crust to physically redirect flow. Neighbor lava data was already being sampled (for height differences) but the `.a` (crust) channel was unused.
+**Changes:**
+- Added per-direction crust barrier: `barrier = yieldThreshold + neighborCrust * crustStrength`
+- Flux into a heavily crusted neighbor is zeroed unless the pressure head exceeds the combined yield + crust barrier
+- Uses existing `u_CrustStrength` uniform (was already defined but unused in flux shader)
+- No new bindings — neighbor lava `.a` channel already loaded
+**Expected behavior:**
+- Crusted flow margins physically block new flow from spreading sideways
+- Hot lava routes around crusted deposits, flowing through uncrusted channels
+- Combined with M2's lateral exposure cooling, creates full levee cycle: cool edges → form crust → block flow → channelize
+**Physics basis:** Tomita 2024 §3: "solidification at the flow margin creates raised levees... subsequent flows are confined between these levees."
+
 ### Files modified this session:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — rewritten (stripped to water pattern + viscDamp on accel only + temperature-dependent yield stress)
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — velocity-gated solidification, strong flow heat retention, reduced cooling rates
