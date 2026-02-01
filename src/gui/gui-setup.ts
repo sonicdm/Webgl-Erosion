@@ -257,7 +257,6 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     
     // Lava Parameters
     var lavapara = gui.addFolder('Lava Parameters');
-    lavapara.add(controls, 'lavaEnabled').name('Enable Lava');
     lavapara.add(controls, 'lavaViscosityScale', 0.1, 10.0).name('Viscosity Scale');
     lavapara.add(controls, 'lavaYieldStress', 0.0, 2.0).name('Yield Stress');
     lavapara.add(controls, 'lavaCoolingRate', 0.01, 1.0).name('Cooling Rate');
@@ -272,6 +271,13 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavapara.add(controls, 'lavaEmissionTemp', 0.5, 1.0).name('Emission Temp');
     lavapara.add(controls, 'lavaCrustStrength', 0.1, 2.0).name('Crust Strength');
     lavapara.add(controls, 'lavaCrustGrowthRate', 0.01, 0.5).name('Crust Growth');
+    lavapara.add(controls, 'lavaSofteningTemp', 0.3, 0.9).name('Softening Temp');
+    lavapara.add(controls, 'lavaKCond', 0.01, 1.0).name('Conductivity');
+    lavapara.add(controls, 'lavaCrustMixSuppression', 0.0, 5.0).name('Crust Mix Suppress');
+    lavapara.add(controls, 'lavaAmbientCoolingRate', 0.0, 0.2).name('Ambient Cooling');
+    lavapara.add(controls, 'lavaViscTempScale', 1.0, 10.0).name('Visc Temp Scale');
+    lavapara.add(controls, 'lavaMaxErosionPerStep', 0.0001, 0.01).name('Max Erosion/Step');
+    lavapara.add(controls, 'lavaErosionSpeedClamp', 1.0, 20.0).name('Erosion Speed Clamp');
     lavapara.close();
 
     // Rendering Parameters

@@ -129,4 +129,12 @@ export interface IAppControls {
     lavaCrustGrowthRate: number;
     lavaRockMeltThreshold: number;
     lavaSourceCount: number;
+    // Lava overhaul: new parameters
+    lavaSofteningTemp: number;
+    lavaKCond: number;
+    lavaCrustMixSuppression: number;
+    lavaAmbientCoolingRate: number;
+    lavaViscTempScale: number;
+    lavaMaxErosionPerStep: number;
+    lavaErosionSpeedClamp: number;
 }

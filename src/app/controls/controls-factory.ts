@@ -117,7 +117,15 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaCrustStrength: 0.5,
         lavaCrustGrowthRate: 0.1,
         lavaRockMeltThreshold: 0.7,
-        lavaSourceCount: 0
+        lavaSourceCount: 0,
+        // Lava overhaul: new parameters
+        lavaSofteningTemp: 0.6,
+        lavaKCond: 0.3,
+        lavaCrustMixSuppression: 2.0,
+        lavaAmbientCoolingRate: 0.05,
+        lavaViscTempScale: 4.0,
+        lavaMaxErosionPerStep: 0.002,
+        lavaErosionSpeedClamp: 5.0
     };
 
     if (actions.resetErosionParameters) {
