@@ -267,6 +267,19 @@ Key issues introduced:
 - Stationary lava has subtle random surface variation
 - Effect strengthens with flow speed
 
+### Change 23: Water-lava interaction polish + enable by default
+**Files:** `src/rendering/webgpu/compute/shaders/lava-water-interaction.wgsl`, `src/app/controls/controls-factory.ts`
+**Why:** Water-lava interaction was disabled by default and too aggressive when enabled — quench cooling (5.0 multiplier) instantly froze lava on contact, making it unusable.
+**Changes:**
+- **Quench cooling reduced**: 5.0 → 1.5 — forms quench crust (insulates core) rather than freezing entire flow
+- **Crust formation increased**: 2.0 → 3.0 — quench contact makes thick crust (pillow basalt behavior)
+- **Flash evaporation**: hot lava (T > 0.7) now aggressively vaporizes nearby water
+- **Flow blocking strengthened**: threshold lowered (0.05 → 0.02), rate increased (0.3 → 0.5) — thinner lava still displaces water
+- **Solidification rate reduced**: 0.05 → 0.03 per step — less instant rock conversion
+- **Heat radius**: now temperature-squared scaling (radiative — hot lava evaporates more distant water), T < 0.4 lava doesn't contribute
+- **Enabled by default**: `lavaWaterInteraction: true` — was false
+**Physics basis:** Real lava-water interaction forms pillow basalt (quench crust with hot interior), not instant solid rock. Steam explosions and flash evaporation dominate the near-field.
+
 ### Files modified this session:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — rewritten (stripped to water pattern + viscDamp on accel only + temperature-dependent yield stress)
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — velocity-gated solidification, strong flow heat retention, reduced cooling rates

@@ -111,7 +111,7 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaRockFraction: 0.7,
         lavaThermalErosionRate: 0.3,
         lavaHeatScale: 2.0,
-        lavaWaterInteraction: false,
+        lavaWaterInteraction: true,
         lavaHeatRadius: 2,
         lavaEmissionTemp: 1.0,
         lavaCrustStrength: 0.3,
