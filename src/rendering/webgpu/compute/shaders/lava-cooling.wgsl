@@ -121,7 +121,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (temperature < uniforms.u_SolidificationThreshold) {
         let solidFrac = (uniforms.u_SolidificationThreshold - temperature) / uniforms.u_SolidificationThreshold;
         // Gentle rate scaled by speed gate — stalled lava solidifies, flowing lava doesn't
-        let solidRate = solidFrac * uniforms.u_timestep * 0.5 * speedGate;
+        // Rate kept low (0.1) to prevent rapid terrain buildup that blocks drainage
+        let solidRate = solidFrac * uniforms.u_timestep * 0.1 * speedGate;
         let solidAmount = min(lavaHeight * solidRate, lavaHeight);
 
         terrainHeight += solidAmount;

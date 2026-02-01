@@ -105,11 +105,11 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaEnabled: false,
         lavaViscosityScale: 5.0,
         lavaYieldStress: 0.2,
-        lavaCoolingRate: 0.00005,
-        lavaProportionalCooling: 0.00005,
+        lavaCoolingRate: 0.00015,
+        lavaProportionalCooling: 0.0001,
         lavaSolidificationThreshold: 0.20,
         lavaRockFraction: 0.7,
-        lavaThermalErosionRate: 0.3,
+        lavaThermalErosionRate: 0.05,
         lavaHeatScale: 2.0,
         lavaWaterInteraction: true,
         lavaHeatRadius: 2,
@@ -122,10 +122,10 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaSofteningTemp: 0.6,
         lavaKCond: 0.3,
         lavaCrustMixSuppression: 2.0,
-        lavaAmbientCoolingRate: 0.00003,
+        lavaAmbientCoolingRate: 0.0001,
         lavaViscTempScale: 4.0,
-        lavaMaxErosionPerStep: 0.002,
-        lavaErosionSpeedClamp: 5.0
+        lavaMaxErosionPerStep: 0.0003,
+        lavaErosionSpeedClamp: 3.0
     };
 
     if (actions.resetErosionParameters) {

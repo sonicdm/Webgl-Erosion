@@ -292,6 +292,30 @@ Key issues introduced:
   - Added to TerrainDebugMode enum as `ThermalErosionRate = 19`
   - Added to GUI dropdown, wired into TerrainMaterialNode select chain
 
+### Change 25: Tuning — reduce erosion, fix cooling/solidification balance, fix source backup
+**Files:** `src/app/controls/controls-factory.ts`, `src/gui/gui-setup.ts`, `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl`
+**Why:** User feedback: "thermal erosion is pretty aggressive", "the source is eventually backing up", "stuff is flowing uphill after removing a source", "source never seems to fully go away/cool". Root causes:
+1. Thermal erosion at 180 steps/sec with maxErosionPerStep=0.002 → 0.36 height/sec removal → carved deep channels
+2. Solidification rate (0.5 multiplier) converted stalled lava to terrain too fast → rock deposits blocked drainage at source
+3. Cooling rates (0.00008/step total) too slow → ~55 seconds to reach solidification → lava stayed bright hot indefinitely
+4. "Flowing uphill" = thermal erosion carved depressions, lava pooled in carved channels
+
+**Changes:**
+- **Thermal erosion defaults reduced ~6x:**
+  - `lavaThermalErosionRate`: 0.3 → 0.05
+  - `lavaMaxErosionPerStep`: 0.002 → 0.0003 (max erosion/sec now 0.054 vs 0.36)
+  - `lavaErosionSpeedClamp`: 5.0 → 3.0
+- **Cooling rates increased ~3x** (lava now cools to solidification in ~18 sec, not 55):
+  - `lavaCoolingRate`: 0.00005 → 0.00015
+  - `lavaProportionalCooling`: 0.00005 → 0.0001
+  - `lavaAmbientCoolingRate`: 0.00003 → 0.0001
+- **Solidification rate reduced 5x** in lava-cooling.wgsl:
+  - `solidRate` multiplier: 0.5 → 0.1 (prevents rapid terrain buildup that blocks drainage)
+- **GUI slider range fix:** Thermal Erosion range (0.1, 2.0) → (0.01, 1.0) to accommodate new default 0.05
+- **Test preset updated** with all new values
+
+**Net effect:** Lava cools faster (visible cooling in ~15-20 sec) but solidifies to terrain much slower. Erosion is gentle rather than channel-carving. Source area drains properly without rock deposit buildup.
+
 ### Files modified across sessions 2+3:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — viscDamp on accel only + yield stress + crust barrier
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — lateral exposure, flow heat retention, velocity-gated solidification

@@ -263,7 +263,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavapara.add(controls, 'lavaProportionalCooling', 0.0, 0.01).name('Proportional Cooling');
     lavapara.add(controls, 'lavaSolidificationThreshold', 0.05, 0.5).name('Solidification Temp');
     lavapara.add(controls, 'lavaRockFraction', 0.0, 1.0).name('Rock Fraction');
-    lavapara.add(controls, 'lavaThermalErosionRate', 0.1, 2.0).name('Thermal Erosion');
+    lavapara.add(controls, 'lavaThermalErosionRate', 0.01, 1.0).name('Thermal Erosion');
     lavapara.add(controls, 'lavaRockMeltThreshold', 0.3, 0.9).name('Rock Melt Temp');
     lavapara.add(controls, 'lavaHeatScale', 0.1, 5.0).name('Heat Scale');
     lavapara.add(controls, 'lavaWaterInteraction').name('Water Interaction');
@@ -284,11 +284,11 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         applyLavaTestPreset: () => {
             controls.lavaViscosityScale = 5.0;
             controls.lavaYieldStress = 0.2;
-            controls.lavaCoolingRate = 0.00005;
-            controls.lavaProportionalCooling = 0.00005;
+            controls.lavaCoolingRate = 0.00015;
+            controls.lavaProportionalCooling = 0.0001;
             controls.lavaSolidificationThreshold = 0.20;
             controls.lavaRockFraction = 0.7;
-            controls.lavaThermalErosionRate = 0.3;
+            controls.lavaThermalErosionRate = 0.05;
             controls.lavaRockMeltThreshold = 0.7;
             controls.lavaEmissionTemp = 1.0;
             controls.lavaCrustStrength = 0.3;
@@ -296,10 +296,10 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             controls.lavaSofteningTemp = 0.6;
             controls.lavaKCond = 0.3;
             controls.lavaCrustMixSuppression = 2.0;
-            controls.lavaAmbientCoolingRate = 0.00003;
+            controls.lavaAmbientCoolingRate = 0.0001;
             controls.lavaViscTempScale = 4.0;
-            controls.lavaMaxErosionPerStep = 0.002;
-            controls.lavaErosionSpeedClamp = 5.0;
+            controls.lavaMaxErosionPerStep = 0.0003;
+            controls.lavaErosionSpeedClamp = 3.0;
             controls.lavaWaterInteraction = true;
             controls.lavaHeatRadius = 2;
             // Refresh GUI to show updated values
