@@ -198,6 +198,21 @@ Key issues introduced:
 - At speed=1 (flowing): 95% suppressed by flowCoolFactor → effectively no cooling while flowing
 **Physics basis:** Griffiths 2000 §3.2: "advance rate is controlled by the balance between supply rate and cooling rate." Cooling-limited advance means lava should travel significant distance before solidifying.
 
+### Change 18: Lateral cooling asymmetry for self-channeling
+**File:** `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl`
+**Why:** Lava spread uniformly because every cell cooled at the same rate. Griffiths 2000 describes self-channeling: edges of a flow are more exposed (more surface area relative to volume), so they cool faster and form crust levees that confine the hotter, faster core.
+**Changes:**
+- Sample 4 neighbor lava heights in the cooling pass
+- Count "exposed sides" — neighbors with lavaHeight < 30% of this cell's height
+- Compute `exposureMultiplier = 1.0 + exposedSides * 0.4` (range: 1.0 center to 2.6 fully exposed edge)
+- Apply multiplier to both ambient and surface-area cooling rates
+- Apply multiplier to crust growth rate
+**Expected behavior:**
+- Central channel stays hotter (lower exposure, slower cooling)
+- Edges cool faster → form thicker crust → act as levees
+- Naturally produces channelized flow morphology
+**Physics basis:** Griffiths 2000 §2: "the edges of the flow, being thinner and more exposed, cool fastest, forming solid levees that confine the flow into a channel."
+
 ### Files modified this session:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — rewritten (stripped to water pattern + viscDamp on accel only + temperature-dependent yield stress)
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — velocity-gated solidification, strong flow heat retention, reduced cooling rates
