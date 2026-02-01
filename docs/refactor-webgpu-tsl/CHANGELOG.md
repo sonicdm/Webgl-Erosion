@@ -429,3 +429,29 @@ Key issues introduced:
 
 **Files**: `LavaMaterialNode.ts`, `controls-factory.ts`, `gui-setup.ts`, `main.ts`
 **New control**: Emissive Glow slider in Lava > Color Ramp (0.0–1.5, step 0.05)
+
+---
+
+## Change 31: Animated turbulence + wider color ramp transitions
+
+**Problem**: Lava surface was static and flat — no convection turbulence. Color ramp had narrow smoothstep bands (0.10-0.15 wide) creating visible discrete banding between orange and yellow instead of smooth gradients. Real lava has constantly moving hot/cool patches from convective overturning, and colors blend smoothly across broad temperature ranges.
+
+**Solution**:
+1. **Animated multi-octave turbulence** — 3 noise layers scrolling at different speeds/directions:
+   - Fine detail (scale 40, speed 0.03) — small convection cells
+   - Medium (scale 18, speed 0.02) — larger convection patterns
+   - Coarse (scale 8, speed 0.008) — slow large-scale drift
+   - Combined noise perturbs temperature before color ramp lookup (±0.15 range)
+   - Perturbation scales with temperature: hot lava = active turbulence, cool = static
+2. **Wide overlapping smoothstep bands** (0.20-0.30 wide) replace narrow ones:
+   - t1: 0.10→0.30 (black→dark red)
+   - t2: 0.20→orangeT (dark red→red)
+   - t3: orangeT-0.10→orangeT+0.20 (red→orange)
+   - t4: orangeT+0.05→yellowT+0.15 (orange→yellow)
+   - Bands overlap significantly so colors blend naturally
+3. **Time uniform** added to LavaMaterialNode, passed from main.ts each frame
+4. **Animated cracks** — crack noise now scrolls slowly to simulate thermal fracturing
+5. **Flow detail** — stronger modulation (0.06-0.15 range vs old 0.02-0.08), time-animated
+
+**Files**: `LavaMaterialNode.ts`, `main.ts`
+**New uniform**: `time` (integer frame counter, passed each tick)

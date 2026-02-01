@@ -1199,6 +1199,7 @@ async function main() {
             orangeTemp: (controls.lavaOrangeTemp ?? 540) / 1200,
             yellowTemp: (controls.lavaYellowTemp ?? 780) / 1200,
             emissiveStrength: controls.lavaEmissiveStrength ?? 0.35,
+            time: timer,
           });
         }
         // Update sky sun position

@@ -1,6 +1,6 @@
 import { Texture, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, fract, max, min, mix, normalize, normalLocal, positionLocal, pow, sin, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { clamp, dot, float, fract, max, min, mix, normalize, normalLocal, positionLocal, pow, sin, cos, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
 
 export interface LavaMaterialNodeInputs {
     /** Heightmap texture (R=terrainHeight, G=water, B=rock, A=baseRock) */
@@ -25,14 +25,8 @@ export interface LavaMaterialNodeInputs {
  * Lava material using Three.js NodeMaterial (TSL).
  * Renders lava as a transparent plane displaced above terrain+water.
  *
- * Temperature-driven 5-stage color ramp:
- *   >0.90 (>1150°C): white/yellow
- *   0.70-0.90 (1000-1150°C): bright orange
- *   0.45-0.70 (650-1000°C): red
- *   0.35-0.45 (500-650°C): dark red/brown
- *   <0.35 (solid): black basalt
- *
- * Emissive glow from hot lava, black crust with glowing cracks.
+ * Temperature-driven color ramp with wide overlapping transitions.
+ * Animated multi-octave turbulence simulates convection.
  * Manual Lambertian lighting (project has no scene lights).
  */
 export class LavaMaterialNode extends MeshBasicNodeMaterial {
@@ -41,6 +35,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
     private orangeTempUniform: any;
     private yellowTempUniform: any;
     private emissiveStrengthUniform: any;
+    private timeUniform: any;
     private inputs: LavaMaterialNodeInputs;
 
     constructor(inputs: LavaMaterialNodeInputs = {}) {
@@ -55,6 +50,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         this.orangeTempUniform = uniform(inputs.orangeTemp ?? 0.45);
         this.yellowTempUniform = uniform(inputs.yellowTemp ?? 0.65);
         this.emissiveStrengthUniform = uniform(inputs.emissiveStrength ?? 0.35);
+        this.timeUniform = uniform(0.0);
 
         this.transparent = true;
         this.depthWrite = true;
@@ -75,6 +71,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         orangeTemp?: number;
         yellowTemp?: number;
         emissiveStrength?: number;
+        time?: number;
     }): void {
         if (params.lightDir !== undefined) {
             this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
@@ -87,6 +84,9 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         }
         if (params.emissiveStrength !== undefined) {
             this.emissiveStrengthUniform.value = params.emissiveStrength;
+        }
+        if (params.time !== undefined) {
+            this.timeUniform.value = params.time;
         }
     }
 
@@ -136,28 +136,52 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const lightDir = normalize(this.lightDirUniform);
         const lamb = max(dot(surfaceNormal, lightDir), float(0.05));
 
-        // --- Temperature-driven 5-stage color ramp ---
-        // Real lava color reference (USGS):
-        //   >1150°C (T>0.90): incandescent white-yellow
-        //   1000-1150°C (T 0.70-0.90): bright orange
-        //   650-1000°C (T 0.45-0.70): cherry red
-        //   500-650°C (T 0.35-0.45): dark red/brown
-        //   <500°C (T<0.35): solid black basalt
         const T = clamp(temperature, 0, 1);
+        const time = this.timeUniform;
 
+        // --- Animated turbulence: simulates convection cells ---
+        // Two noise layers scrolling in different directions at different speeds.
+        // This perturbs the temperature lookup to create organic hot/cool patches
+        // that move across the surface like real convective overturning.
+        const turbScale1 = float(40);
+        const turbScale2 = float(18);
+        const turbSpeed1 = float(0.03);
+        const turbSpeed2 = float(0.02);
+        // Layer 1: fine detail, scrolls diagonally
+        const turbUv1 = safeUv.mul(turbScale1).add(vec2(time.mul(turbSpeed1), time.mul(turbSpeed1).mul(0.7)));
+        const turb1 = fract(sin(dot(turbUv1, vec2(12.9898, 78.233))).mul(43758.5453));
+        // Layer 2: larger cells, scrolls opposite direction
+        const turbUv2 = safeUv.mul(turbScale2).add(vec2(time.mul(turbSpeed2).negate(), time.mul(turbSpeed2).mul(1.3)));
+        const turb2 = fract(sin(dot(turbUv2, vec2(39.346, 11.135))).mul(23421.631));
+        // Layer 3: very slow large-scale drift
+        const turbUv3 = safeUv.mul(float(8)).add(vec2(time.mul(0.008), time.mul(0.005).negate()));
+        const turb3 = fract(sin(dot(turbUv3, vec2(71.917, 23.687))).mul(67432.891));
+
+        // Combine: weighted blend of octaves (fine + medium + coarse)
+        const turbulence = turb1.mul(0.3).add(turb2.mul(0.45)).add(turb3.mul(0.25));
+
+        // Perturb temperature before color ramp lookup.
+        // Strength scales with temperature — hot lava has more turbulence, cool lava is static.
+        const turbStrength = smoothstep(float(0.2), float(0.5), T).mul(0.15);
+        const Tperturbed = clamp(T.add(turbulence.sub(0.5).mul(turbStrength)), 0, 1);
+
+        // --- Temperature-driven color ramp with WIDE overlapping transitions ---
+        // Wider bands (0.20-0.30) create smooth gradients instead of visible banding.
+        // Transitions overlap so colors blend naturally like real lava.
         const colBlack = vec3(0.05, 0.04, 0.03);       // solid basalt
         const colDarkRed = vec3(0.3, 0.05, 0.02);      // dark red/brown
-        const colRed = vec3(0.8, 0.15, 0.02);           // cherry red
+        const colRed = vec3(0.85, 0.12, 0.02);          // cherry red
         const colOrange = vec3(1.0, 0.45, 0.05);        // bright orange
-        const colYellow = vec3(1.0, 0.75, 0.3);          // incandescent yellow-orange
+        const colYellow = vec3(1.0, 0.75, 0.3);         // incandescent yellow-orange
 
-        // Smooth interpolation between stages — thresholds derived from GUI-tunable uniforms
         const orangeT = this.orangeTempUniform;
         const yellowT = this.yellowTempUniform;
-        const t1 = smoothstep(orangeT.sub(0.20), orangeT.sub(0.10), T); // black → dark red
-        const t2 = smoothstep(orangeT.sub(0.10), orangeT, T);           // dark red → red
-        const t3 = smoothstep(orangeT, orangeT.add(0.15), T);           // red → orange
-        const t4 = smoothstep(yellowT, yellowT.add(0.20), T);           // orange → yellow
+
+        // Wide overlapping smoothstep bands — each 0.20-0.30 wide
+        const t1 = smoothstep(float(0.10), float(0.30), Tperturbed);                    // black → dark red
+        const t2 = smoothstep(float(0.20), orangeT, Tperturbed);                         // dark red → red
+        const t3 = smoothstep(orangeT.sub(0.10), orangeT.add(0.20), Tperturbed);        // red → orange
+        const t4 = smoothstep(orangeT.add(0.05), yellowT.add(0.15), Tperturbed);        // orange → yellow
 
         let baseColor = mix(colBlack, colDarkRed, t1);
         baseColor = mix(baseColor, colRed, t2);
@@ -165,66 +189,44 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         baseColor = mix(baseColor, colYellow, t4);
 
         // --- Crust darkening ---
-        // Crust forms a dark insulating skin over the hot interior.
-        // Where crust is thick and temperature is moderate, surface appears dark.
-        // Where temperature is very high, crust melts and glowing interior shows through.
         const crustFactor = clamp(crustThickness.mul(8), 0, 1);
         const crustMeltthrough = smoothstep(float(0.5), float(0.8), T);
         const crustDarkening = crustFactor.mul(float(1).sub(crustMeltthrough));
-        const crustColor = vec3(0.06, 0.05, 0.04); // dark crust
+        const crustColor = vec3(0.06, 0.05, 0.04);
         const surfaceColor = mix(baseColor, crustColor, crustDarkening);
 
         // --- Crust crack rendering (glowing fissures) ---
-        // Where crust exists but underlying lava is still hot, render glowing cracks.
-        // Uses multi-octave procedural noise to create irregular crack patterns.
-        // Crack density increases with: speed (shear cracking), temperature differential
-        // (thermal stress), and decreases with crust thickness (thick crust has fewer cracks).
-
-        // Hash-based noise at two scales for irregular crack patterns
-        const noiseUv1 = safeUv.mul(float(200)); // fine detail
-        const noiseUv2 = safeUv.mul(float(80));  // larger cracks
-        // Classic GPU hash: fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453)
-        const hash1 = fract(sin(dot(noiseUv1, vec2(12.9898, 78.233))).mul(43758.5453));
-        const hash2 = fract(sin(dot(noiseUv2, vec2(39.346, 11.135))).mul(23421.631));
-
-        // Combine octaves: creates irregular web-like pattern
+        // Animated cracks: noise scrolls slowly to simulate thermal stress fracturing
+        const crackUv1 = safeUv.mul(float(200)).add(vec2(time.mul(0.01), float(0)));
+        const crackUv2 = safeUv.mul(float(80)).add(vec2(float(0), time.mul(0.007).negate()));
+        const hash1 = fract(sin(dot(crackUv1, vec2(12.9898, 78.233))).mul(43758.5453));
+        const hash2 = fract(sin(dot(crackUv2, vec2(39.346, 11.135))).mul(23421.631));
         const crackNoise = min(hash1, hash2);
 
-        // Crack conditions: crust must exist and lava underneath must be hot
         const hasCrust = smoothstep(float(0.01), float(0.05), crustThickness);
         const hotUnderneath = smoothstep(float(0.35), float(0.6), T);
-        // Crack width: thinner crust = more cracks, faster flow = more shear cracks
         const baseCrackWidth = float(0.12);
         const crackWidth = baseCrackWidth.add(
-            clamp(float(1).sub(crustThickness.mul(4)), 0, 0.15)  // thin crust = wider cracks
+            clamp(float(1).sub(crustThickness.mul(4)), 0, 0.15)
         );
-
-        // Crack mask: noise below threshold = crack
         const isCrack = crackNoise.lessThan(crackWidth);
         const crackIntensity = hasCrust.mul(hotUnderneath).mul(isCrack.select(float(1), float(0)));
-
-        // Crack glow color: show the hot baseColor underneath with full brightness
         const crackGlow = baseColor.mul(crackIntensity).mul(1.2);
 
         // --- Emissive glow ---
-        // Hot lava emits light — this is added on top of Lambertian lighting.
-        // Emissive intensity ramps up above solidification temperature.
         const emissiveThreshold = float(0.3);
         const emissiveT = clamp(T.sub(emissiveThreshold).div(float(1).sub(emissiveThreshold)), 0, 1);
         const emissiveIntensity = emissiveT.mul(emissiveT).mul(this.emissiveStrengthUniform);
-        // Crust suppresses emission except at cracks
         const crustEmissionBlock = float(1).sub(crustDarkening.mul(0.7));
-        // Cracks get full emissive regardless of crust darkening
         const baseEmissive = baseColor.mul(emissiveIntensity).mul(crustEmissionBlock);
         const crackEmissive = crackGlow.mul(emissiveIntensity.mul(1.2));
         const emissiveColor = max(baseEmissive, crackEmissive);
 
         // --- Final color: lit surface + crack glow + emissive ---
-        // Cracks punch through crust darkening to show hot color
         const crackedSurface = mix(surfaceColor, baseColor, crackIntensity);
         const litColor = crackedSurface.mul(lamb).add(emissiveColor);
 
-        // --- Flow-aligned surface detail + speed-based heat glow ---
+        // --- Animated flow texture + convection surface detail ---
         let finalColor = litColor;
         if (inputs.lavaVelocityMap) {
             const vel = texture(inputs.lavaVelocityMap, safeUv);
@@ -232,29 +234,24 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
             const velX = vel.x;
             const velY = vel.y;
 
-            // Flow-aligned anisotropic noise: stretched along velocity, compressed perpendicular.
-            // Creates ropy pahoehoe texture on slow flows, stretched streaks on fast flows.
-            const flowScale = float(120);
+            // Flow-aligned noise: stretched along velocity direction
+            const flowScale = float(80);
             const flowUv = safeUv.mul(flowScale);
+            const speedFactor = clamp(speed.mul(5), 0, 1);
 
-            // Project UV along flow direction and perpendicular
-            // flowDir ~= (velX, velY) normalized, but use raw for stretching effect
-            const speedFactor = clamp(speed.mul(5), 0, 1); // how much to stretch
-            // Stretch along flow: compress perpendicular by speed
-            const stretchedU = flowUv.x.add(velX.mul(flowScale).mul(0.3));
-            const stretchedV = flowUv.y.add(velY.mul(flowScale).mul(0.3));
+            // Animated flow detail: scrolls with velocity + time
+            const stretchedU = flowUv.x.add(velX.mul(flowScale).mul(0.3)).add(time.mul(0.05));
+            const stretchedV = flowUv.y.add(velY.mul(flowScale).mul(0.3)).add(time.mul(0.03));
             const flowNoise = fract(sin(
                 dot(vec2(stretchedU, stretchedV), vec2(17.239, 43.157))
             ).mul(28461.327));
 
-            // Subtle modulation: 0.92-1.08 range, stronger with speed
-            const detailStrength = mix(float(0.02), float(0.08), speedFactor);
+            // Stronger modulation than before: 0.85-1.15 range for visible texture
+            const detailStrength = mix(float(0.06), float(0.15), speedFactor);
             const flowDetail = float(1).sub(detailStrength).add(flowNoise.mul(detailStrength.mul(2)));
-
-            // Apply flow detail to surface color (not emissive — just surface texture)
             finalColor = litColor.mul(flowDetail);
 
-            // Speed-based heat glow (frictional heating)
+            // Speed-based heat glow
             const heatGlow = clamp(speed.mul(0.15), 0, 0.06);
             finalColor = finalColor.add(vec3(heatGlow, heatGlow.mul(0.3), float(0)));
         }
