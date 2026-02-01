@@ -145,7 +145,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     const kcController = erosionpara.add(controls, 'Kc', 0.01, 0.5);
     const ksController = erosionpara.add(controls, 'Ks', 0.001, 0.2);
     const kdController = erosionpara.add(controls, 'Kd', 0.0001, 0.1);
-    erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10, lavaHeight: 11, lavaTemperature: 12, lavaVelocity: 13, lavaVolume: 14, lavaLayering: 15, waterLavaContact: 16, lavaCrust: 17, lavaDeltaH: 18 });
+    erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10, lavaHeight: 11, lavaTemperature: 12, lavaVelocity: 13, lavaVolume: 14, lavaLayering: 15, waterLavaContact: 16, lavaCrust: 17, lavaDeltaH: 18, thermalErosionRate: 19 });
     const advectionMethodController = erosionpara.add(controls, 'AdvectionMethod', { Semilagrangian: 0, MacCormack: 1 });
     const velocityMultiplierController = erosionpara.add(controls, 'VelocityMultiplier', 1.0, 5.0);
     erosionpara.add(controls, 'AdvectionSpeedScaling', 0.1, 3.0);
@@ -278,32 +278,33 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavapara.add(controls, 'lavaViscTempScale', 1.0, 10.0).name('Visc Temp Scale');
     lavapara.add(controls, 'lavaMaxErosionPerStep', 0.0001, 0.01).name('Max Erosion/Step');
     lavapara.add(controls, 'lavaErosionSpeedClamp', 1.0, 20.0).name('Erosion Speed Clamp');
-    // Dev: Lava test preset — sets tuned parameters for lava flow testing
+    // Dev: Lava test preset — tuned for paper-grounded flow behavior
+    // Cooling rates calibrated for 180 steps/sec (SimSpeed=3 × 60fps)
     lavapara.add({
         applyLavaTestPreset: () => {
-            controls.lavaViscosityScale = 3.0;
+            controls.lavaViscosityScale = 5.0;
             controls.lavaYieldStress = 0.2;
-            controls.lavaCoolingRate = 0.03;
-            controls.lavaProportionalCooling = 0.01;
-            controls.lavaSolidificationThreshold = 0.06;
+            controls.lavaCoolingRate = 0.00005;
+            controls.lavaProportionalCooling = 0.00005;
+            controls.lavaSolidificationThreshold = 0.20;
             controls.lavaRockFraction = 0.7;
             controls.lavaThermalErosionRate = 0.3;
             controls.lavaRockMeltThreshold = 0.7;
             controls.lavaEmissionTemp = 1.0;
-            controls.lavaCrustStrength = 0.4;
-            controls.lavaCrustGrowthRate = 0.06;
+            controls.lavaCrustStrength = 0.3;
+            controls.lavaCrustGrowthRate = 0.01;
             controls.lavaSofteningTemp = 0.6;
             controls.lavaKCond = 0.3;
             controls.lavaCrustMixSuppression = 2.0;
-            controls.lavaAmbientCoolingRate = 0.01;
-            controls.lavaViscTempScale = 3.0;
+            controls.lavaAmbientCoolingRate = 0.00003;
+            controls.lavaViscTempScale = 4.0;
             controls.lavaMaxErosionPerStep = 0.002;
             controls.lavaErosionSpeedClamp = 5.0;
             controls.lavaWaterInteraction = true;
             controls.lavaHeatRadius = 2;
             // Refresh GUI to show updated values
             gui.controllersRecursive().forEach((c: any) => c.updateDisplay?.());
-            console.log('[LAVA_SIM] Applied lava test preset');
+            console.log('[LAVA_SIM] Applied lava test preset (paper-grounded defaults)');
         }
     }, 'applyLavaTestPreset').name('Apply Test Preset');
     lavapara.close();

@@ -424,6 +424,7 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             const crustCracking = clamp(lavaData2.y.mul(lavaData2.w).mul(3), 0, 1);
             debugLavaCrust = vec3(crustVal, crustCracking, crustVal.mul(0.5));
         }
+        let debugThermalErosionRate = vec3(0, 0, 0);
         if (inputs.lavaVelocityMap) {
             const lavaVelData = texture(inputs.lavaVelocityMap, curUv);
             debugLavaVel = abs(vec3(lavaVelData.x, lavaVelData.y, lavaVelData.z)).div(5);
@@ -433,6 +434,16 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             const arriving = clamp(deltaH.mul(50), 0, 1);
             const leaving = clamp(deltaH.negate().mul(50), 0, 1);
             debugLavaDeltaH = vec3(leaving, arriving, float(0));
+
+            // ThermalErosionRate: estimated erosion intensity = temperature * speed
+            // Black→blue→green→red heatmap
+            if (inputs.lavaMap) {
+                const lavaForErosion = texture(inputs.lavaMap, curUv);
+                const erosionProxy = clamp(lavaForErosion.y.mul(lavaVelData.z).mul(5), 0, 1);
+                const erLow = mix(vec3(0, 0, 0.3), vec3(0, 0.8, 0), clamp(erosionProxy.mul(3), 0, 1));
+                const erHigh = mix(vec3(0, 0.8, 0), vec3(1, 0.2, 0), clamp(erosionProxy.sub(0.33).mul(3), 0, 1));
+                debugThermalErosionRate = erosionProxy.lessThan(float(0.33)).select(erLow, erHigh);
+            }
         }
 
         const finalColor = dbg.equal(3).select(debugTerrain,
@@ -450,7 +461,8 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
                                                         dbg.equal(16).select(debugLavaWaterContact,
                                                             dbg.equal(17).select(debugLavaCrust,
                                                                 dbg.equal(18).select(debugLavaDeltaH,
-                                                                    litColor)))))))))))))));
+                                                                    dbg.equal(19).select(debugThermalErosionRate,
+                                                                        litColor))))))))))))))));
 
         this.colorNode = finalColor;
     }

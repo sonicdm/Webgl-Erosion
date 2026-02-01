@@ -280,10 +280,27 @@ Key issues introduced:
 - **Enabled by default**: `lavaWaterInteraction: true` — was false
 **Physics basis:** Real lava-water interaction forms pillow basalt (quench crust with hot interior), not instant solid rock. Steam explosions and flash evaporation dominate the near-field.
 
-### Files modified this session:
-- `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — rewritten (stripped to water pattern + viscDamp on accel only + temperature-dependent yield stress)
-- `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — velocity-gated solidification, strong flow heat retention, reduced cooling rates
-- `src/rendering/webgpu/compute/ComputeNodePipeline.ts` — cooling pass now binds lava velocity texture
+### Change 24: Updated test preset + thermal erosion debug view
+**Files:** `src/gui/gui-setup.ts`, `src/rendering/webgpu/materials/TerrainMaterialNode.ts`, `src/rendering/webgpu/shader-nodes/terrain/TerrainDebugViewNode.ts`
+**Why:** Test preset had stale cooling rates (0.03 — 600x higher than new defaults). Also added thermal erosion rate visualization that was requested in the spec.
+**Changes:**
+- **Test preset**: All values updated to match current paper-grounded defaults (cooling rates 10x lower, viscosity scale 5.0, solidification threshold 0.20, etc.)
+- **Thermal erosion debug view** (mode 19 — `thermalErosionRate`):
+  - Shows estimated erosion intensity as `temperature * speed` heatmap
+  - Blue→green→red color ramp: blue = low erosion, red = high erosion
+  - Derived from existing lava temp + velocity channels (no new textures)
+  - Added to TerrainDebugMode enum as `ThermalErosionRate = 19`
+  - Added to GUI dropdown, wired into TerrainMaterialNode select chain
+
+### Files modified across sessions 2+3:
+- `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — viscDamp on accel only + yield stress + crust barrier
+- `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — lateral exposure, flow heat retention, velocity-gated solidification
+- `src/rendering/webgpu/compute/shaders/lava-thermal-transfer.wgsl` — substrate conduction + enhanced re-mobilization
+- `src/rendering/webgpu/compute/shaders/lava-water-interaction.wgsl` — reduced quench, flash evaporation, stronger blocking
+- `src/rendering/webgpu/compute/ComputeNodePipeline.ts` — cooling pass velocity binding, thermal transfer terrain binding
 - `src/simulation/SimulatePerStepWebGPU.ts` — all 7 lava passes active
-- `src/app/controls/controls-factory.ts` — tuned defaults (cooling rates quartered, solidification threshold 0.20)
-- `src/rendering/webgpu/materials/LavaMaterialNode.ts` — full lava rendering (5-stage color ramp, emissive, crust, Lambertian lighting)
+- `src/app/controls/controls-factory.ts` — paper-grounded defaults (cooling 10x slower, water interaction enabled)
+- `src/rendering/webgpu/materials/LavaMaterialNode.ts` — 5-stage color ramp, crust cracks, flow detail, emissive
+- `src/rendering/webgpu/materials/TerrainMaterialNode.ts` — thermal erosion rate debug view (mode 19)
+- `src/rendering/webgpu/shader-nodes/terrain/TerrainDebugViewNode.ts` — ThermalErosionRate enum
+- `src/gui/gui-setup.ts` — updated slider ranges, test preset, debug dropdown
