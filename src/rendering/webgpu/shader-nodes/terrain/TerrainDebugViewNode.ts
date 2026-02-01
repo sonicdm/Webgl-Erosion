@@ -17,6 +17,11 @@ export enum TerrainDebugMode {
     LavaHeight = 11,
     LavaTemperature = 12,
     LavaVelocity = 13,
+    LavaVolume = 14,
+    LavaLayering = 15,
+    WaterLavaContact = 16,
+    LavaCrust = 17,
+    LavaDeltaH = 18,
 }
 
 export interface TerrainDebugViewInputs {

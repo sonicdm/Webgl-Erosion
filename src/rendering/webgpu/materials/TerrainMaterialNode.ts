@@ -377,14 +377,62 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         let debugLavaHeight = vec3(0, 0, 0);
         let debugLavaTemp = vec3(0, 0, 0);
         let debugLavaVel = vec3(0, 0, 0);
+        let debugLavaVolume = vec3(0, 0, 0);
+        let debugLavaLayering = vec3(0, 0, 0);
         if (inputs.lavaMap) {
             const lavaData = texture(inputs.lavaMap, curUv);
             debugLavaHeight = vec3(lavaData.x.mul(5), lavaData.x.mul(2), lavaData.x);  // blue-white ramp
             debugLavaTemp = vec3(lavaData.y, lavaData.y.mul(0.3), float(0));  // red-orange heat
+
+            // LavaVolume: thermal mass = height * temperature (shows where heat is concentrated)
+            const thermalMass = clamp(lavaData.x.mul(lavaData.y).mul(10), 0, 1);
+            debugLavaVolume = mix(vec3(0, 0, 0.1), mix(vec3(1, 0.3, 0), vec3(1, 1, 0.5), thermalMass), thermalMass);
+
+            // LavaLayering: sample 4 neighbors to show insulation pattern
+            const eps = float(1).div(float(inputs.simres ?? 512));
+            const nT = texture(inputs.lavaMap, curUv.add(vec2(0, eps)));
+            const nR = texture(inputs.lavaMap, curUv.add(vec2(eps, 0)));
+            const nB = texture(inputs.lavaMap, curUv.add(vec2(0, eps.negate())));
+            const nL = texture(inputs.lavaMap, curUv.add(vec2(eps.negate(), 0)));
+            // Average neighbor thermal mass
+            const avgNeighborMass = nT.x.mul(nT.y).add(nR.x.mul(nR.y)).add(nB.x.mul(nB.y)).add(nL.x.mul(nL.y)).div(4);
+            const selfMass = lavaData.x.mul(lavaData.y);
+            // Insulation factor: how much this cell is surrounded by hot lava mass
+            const insulation = clamp(avgNeighborMass.mul(3), 0, 1);
+            // Show: red = exposed (cools fast), green = insulated (retains heat), blue = self thermal mass
+            debugLavaLayering = vec3(
+                clamp(float(1).sub(insulation), 0, 1),
+                insulation,
+                clamp(selfMass.mul(5), 0, 1)
+            );
+        }
+        let debugLavaWaterContact = vec3(0, 0, 0);
+        let debugLavaCrust = vec3(0, 0, 0);
+        let debugLavaDeltaH = vec3(0, 0, 0);
+        if (inputs.lavaMap) {
+            const lavaData2 = texture(inputs.lavaMap, curUv);
+            // WaterLavaContact: red = lava height, blue = water, green = overlap zone
+            const contactIntensity = clamp(lavaData2.x.mul(sampling.water).mul(50), 0, 1);
+            debugLavaWaterContact = vec3(
+                clamp(lavaData2.x.mul(3), 0, 1),
+                contactIntensity,
+                clamp(sampling.water.mul(3), 0, 1)
+            );
+
+            // LavaCrust: white = thick crust, red-orange = thin/cracking crust
+            const crustVal = clamp(lavaData2.w.mul(5), 0, 1);
+            const crustCracking = clamp(lavaData2.y.mul(lavaData2.w).mul(3), 0, 1);
+            debugLavaCrust = vec3(crustVal, crustCracking, crustVal.mul(0.5));
         }
         if (inputs.lavaVelocityMap) {
             const lavaVelData = texture(inputs.lavaVelocityMap, curUv);
             debugLavaVel = abs(vec3(lavaVelData.x, lavaVelData.y, lavaVelData.z)).div(5);
+
+            // LavaDeltaH: green = lava arriving (deltaH > 0), red = lava leaving (deltaH < 0)
+            const deltaH = lavaVelData.w;
+            const arriving = clamp(deltaH.mul(50), 0, 1);
+            const leaving = clamp(deltaH.negate().mul(50), 0, 1);
+            debugLavaDeltaH = vec3(leaving, arriving, float(0));
         }
 
         const finalColor = dbg.equal(3).select(debugTerrain,
@@ -397,7 +445,12 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
                                     dbg.equal(11).select(debugLavaHeight,
                                         dbg.equal(12).select(debugLavaTemp,
                                             dbg.equal(13).select(debugLavaVel,
-                                                litColor))))))))));
+                                                dbg.equal(14).select(debugLavaVolume,
+                                                    dbg.equal(15).select(debugLavaLayering,
+                                                        dbg.equal(16).select(debugLavaWaterContact,
+                                                            dbg.equal(17).select(debugLavaCrust,
+                                                                dbg.equal(18).select(debugLavaDeltaH,
+                                                                    litColor)))))))))))))));
 
         this.colorNode = finalColor;
     }
