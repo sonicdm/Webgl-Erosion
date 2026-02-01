@@ -243,7 +243,7 @@ export function SimulatePerStepWebGPU(
         });
         texturePool.swapTerrainTextures();
 
-        // 9e. Lava Cooling & Solidification
+        // 9e. Lava Cooling & Solidification (exponential viscosity + ambient cooling)
         computePipeline.lavaCoolingPass(texturePool, {
             simRes: simres,
             coolingRate: controls.lavaCoolingRate,
@@ -251,7 +251,8 @@ export function SimulatePerStepWebGPU(
             solidificationThreshold: controls.lavaSolidificationThreshold,
             rockFraction: controls.lavaRockFraction,
             crustGrowthRate: controls.lavaCrustGrowthRate,
-            waterEvapRate: controls.EvaporationConstant,
+            ambientCoolingRate: controls.lavaAmbientCoolingRate,
+            viscTempScale: controls.lavaViscTempScale,
             timestep: controls.timestep,
         });
         texturePool.swapLavaTextures();

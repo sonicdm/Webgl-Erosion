@@ -2665,7 +2665,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             solidificationThreshold: number;
             rockFraction: number;
             crustGrowthRate: number;
-            waterEvapRate: number;
+            ambientCoolingRate: number;
+            viscTempScale: number;
             timestep: number;
         }
     ): void {
@@ -2685,8 +2686,12 @@ struct Uniforms {
     u_SolidificationThreshold: f32,
     u_RockFraction: f32,
     u_CrustGrowthRate: f32,
-    u_WaterEvapRate: f32,
+    u_AmbientCoolingRate: f32,
+    u_ViscTempScale: f32,
     u_timestep: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 
 @group(0) @binding(4) var<uniform> uniforms: Uniforms;
@@ -2712,22 +2717,30 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // Temperature decay: constant + proportional to surface area
+    // --- Temperature decay ---
+    // Ambient cooling: constant heat loss to environment
+    temperature -= uniforms.u_AmbientCoolingRate * uniforms.u_timestep;
+
+    // Surface area cooling: thin lava cools faster, crust insulates
     let surfaceAreaFactor = 1.0 + uniforms.u_ProportionalCooling / max(lavaHeight, 0.001);
     let crustInsulation = 1.0 / (1.0 + crustThickness * 5.0);
-    temperature -= uniforms.u_CoolingRate * uniforms.u_WaterEvapRate * surfaceAreaFactor * crustInsulation * uniforms.u_timestep;
+    temperature -= uniforms.u_CoolingRate * surfaceAreaFactor * crustInsulation * uniforms.u_timestep;
     temperature = max(temperature, 0.0);
 
-    // Viscosity from temperature
-    viscosity = 1.0 + uniforms.u_SimRes * 0.001 * (1.0 - temperature) * (1.0 - temperature);
+    // --- Exponential viscosity model ---
+    // visc = exp(alpha * (T_ref - T)), where T_ref = 1.0 (emission temp)
+    // Hot (T=1): visc=1 (free flow). Cold (T=0): visc=exp(alpha) (stalled).
+    let alpha = uniforms.u_ViscTempScale;
+    viscosity = exp(alpha * (1.0 - temperature));
+    viscosity = min(viscosity, 1000.0); // cap to prevent numerical issues
 
-    // Crust growth
+    // --- Crust growth ---
     if (temperature < 0.8) {
         crustThickness += uniforms.u_CrustGrowthRate * (1.0 - temperature) * uniforms.u_timestep;
         crustThickness = min(crustThickness, lavaHeight * 0.5);
     }
 
-    // Solidification
+    // --- Solidification ---
     if (temperature < uniforms.u_SolidificationThreshold) {
         let solidRate = (uniforms.u_SolidificationThreshold - temperature) / uniforms.u_SolidificationThreshold;
         let solidAmount = min(lavaHeight * solidRate * uniforms.u_timestep * 2.0, lavaHeight);
@@ -2766,7 +2779,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         const uniformData = new Float32Array([
             uniforms.simRes, uniforms.coolingRate, uniforms.proportionalCooling,
             uniforms.solidificationThreshold, uniforms.rockFraction, uniforms.crustGrowthRate,
-            uniforms.waterEvapRate, uniforms.timestep,
+            uniforms.ambientCoolingRate, uniforms.viscTempScale,
+            uniforms.timestep, 0, 0, 0, // padding to 48 bytes (12 floats)
         ]);
 
         let uniformBuffer = this.uniformBuffers.get('lavaCooling');
