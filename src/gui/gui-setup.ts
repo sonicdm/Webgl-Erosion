@@ -259,8 +259,8 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     var lavapara = gui.addFolder('Lava Parameters');
     lavapara.add(controls, 'lavaViscosityScale', 0.1, 10.0).name('Viscosity Scale');
     lavapara.add(controls, 'lavaYieldStress', 0.0, 2.0).name('Yield Stress');
-    lavapara.add(controls, 'lavaCoolingRate', 0.01, 1.0).name('Cooling Rate');
-    lavapara.add(controls, 'lavaProportionalCooling', 0.0, 0.1).name('Proportional Cooling');
+    lavapara.add(controls, 'lavaCoolingRate', 0.00001, 0.01).name('Cooling Rate');
+    lavapara.add(controls, 'lavaProportionalCooling', 0.0, 0.01).name('Proportional Cooling');
     lavapara.add(controls, 'lavaSolidificationThreshold', 0.05, 0.5).name('Solidification Temp');
     lavapara.add(controls, 'lavaRockFraction', 0.0, 1.0).name('Rock Fraction');
     lavapara.add(controls, 'lavaThermalErosionRate', 0.1, 2.0).name('Thermal Erosion');
@@ -274,7 +274,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavapara.add(controls, 'lavaSofteningTemp', 0.3, 0.9).name('Softening Temp');
     lavapara.add(controls, 'lavaKCond', 0.01, 1.0).name('Conductivity');
     lavapara.add(controls, 'lavaCrustMixSuppression', 0.0, 5.0).name('Crust Mix Suppress');
-    lavapara.add(controls, 'lavaAmbientCoolingRate', 0.0, 0.2).name('Ambient Cooling');
+    lavapara.add(controls, 'lavaAmbientCoolingRate', 0.0, 0.01).name('Ambient Cooling');
     lavapara.add(controls, 'lavaViscTempScale', 1.0, 10.0).name('Visc Temp Scale');
     lavapara.add(controls, 'lavaMaxErosionPerStep', 0.0001, 0.01).name('Max Erosion/Step');
     lavapara.add(controls, 'lavaErosionSpeedClamp', 1.0, 20.0).name('Erosion Speed Clamp');
@@ -283,20 +283,20 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         applyLavaTestPreset: () => {
             controls.lavaViscosityScale = 3.0;
             controls.lavaYieldStress = 0.2;
-            controls.lavaCoolingRate = 0.05;
+            controls.lavaCoolingRate = 0.03;
             controls.lavaProportionalCooling = 0.01;
-            controls.lavaSolidificationThreshold = 0.15;
+            controls.lavaSolidificationThreshold = 0.06;
             controls.lavaRockFraction = 0.7;
             controls.lavaThermalErosionRate = 0.3;
             controls.lavaRockMeltThreshold = 0.7;
             controls.lavaEmissionTemp = 1.0;
             controls.lavaCrustStrength = 0.4;
-            controls.lavaCrustGrowthRate = 0.08;
+            controls.lavaCrustGrowthRate = 0.06;
             controls.lavaSofteningTemp = 0.6;
             controls.lavaKCond = 0.3;
             controls.lavaCrustMixSuppression = 2.0;
-            controls.lavaAmbientCoolingRate = 0.03;
-            controls.lavaViscTempScale = 4.0;
+            controls.lavaAmbientCoolingRate = 0.01;
+            controls.lavaViscTempScale = 3.0;
             controls.lavaMaxErosionPerStep = 0.002;
             controls.lavaErosionSpeedClamp = 5.0;
             controls.lavaWaterInteraction = true;
