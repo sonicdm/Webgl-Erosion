@@ -171,8 +171,8 @@ export function SimulatePerStepWebGPU(
     });
     texturePool.swapTerrainTextures();
 
-    // 9. Lava Simulation (if enabled) — 6 sub-passes gated by lavaEnabled
-    if (controls.lavaEnabled) {
+    // 9. Lava Simulation
+    {
         // Prepare lava source buffers
         const lavaSrcBuffers = appContext.simulationState.getLavaSourceBuffers(MAX_LAVA_SOURCES);
         const lavaSourceCount = getLavaSourceCount();
@@ -232,12 +232,14 @@ export function SimulatePerStepWebGPU(
         texturePool.swapLavaTextures();
         texturePool.swapLavaVelTextures();
 
-        // 9d. Lava Thermal Erosion
+        // 9d. Lava Thermal Erosion (bounded: speed clamp + per-step cap)
         computePipeline.lavaThermalErosionPass(texturePool, {
             simRes: simres,
             thermalErosionRate: controls.lavaThermalErosionRate,
-            Ks: controls.Ks,
+            maxErosionPerStep: controls.lavaMaxErosionPerStep,
+            erosionSpeedClamp: controls.lavaErosionSpeedClamp,
             rockMeltThreshold: controls.lavaRockMeltThreshold,
+            timestep: controls.timestep,
         });
         texturePool.swapTerrainTextures();
 

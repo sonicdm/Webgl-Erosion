@@ -2529,8 +2529,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         uniforms: {
             simRes: number;
             thermalErosionRate: number;
-            Ks: number;
+            maxErosionPerStep: number;
+            erosionSpeedClamp: number;
             rockMeltThreshold: number;
+            timestep: number;
         }
     ): void {
         const device = this.device;
@@ -2545,8 +2547,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 struct Uniforms {
     u_SimRes: f32,
     u_ThermalErosionRate: f32,
-    u_Ks: f32,
+    u_MaxErosionPerStep: f32,
+    u_ErosionSpeedClamp: f32,
     u_RockMeltThreshold: f32,
+    u_Timestep: f32,
+    _pad0: f32,
+    _pad1: f32,
 };
 
 @group(0) @binding(4) var<uniform> uniforms: Uniforms;
@@ -2568,17 +2574,31 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let speed = lavaVel.b;
 
     if (lavaHeight > 0.01 && temperature > 0.1) {
-        var erosionRate = uniforms.u_ThermalErosionRate * uniforms.u_Ks * temperature * speed;
+        // Clamp speed to prevent runaway erosion
+        let clampedSpeed = min(speed, uniforms.u_ErosionSpeedClamp);
 
+        // Erosion scales with temperature, clamped speed, and timestep
+        // No Ks — this is lava thermal erosion, not water sediment transport
+        var erosionRate = uniforms.u_ThermalErosionRate
+                        * temperature
+                        * clampedSpeed
+                        * uniforms.u_Timestep;
+
+        // Substrate resistance from rock hardness
         if (rock > 0.1) {
             let rockStrength = clamp((rock - 0.1) / 0.9, 0.0, 1.0);
             if (temperature > uniforms.u_RockMeltThreshold) {
+                // Above melt threshold: rock partially resists (30%)
                 erosionRate *= (1.0 - rockStrength * 0.7);
                 rock = max(0.0, rock - erosionRate * 0.01);
             } else {
+                // Below melt threshold: rock strongly resists (95%)
                 erosionRate *= (1.0 - rockStrength * 0.95);
             }
         }
+
+        // Hard per-step cap: never erode more than maxErosionPerStep
+        erosionRate = min(erosionRate, uniforms.u_MaxErosionPerStep);
 
         height = max(height - erosionRate, -0.10);
     }
@@ -2599,7 +2619,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
 
         const uniformData = new Float32Array([
-            uniforms.simRes, uniforms.thermalErosionRate, uniforms.Ks, uniforms.rockMeltThreshold,
+            uniforms.simRes, uniforms.thermalErosionRate,
+            uniforms.maxErosionPerStep, uniforms.erosionSpeedClamp,
+            uniforms.rockMeltThreshold, uniforms.timestep,
+            0, 0, // padding to 32 bytes (8 floats)
         ]);
 
         let uniformBuffer = this.uniformBuffers.get('lavaThermalErosion');
