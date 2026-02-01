@@ -236,6 +236,23 @@ Key issues introduced:
 - **Enhanced re-mobilization**: when reheated lava melts crust, also actively reduce viscosity toward the temperature-appropriate value (`mix` toward target viscosity). Previously only crust was melted, leaving high viscosity from the cooled state.
 **Physics basis:** Griffiths 2000 §4: hot lava flowing over cooled substrate loses heat by conduction into the underlying deposit. Tomita 2024 §4: re-mobilization of partly solidified lava when overrun by fresh hot flow.
 
+### Change 21: Crust crack rendering — glowing fissures
+**File:** `src/rendering/webgpu/materials/LavaMaterialNode.ts`
+**Why:** Crusted lava looked uniformly dark. Real lava crust has glowing fissures where the hot interior shows through thermal stress fractures. This is a key visual feature that communicates the temperature state beneath the crust.
+**Changes:**
+- Added multi-octave procedural noise (GPU hash function at two scales: 200x and 80x UV)
+- Combined with `min()` to create irregular web-like crack patterns
+- **Crack conditions**: crust must exist (`crustThickness > 0.01`) AND underlying temp must be hot (`T > 0.35`)
+- **Crack width**: thinner crust = wider cracks (more fissures), base width 12%
+- Cracks punch through crust darkening to show hot baseColor underneath
+- Crack emissive glow: 1.5x normal emissive intensity at crack locations
+- Added TSL imports: `fract`, `sin`, `min`
+**Visual effect:**
+- Dark crusted lava shows orange/red glowing crack network
+- Cracks fade as lava cools below T=0.35 (no hot interior to show)
+- Cracks disappear as crust melts through at T>0.8 (no crust to crack)
+- Produces the characteristic "lava with glowing cracks" appearance
+
 ### Files modified this session:
 - `src/rendering/webgpu/compute/shaders/lava-flux.wgsl` — rewritten (stripped to water pattern + viscDamp on accel only + temperature-dependent yield stress)
 - `src/rendering/webgpu/compute/shaders/lava-cooling.wgsl` — velocity-gated solidification, strong flow heat retention, reduced cooling rates
