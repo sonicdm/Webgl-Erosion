@@ -381,3 +381,29 @@ Key issues introduced:
 - `src/rendering/webgpu/materials/TerrainMaterialNode.ts` — thermal erosion rate debug view (mode 19)
 - `src/rendering/webgpu/shader-nodes/terrain/TerrainDebugViewNode.ts` — ThermalErosionRate enum
 - `src/gui/gui-setup.ts` — updated slider ranges, test preset, debug dropdown
+
+---
+
+## Change 29: Temperature controls → human-readable °C
+
+**Problem**: All temperature-related lava controls used internal 0-1 normalized values. Users couldn't tell what "Solidification Threshold: 0.20" means in real terms. The color ramp controls (`lavaOrangeTemp`, `lavaYellowTemp`) had almost no visible effect because the GUI range (0.2-0.7) mapped to tiny shader-space differences.
+
+**Solution**: Convert all temperature controls to display in °C (Celsius), using the mapping `T_normalized = T_celsius / 1200` (basaltic lava max ~1200°C). The `/1200` conversion happens at the boundary where controls are consumed — in `SimulatePerStepWebGPU.ts` (5 locations) and `main.ts` (2 locations for color ramp uniforms). Shaders continue to operate in 0-1 normalized space internally.
+
+**Changes**:
+- `controls-factory.ts`: Defaults now in °C:
+  - `lavaSolidificationThreshold`: 0.20 → 240°C
+  - `lavaEmissionTemp`: 1.0 → 1200°C
+  - `lavaRockMeltThreshold`: 0.7 → 840°C
+  - `lavaSofteningTemp`: 0.6 → 720°C
+  - `lavaOrangeTemp`: 0.45 → 540°C
+  - `lavaYellowTemp`: 0.65 → 780°C
+- `gui-setup.ts`: All temperature sliders now show °C with step(10):
+  - Source °C (600-1200), Solidify °C (60-600), Re-melt °C (360-1080)
+  - Rock Melt °C (360-1080), Orange °C (240-840), Yellow °C (480-1080)
+  - Reset Defaults button updated to °C values
+- `SimulatePerStepWebGPU.ts`: Added `/1200` conversion at 5 consumption points:
+  - `emissionTemp`, `softeningTemp`, `rockMeltThreshold`, `solidificationThreshold` (×2)
+- `main.ts`: Added `/1200` conversion for `orangeTemp` and `yellowTemp` passed to lava material, updated fallback values from 0-1 to °C
+
+**Effect**: Temperature sliders now show meaningful physical values. Moving "Orange °C" from 540 to 400 visibly shifts the color ramp. The color ramp controls now have full dynamic range instead of being nearly inert.

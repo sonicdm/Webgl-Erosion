@@ -263,14 +263,14 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavaFlow.add(controls, 'lavaViscosityScale', 0.1, 10.0).name('Viscosity');
     lavaFlow.add(controls, 'lavaYieldStress', 0.0, 2.0).name('Yield Stress');
     lavaFlow.add(controls, 'lavaViscTempScale', 1.0, 10.0).name('Visc-Temp Curve');
-    lavaFlow.add(controls, 'lavaEmissionTemp', 0.5, 1.0).name('Source Temp');
+    lavaFlow.add(controls, 'lavaEmissionTemp', 600, 1200).step(10).name('Source °C');
 
     // Cooling — controls how lava loses heat and solidifies
     var lavaCooling = lavapara.addFolder('Cooling');
     lavaCooling.add(controls, 'lavaCoolingRate', 0.00001, 0.01).name('Surface Cooling');
     lavaCooling.add(controls, 'lavaProportionalCooling', 0.0, 0.01).name('Thin-Edge Cooling');
     lavaCooling.add(controls, 'lavaAmbientCoolingRate', 0.0, 0.01).name('Ambient Cooling');
-    lavaCooling.add(controls, 'lavaSolidificationThreshold', 0.05, 0.5).name('Solidify Temp');
+    lavaCooling.add(controls, 'lavaSolidificationThreshold', 60, 600).step(10).name('Solidify °C');
     lavaCooling.add(controls, 'lavaRockFraction', 0.0, 1.0).name('Rock Fraction');
     lavaCooling.add(controls, 'lavaKCond', 0.01, 1.0).name('Conductivity');
 
@@ -278,7 +278,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     var lavaCrust = lavapara.addFolder('Crust');
     lavaCrust.add(controls, 'lavaCrustStrength', 0.1, 2.0).name('Barrier Strength');
     lavaCrust.add(controls, 'lavaCrustGrowthRate', 0.01, 0.5).name('Growth Rate');
-    lavaCrust.add(controls, 'lavaSofteningTemp', 0.3, 0.9).name('Re-melt Temp');
+    lavaCrust.add(controls, 'lavaSofteningTemp', 360, 1080).step(10).name('Re-melt °C');
     lavaCrust.add(controls, 'lavaCrustMixSuppression', 0.0, 5.0).name('Insulation');
 
     // Erosion — controls thermal erosion of terrain by hot lava
@@ -286,12 +286,12 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavaErosion.add(controls, 'lavaThermalErosionRate', 0.01, 1.0).name('Erosion Rate');
     lavaErosion.add(controls, 'lavaMaxErosionPerStep', 0.0001, 0.01).name('Max Per Step');
     lavaErosion.add(controls, 'lavaErosionSpeedClamp', 1.0, 20.0).name('Speed Clamp');
-    lavaErosion.add(controls, 'lavaRockMeltThreshold', 0.3, 0.9).name('Rock Melt Temp');
+    lavaErosion.add(controls, 'lavaRockMeltThreshold', 360, 1080).step(10).name('Rock Melt °C');
 
     // Color — controls the temperature-to-color ramp (live preview)
     var lavaColor = lavapara.addFolder('Color Ramp');
-    lavaColor.add(controls, 'lavaOrangeTemp', 0.2, 0.7).name('Orange Starts');
-    lavaColor.add(controls, 'lavaYellowTemp', 0.4, 0.9).name('Yellow Starts');
+    lavaColor.add(controls, 'lavaOrangeTemp', 240, 840).step(10).name('Orange °C');
+    lavaColor.add(controls, 'lavaYellowTemp', 480, 1080).step(10).name('Yellow °C');
 
     // Water interaction
     var lavaWater = lavapara.addFolder('Water');
@@ -306,14 +306,14 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             controls.lavaYieldStress = 0.2;
             controls.lavaCoolingRate = 0.00015;
             controls.lavaProportionalCooling = 0.0001;
-            controls.lavaSolidificationThreshold = 0.20;
+            controls.lavaSolidificationThreshold = 240;
             controls.lavaRockFraction = 0.7;
             controls.lavaThermalErosionRate = 0.05;
-            controls.lavaRockMeltThreshold = 0.7;
-            controls.lavaEmissionTemp = 1.0;
+            controls.lavaRockMeltThreshold = 840;
+            controls.lavaEmissionTemp = 1200;
             controls.lavaCrustStrength = 0.3;
             controls.lavaCrustGrowthRate = 0.01;
-            controls.lavaSofteningTemp = 0.6;
+            controls.lavaSofteningTemp = 720;
             controls.lavaKCond = 0.3;
             controls.lavaCrustMixSuppression = 2.0;
             controls.lavaAmbientCoolingRate = 0.0001;
@@ -322,8 +322,8 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             controls.lavaErosionSpeedClamp = 3.0;
             controls.lavaWaterInteraction = true;
             controls.lavaHeatRadius = 2;
-            controls.lavaOrangeTemp = 0.45;
-            controls.lavaYellowTemp = 0.65;
+            controls.lavaOrangeTemp = 540;
+            controls.lavaYellowTemp = 780;
             gui.controllersRecursive().forEach((c: any) => c.updateDisplay?.());
             console.log('[LAVA_SIM] Applied lava test preset');
         }

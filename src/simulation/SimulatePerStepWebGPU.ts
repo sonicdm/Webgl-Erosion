@@ -200,7 +200,7 @@ export function SimulatePerStepWebGPU(
             brushPos: brushState?.brushPos || [0, 0],
             brushPressed: controls.brushPressed ? 1 : 0,
             brushOperation: controls.brushOperation,
-            emissionTemp: controls.lavaEmissionTemp,
+            emissionTemp: controls.lavaEmissionTemp / 1200,
             sourceCount: lavaSourceCount,
             sourcePositions: lavaSrcBuffers.positions,
             sourceSizes: lavaSrcBuffers.sizes,
@@ -232,33 +232,33 @@ export function SimulatePerStepWebGPU(
         texturePool.swapLavaTextures();
         texturePool.swapLavaVelTextures();
 
-        // 9c2. Lava-Lava Thermal Transfer (conduction + mixing + re-mobilization)
+        // 9d. Lava Thermal Transfer (heat conduction between lava cells, re-mobilization)
         computePipeline.lavaThermalTransferPass(texturePool, {
             simRes: simres,
             kCond: controls.lavaKCond,
             crustMixSuppression: controls.lavaCrustMixSuppression,
-            softeningTemp: controls.lavaSofteningTemp,
+            softeningTemp: controls.lavaSofteningTemp / 1200,
             timestep: controls.timestep,
         });
         texturePool.swapLavaTextures();
 
-        // 9d. Lava Thermal Erosion (bounded: speed clamp + per-step cap)
+        // 9e. Lava Thermal Erosion (bounded — hot lava erodes terrain beneath)
         computePipeline.lavaThermalErosionPass(texturePool, {
             simRes: simres,
             thermalErosionRate: controls.lavaThermalErosionRate,
             maxErosionPerStep: controls.lavaMaxErosionPerStep,
             erosionSpeedClamp: controls.lavaErosionSpeedClamp,
-            rockMeltThreshold: controls.lavaRockMeltThreshold,
+            rockMeltThreshold: controls.lavaRockMeltThreshold / 1200,
             timestep: controls.timestep,
         });
         texturePool.swapTerrainTextures();
 
-        // 9e. Lava Cooling & Solidification (exponential viscosity + ambient cooling)
+        // 9f. Lava Cooling & Solidification
         computePipeline.lavaCoolingPass(texturePool, {
             simRes: simres,
             coolingRate: controls.lavaCoolingRate,
             proportionalCooling: controls.lavaProportionalCooling,
-            solidificationThreshold: controls.lavaSolidificationThreshold,
+            solidificationThreshold: controls.lavaSolidificationThreshold / 1200,
             rockFraction: controls.lavaRockFraction,
             crustGrowthRate: controls.lavaCrustGrowthRate,
             ambientCoolingRate: controls.lavaAmbientCoolingRate,
@@ -268,22 +268,22 @@ export function SimulatePerStepWebGPU(
         texturePool.swapLavaTextures();
         texturePool.swapTerrainTextures();
 
-        // 9f. Lava-Water Interaction (mutual exclusion + quench crust + evaporation)
+        // 9g. Lava-Water Interaction (mutual exclusion, quench cooling, evaporation)
         if (controls.lavaWaterInteraction) {
             computePipeline.lavaWaterInteractionPass(texturePool, {
                 simRes: simres,
                 heatRadius: controls.lavaHeatRadius,
                 coolingRate: controls.lavaCoolingRate,
-                solidificationThreshold: controls.lavaSolidificationThreshold,
+                solidificationThreshold: controls.lavaSolidificationThreshold / 1200,
                 rockFraction: controls.lavaRockFraction,
-                waterEvapRate: controls.EvaporationConstant,
+                waterEvapRate: 0.1,
                 timestep: controls.timestep,
             });
             texturePool.swapLavaTextures();
             texturePool.swapTerrainTextures();
         }
 
-        // 9g. Lava diagnostics (rate-limited logging)
+        // 9h. Lava diagnostics (rate-limited logging)
         if (lavaSourceCount > 0) {
             lavaLogger.log(LogCategory.LAVA_SIM, 'step',
                 `sources=${lavaSourceCount} dt=${controls.timestep.toFixed(4)} viscScale=${controls.lavaViscosityScale} erosionCap=${controls.lavaMaxErosionPerStep}`);
