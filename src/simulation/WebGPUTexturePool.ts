@@ -1,7 +1,9 @@
+import { generateNoiseTexture } from './NoiseTextureGenerator';
+
 /**
  * WebGPU texture pool for simulation textures.
  * Manages all WebGPU textures used in the simulation pipeline with ping-pong support.
- * 
+ *
  * This replaces LegacyTexturePool for the WebGPU render path.
  */
 export class WebGPUTexturePool {
@@ -37,6 +39,21 @@ export class WebGPUTexturePool {
     public readLavaVelTexture: GPUTexture;   // R=velX, G=velY, B=speed, A=heat(derived)
     public writeLavaVelTexture: GPUTexture;
 
+    // Lava channeling: 8-neighbor second flux texture
+    public readLavaFlux2Texture: GPUTexture;  // R=fS, G=fSW, B=fW, A=fNW
+    public writeLavaFlux2Texture: GPUTexture;
+
+    // Lava layer system: cool lava (frozen but re-meltable)
+    public readCoolLavaTexture: GPUTexture;   // R=coolLavaHeight (rgba32float for compatibility)
+    public writeCoolLavaTexture: GPUTexture;
+
+    // Lava layer system: basalt (permanently solidified)
+    public readBasaltTexture: GPUTexture;     // R=basaltHeight (rgba32float for compatibility)
+    public writeBasaltTexture: GPUTexture;
+
+    // Lava channeling: noise texture (generated once, read-only)
+    public noiseTexture: GPUTexture;
+
     // Height map texture for importing external height maps
     public heightmapTexture: GPUTexture | null = null;
 
@@ -69,6 +86,13 @@ export class WebGPUTexturePool {
         this.writeLavaFluxTexture = null as any;
         this.readLavaVelTexture = null as any;
         this.writeLavaVelTexture = null as any;
+        this.readLavaFlux2Texture = null as any;
+        this.writeLavaFlux2Texture = null as any;
+        this.readCoolLavaTexture = null as any;
+        this.writeCoolLavaTexture = null as any;
+        this.readBasaltTexture = null as any;
+        this.writeBasaltTexture = null as any;
+        this.noiseTexture = null as any;
     }
 
     /**
@@ -115,6 +139,13 @@ export class WebGPUTexturePool {
         this.writeLavaFluxTexture = this.createSimulationTexture(this.simres, this.simres);
         this.readLavaVelTexture = this.createSimulationTexture(this.simres, this.simres);
         this.writeLavaVelTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.readLavaFlux2Texture = this.createSimulationTexture(this.simres, this.simres);
+        this.writeLavaFlux2Texture = this.createSimulationTexture(this.simres, this.simres);
+        this.readCoolLavaTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.writeCoolLavaTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.readBasaltTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.writeBasaltTexture = this.createSimulationTexture(this.simres, this.simres);
+        this.noiseTexture = generateNoiseTexture(this.device, this.simres);
         this.zeroBuffer = null;
     }
 
@@ -149,6 +180,13 @@ export class WebGPUTexturePool {
         this.destroyTexture(this.writeLavaFluxTexture);
         this.destroyTexture(this.readLavaVelTexture);
         this.destroyTexture(this.writeLavaVelTexture);
+        this.destroyTexture(this.readLavaFlux2Texture);
+        this.destroyTexture(this.writeLavaFlux2Texture);
+        this.destroyTexture(this.readCoolLavaTexture);
+        this.destroyTexture(this.writeCoolLavaTexture);
+        this.destroyTexture(this.readBasaltTexture);
+        this.destroyTexture(this.writeBasaltTexture);
+        this.destroyTexture(this.noiseTexture);
 
         // Recreate textures with new size
         this.setup();
@@ -227,6 +265,12 @@ export class WebGPUTexturePool {
         this.writeTexture(this.writeLavaFluxTexture, zero);
         this.writeTexture(this.readLavaVelTexture, zero);
         this.writeTexture(this.writeLavaVelTexture, zero);
+        this.writeTexture(this.readLavaFlux2Texture, zero);
+        this.writeTexture(this.writeLavaFlux2Texture, zero);
+        this.writeTexture(this.readCoolLavaTexture, zero);
+        this.writeTexture(this.writeCoolLavaTexture, zero);
+        this.writeTexture(this.readBasaltTexture, zero);
+        this.writeTexture(this.writeBasaltTexture, zero);
     }
 
     private getZeroBuffer(): Float32Array {
@@ -284,6 +328,13 @@ export class WebGPUTexturePool {
         this.destroyTexture(this.writeLavaFluxTexture);
         this.destroyTexture(this.readLavaVelTexture);
         this.destroyTexture(this.writeLavaVelTexture);
+        this.destroyTexture(this.readLavaFlux2Texture);
+        this.destroyTexture(this.writeLavaFlux2Texture);
+        this.destroyTexture(this.readCoolLavaTexture);
+        this.destroyTexture(this.writeCoolLavaTexture);
+        this.destroyTexture(this.readBasaltTexture);
+        this.destroyTexture(this.writeBasaltTexture);
+        this.destroyTexture(this.noiseTexture);
         this.destroyTexture(this.heightmapTexture);
     }
 
@@ -346,6 +397,24 @@ export class WebGPUTexturePool {
         const tmp = this.readLavaVelTexture;
         this.readLavaVelTexture = this.writeLavaVelTexture;
         this.writeLavaVelTexture = tmp;
+    }
+
+    swapLavaFlux2Textures(): void {
+        const tmp = this.readLavaFlux2Texture;
+        this.readLavaFlux2Texture = this.writeLavaFlux2Texture;
+        this.writeLavaFlux2Texture = tmp;
+    }
+
+    swapCoolLavaTextures(): void {
+        const tmp = this.readCoolLavaTexture;
+        this.readCoolLavaTexture = this.writeCoolLavaTexture;
+        this.writeCoolLavaTexture = tmp;
+    }
+
+    swapBasaltTextures(): void {
+        const tmp = this.readBasaltTexture;
+        this.readBasaltTexture = this.writeBasaltTexture;
+        this.writeBasaltTexture = tmp;
     }
 
     setHeightMapTexture(texture: GPUTexture | null): void {
