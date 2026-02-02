@@ -46,7 +46,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Lava is ~2.7x denser than water — it sinks and pushes water aside.
     // Thicker lava blocks more aggressively.
     if (lavaHeight > 0.02 && water > 0.001) {
-        let displaceRate = lavaHeight * 0.5 * uniforms.u_Timestep;
+        let displaceRate = lavaHeight * 0.5;
         let displace = min(water, displaceRate);
         water = max(0.0, water - displace);
     }
@@ -60,22 +60,22 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Quench cooling — reduced from 5.0 to 1.5 to avoid instant freezing.
         // Real lava-water interaction cools the surface rapidly but doesn't instantly
         // solidify the entire flow — it forms a quench crust that insulates the core.
-        let quenchCooling = contactAmount * 1.5 * uniforms.u_Timestep;
+        let quenchCooling = contactAmount * 1.5;
         temperature = max(0.0, temperature - quenchCooling);
 
         // Rapid quench crust formation on contact (thicker than normal cooling)
-        crustThickness += contactAmount * 3.0 * uniforms.u_Timestep;
+        crustThickness += contactAmount * 3.0;
         crustThickness = min(crustThickness, lavaHeight * 0.5);
 
         // Flash evaporation: hot lava (T > 0.7) vaporizes nearby water aggressively
         if (temperature > 0.7) {
-            let flashEvap = min(water, temperature * 0.3 * uniforms.u_Timestep);
+            let flashEvap = min(water, temperature * 0.3);
             water = max(0.0, water - flashEvap);
         }
 
         // Immediate solidification only if deeply quenched (well below threshold)
         if (temperature < uniforms.u_SolidificationThreshold * 0.5) {
-            let solidAmount = min(lavaHeight * 0.03 * uniforms.u_Timestep, lavaHeight);
+            let solidAmount = min(min(lavaHeight * 0.003, lavaHeight), 0.0001);
             terrainHeight += solidAmount;
             rock = min(1.0, rock + solidAmount * uniforms.u_RockFraction);
             if (rock > 0.1 && baseRock < 0.001) {
@@ -107,7 +107,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         if (nearbyHeat > 0.01) {
-            water = max(0.0, water - nearbyHeat * uniforms.u_WaterEvapRate * 0.5 * uniforms.u_Timestep);
+            water = max(0.0, water - nearbyHeat * uniforms.u_WaterEvapRate * 0.5);
         }
     }
 

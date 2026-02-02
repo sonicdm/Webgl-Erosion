@@ -455,3 +455,140 @@ Key issues introduced:
 
 **Files**: `LavaMaterialNode.ts`, `main.ts`
 **New uniform**: `time` (integer frame counter, passed each tick)
+
+---
+
+## Session 4 — Flow model replacement + Voronoi rendering
+
+### Change 32: Voronoi cellular noise (replacing hash noise)
+**File:** `src/rendering/webgpu/materials/LavaMaterialNode.ts`
+**Why:** The hash-based turbulence from Change 31 produced per-pixel grain (static/noise) because `fract(sin(dot(uv*scale, ...)))` was evaluated at per-pixel UV coordinates. Sin-wave patterns (attempted as a fix) created periodic contour/Fresnel-lens artifacts. Neither approach produced the desired cellular crust plate look of real lava.
+**Changes:**
+- Replaced all hash-based and sin-wave noise with **grid-based Voronoi cellular noise**
+- 9-cell neighborhood search (JS loop unrolls to TSL shader nodes at build time)
+- Hash is per-CELL (integer grid coords), not per-pixel — produces smooth distance fields, no grain
+- d1/d2 tracking: d1 = distance to nearest cell point, d2 = second nearest
+- Edge detection: `d2 - d1` ≈ 0 at cell boundaries (seams), large in plate interiors
+- Animated drift: cell points orbit slowly, speed scales with temperature (`animSpeed = smoothstep(0.15, 0.5, T)`)
+- Hot lava: active drifting convection cells. Cool lava: frozen/static crust plates
+- gridScale=50 for ~50 cells across the simulation grid
+- Added TSL imports: `floor`, `fract`
+
+### Change 33: Instantaneous viscous flow — replacing momentum-based pipe model
+**File:** `src/rendering/webgpu/compute/shaders/lava-flux.wgsl`
+**File:** `src/rendering/webgpu/compute/shaders/lava-height-vel.wgsl`
+**Why:** The pipe model (`flux_new = flux_old + acceleration`) is the Saint-Venant shallow water equations — designed for inviscid flow with inertia/momentum. This is fundamentally wrong for lava, which is viscosity-dominated with negligible inertia. Every fix attempted created new problems:
+- No damping → momentum oscillates → standing waves, ripples, spires
+- Add flux damping → exponential decay kills all flow at 180 steps/sec
+- Gate solidifying cells → leading edge freezes → nothing flows past it
+- Temperature-gated damping → still compounds to kill flow at margins
+
+The root cause of spires: when lava solidifies (`terrain += X, lava -= X`), surface height stays constant, so head pressure doesn't change, and accumulated flux from neighbors keeps feeding the solidifying cell.
+
+**Solution:** Replace accumulated flux with **instantaneous height-gradient flow**:
+```
+// OLD (momentum): flux = old_flux + accel * viscDamp
+// NEW (viscous):  flux = heightDiff * flowCoeff * viscDamp
+```
+No flux memory between steps. Each step computes flow purely from current height differences and current viscosity. This matches how actual lava simulation codes work (SCIARA, MAGFLOW — cellular automata with instantaneous redistribution).
+
+**Changes to lava-flux.wgsl:**
+- Removed: reading previous flux texture (`readLavaFlux` binding kept for pipeline compatibility but unused)
+- Removed: all accumulated flux damping, cold-block, inflow gating
+- Added: `flowCoeff = g * pipeArea / pipeLen` — instantaneous flow rate proportional to height gradient
+- Kept: yield stress (Bingham plastic), crust barrier with thermal override, conservation factor, boundary conditions
+- The `readLavaFlux` binding is still declared (bind group layout unchanged) but the values are not read
+
+**Changes to lava-height-vel.wgsl:**
+- Reverted inflow gate (`solidGate`) that was rejecting incoming flux for cold cells
+- Back to simple `fin = topFlux.b + rightFlux.a + bottomFlux.r + leftFlux.g`
+
+**Expected behavior:**
+- No standing waves or ripples (no momentum to oscillate)
+- No spires (no accumulated flux to feed solidifying cells)
+- Lava spreads as viscous creep proportional to slope
+- Hot lava flows steadily downhill, cool lava slows to a stop
+- Yield stress + crust barrier still create levees and channelization
+
+**Physics basis:** Lava flow is Reynolds number << 1 (Stokes flow regime). Inertial terms are negligible compared to viscous dissipation. The pipe model's momentum accumulation has no physical basis for lava.
+
+### Change 34: Simplified Voronoi rendering — direct plate darkening
+**File:** `src/rendering/webgpu/materials/LavaMaterialNode.ts`
+**Why:** The temperature-shift approach (Change 32's initial implementation) was too convoluted: shift temperature BEFORE color ramp lookup to create contrast. This produced wireframe-like thin bright lines on uniformly pale backgrounds because the shift wasn't large enough to push plate centers into visually distinct color bands. The edgeFactor smoothstep threshold (0.06) was too tight, making seams razor-thin.
+**Changes:**
+- **Removed**: Voronoi-driven temperature shift (`shiftStrength`, `plateShift`, `surfaceT`)
+- **Added**: Direct plate brightness modulation after color ramp:
+  - Color ramp computed from actual temperature T (no shifting)
+  - `plateBrightness = mix(darkenAmount, 1.0, edgeFactor)` — plate interiors darkened, edges full brightness
+  - `darkenAmount` scales with cooling: hot lava plates at 35% brightness, cool lava plates at 15%
+  - Creates clear contrast: dark plates with bright glowing seams at ANY temperature
+- **Wider seams**: edgeFactor smoothstep threshold 0.06 → 0.12 (visible bands, not thin wireframe)
+- **Simplified emissive**: removed `hotGlow` term (was adding glow to plate interiors, reducing contrast). Only edge glow remains.
+- **Removed**: crust crack rendering, flow-aligned detail (will be re-implemented with speed-dependent approach)
+
+### Change 35: Parameter adjustments
+**File:** `src/app/controls/controls-factory.ts`
+**Changes:**
+- `lavaViscosityScale`: reverted from 8.0 to 5.0 (had been changed back and forth; 5.0 gives viscDamp≈0.25 at T=1.0 which is ~4x slower than water)
+
+### Change 36: Speed-dependent surface rendering
+**File:** `src/rendering/webgpu/materials/LavaMaterialNode.ts`
+**Why:** Voronoi cellular pattern was applied uniformly to all lava regardless of flow state. Real lava has completely different surface appearance based on whether it's flowing or stalled:
+- **Flowing channels**: smooth bright surface with elongated ropy bands/streaks aligned with flow direction
+- **Stalled/cooling pools**: dark crust plates with glowing seams (Voronoi pattern)
+- **Lobes/toes at front**: black crust shells that rupture to show bright interior
+
+**Changes:**
+- **Flow-aligned streaks** for flowing lava:
+  - Sample velocity map (vel.xy direction, vel.z speed) early in the shader
+  - Compute perpendicular-to-flow axis for cross-flow banding
+  - Two-scale sin bands (120x and 55x) create irregular ropy texture
+  - Wavy distortion along flow axis (sin at 60x scale, time-animated) for fold patterns
+  - Subtle darkening: 0.80-1.0 range (flowing channels are brighter overall)
+- **Speed-based blend**: `flowBlend = smoothstep(0.05, 0.3, speed)`
+  - speed≈0: pure Voronoi plates (darken 0.15-0.35 range)
+  - speed>0.3: pure flow streaks (darken 0.80-1.0 range)
+  - Smooth transition in between
+- **Emissive glow fades with flow**: Voronoi edge glow multiplied by `(1-flowBlend)` — seams only glow on stalled lava
+- **Speed heat glow**: flowing lava gets subtle brightness boost from shear heating
+- Velocity map sampling moved from end-of-shader additive to main pattern computation
+
+**Visual effect:**
+- Central hot channel: bright, smooth, with subtle longitudinal streaks
+- Margins/stalled areas: dark plates with orange/red seam glow
+- Transition zone: gradual blend from streaks to plates as flow slows
+
+---
+
+## Session 5 — Fixing terrain mounding, cooling timescale, and flow model
+
+### Change 37: Remove timestep from cooling/water-interaction + increase cooling rates (match water pattern)
+**Files:** `lava-cooling.wgsl`, `lava-water-interaction.wgsl`, `controls-factory.ts`, `gui-setup.ts`
+**Why:** Water erosion uses raw per-step rates (Ks=0.02, Kd=0.006) NOT multiplied by timestep. Lava cooling WAS multiplied by timestep, making it inconsistent. At timestep=0.05, effective cooling was 0.00015 × 0.05 = 0.0000075/step — taking ~12 minutes to cool. Should be on the same timescale as water (a few seconds).
+**Changes:**
+- **lava-cooling.wgsl**: Removed `uniforms.u_timestep *` from 6 locations:
+  - Ambient cooling (line 81)
+  - Surface area cooling (line 87)
+  - Crust growth (line 103)
+  - Crust melt (line 108)
+  - Crust shear (line 112)
+  - Solidification rate (line 125)
+- **lava-water-interaction.wgsl**: Removed `uniforms.u_Timestep *` from 5 locations:
+  - Water displacement (line 49)
+  - Quench cooling (line 63)
+  - Quench crust formation (line 67)
+  - Flash evaporation (line 72)
+  - Heat radius evaporation (line 110)
+- **controls-factory.ts**: Increased defaults to raw per-step values:
+  - `lavaCoolingRate`: 0.00015 → 0.002
+  - `lavaProportionalCooling`: 0.0001 → 0.001
+  - `lavaAmbientCoolingRate`: 0.0001 → 0.001
+  - `lavaCrustGrowthRate`: 0.02 → 0.005
+- **gui-setup.ts**: Updated slider ranges and test preset to match new scale
+
+### Change 38: Reduce solidification rate + add per-step cap
+**Files:** `lava-cooling.wgsl`, `lava-water-interaction.wgsl`
+**Why:** Solidification converts lavaHeight → terrainHeight every step. With continuous source injection, this creates a perpetual loop: source adds lava → lava cools → solidifies into terrain → source adds more → terrain keeps growing (visible as weird tall shapes/spires). The mechanic is correct (edges cool → form rock levees), it's just too fast.
+**Changes:**
+- **lava-cooling.wgsl**: Solidification rate reduced 10x (0.1 → 0.01) + hard cap of 0.0001/step (max terrain growth 0.018/sec at 180 steps/sec)
+- **lava-water-interaction.wgsl**: Quench solidification rate reduced 10x (0.03 → 0.003) + same 0.0001/step cap

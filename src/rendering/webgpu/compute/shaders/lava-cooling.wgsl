@@ -78,13 +78,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let flowCoolFactor = 1.0 / (1.0 + speed * 20.0);
 
     // Ambient cooling: constant heat loss, scaled by lateral exposure
-    temperature -= uniforms.u_AmbientCoolingRate * uniforms.u_timestep * flowCoolFactor * exposureMultiplier;
+    temperature -= uniforms.u_AmbientCoolingRate * flowCoolFactor * exposureMultiplier;
 
     // Surface area cooling: thin lava cools faster, crust insulates.
     // Cap the thin-lava multiplier to prevent blow-up at leading edge.
     let surfaceAreaFactor = min(1.0 + uniforms.u_ProportionalCooling / max(lavaHeight, 0.05), 2.0);
     let crustInsulation = 1.0 / (1.0 + crustThickness * 5.0);
-    temperature -= uniforms.u_CoolingRate * surfaceAreaFactor * crustInsulation * uniforms.u_timestep * flowCoolFactor * exposureMultiplier;
+    temperature -= uniforms.u_CoolingRate * surfaceAreaFactor * crustInsulation * flowCoolFactor * exposureMultiplier;
     temperature = max(temperature, 0.0);
 
     // --- Viscosity: base + temperature ramp ---
@@ -100,16 +100,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Edges grow crust faster (more exposed surface → Griffiths channelization).
     let crustFlowSuppression = 1.0 / (1.0 + speed * 5.0);
     if (temperature < 0.6) {
-        crustThickness += uniforms.u_CrustGrowthRate * (0.6 - temperature) * uniforms.u_timestep * crustFlowSuppression * exposureMultiplier;
+        crustThickness += uniforms.u_CrustGrowthRate * (0.6 - temperature) * crustFlowSuppression * exposureMultiplier;
         crustThickness = min(crustThickness, lavaHeight * 0.3);
     }
     // Hot lava melts crust
     if (temperature > 0.8) {
-        crustThickness = max(0.0, crustThickness - 0.1 * uniforms.u_timestep);
+        crustThickness = max(0.0, crustThickness - 0.1);
     }
     // Moving lava shears crust
     if (speed > 0.5) {
-        crustThickness = max(0.0, crustThickness - speed * 0.02 * uniforms.u_timestep);
+        crustThickness = max(0.0, crustThickness - speed * 0.02);
     }
 
     // --- Solidification: lava → rock ---
@@ -121,9 +121,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (temperature < uniforms.u_SolidificationThreshold) {
         let solidFrac = (uniforms.u_SolidificationThreshold - temperature) / uniforms.u_SolidificationThreshold;
         // Gentle rate scaled by speed gate — stalled lava solidifies, flowing lava doesn't
-        // Rate kept low (0.1) to prevent rapid terrain buildup that blocks drainage
-        let solidRate = solidFrac * uniforms.u_timestep * 0.1 * speedGate;
-        let solidAmount = min(lavaHeight * solidRate, lavaHeight);
+        // Rate kept low (0.01) to prevent rapid terrain buildup that blocks drainage
+        // Hard cap of 0.0001/step → max terrain growth 0.018/sec at 180 steps/sec
+        let solidRate = solidFrac * 0.01 * speedGate;
+        let solidAmount = min(min(lavaHeight * solidRate, lavaHeight), 0.0001);
 
         terrainHeight += solidAmount;
         rock = min(1.0, rock + solidAmount * uniforms.u_RockFraction);
