@@ -105,11 +105,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     // Hot lava melts crust
     if (temperature > 0.8) {
-        crustThickness = max(0.0, crustThickness - 0.1);
+        crustThickness = max(0.0, crustThickness - 0.005);
     }
     // Moving lava shears crust
     if (speed > 0.5) {
-        crustThickness = max(0.0, crustThickness - speed * 0.02);
+        crustThickness = max(0.0, crustThickness - speed * 0.001);
     }
 
     // --- Solidification: lava → rock ---

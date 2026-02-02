@@ -305,8 +305,8 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         applyLavaTestPreset: () => {
             controls.lavaViscosityScale = 5.0;
             controls.lavaYieldStress = 0.2;
-            controls.lavaCoolingRate = 0.002;
-            controls.lavaProportionalCooling = 0.001;
+            controls.lavaCoolingRate = 0.0008;
+            controls.lavaProportionalCooling = 0.0004;
             controls.lavaSolidificationThreshold = 240;
             controls.lavaRockFraction = 0.7;
             controls.lavaThermalErosionRate = 0.05;
@@ -317,7 +317,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             controls.lavaSofteningTemp = 720;
             controls.lavaKCond = 0.3;
             controls.lavaCrustMixSuppression = 2.0;
-            controls.lavaAmbientCoolingRate = 0.001;
+            controls.lavaAmbientCoolingRate = 0.0004;
             controls.lavaViscTempScale = 4.0;
             controls.lavaMaxErosionPerStep = 0.0003;
             controls.lavaErosionSpeedClamp = 3.0;

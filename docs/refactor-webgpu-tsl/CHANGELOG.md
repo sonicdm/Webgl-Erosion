@@ -634,3 +634,22 @@ No flux memory between steps. Each step computes flow purely from current height
 - Fades to normal at the radius edge
 - Cooling only takes effect once lava flows away from the source
 **Physics basis:** Real volcanic vents maintain near-eruption temperatures at the outlet. Cooling is a transport phenomenon — lava cools as it travels, not at the source.
+
+### Change 42: Fix hard-coded constants missed by timestep removal (÷20)
+**Files:** `lava-cooling.wgsl`, `lava-water-interaction.wgsl`, `controls-factory.ts`, `gui-setup.ts`
+**Why:** Change 37 removed `u_timestep` (0.05) multiplication from uniform-controlled rates but missed all hard-coded constants in the shaders. These constants were calibrated assuming timestep multiplication, so removing the multiply made them 20x too strong. Result: instant cooling, instant crust, instant water displacement → lava solidified on contact.
+**Changes (all ÷20 to restore original effective rates):**
+- **lava-cooling.wgsl**:
+  - Crust melt: `0.1` → `0.005` per step (was 0.1*0.05=0.005)
+  - Crust shear: `speed * 0.02` → `speed * 0.001` per step (was 0.02*0.05=0.001)
+- **lava-water-interaction.wgsl**:
+  - Water displacement: `0.5` → `0.025` (was 0.5*0.05=0.025)
+  - Quench cooling: `1.5` → `0.075` (was 1.5*0.05=0.075)
+  - Crust formation: `3.0` → `0.15` (was 3.0*0.05=0.15)
+  - Flash evaporation: `0.3` → `0.015` (was 0.3*0.05=0.015)
+  - Heat radius evap: `0.5` → `0.025` (was 0.5*0.05=0.025)
+- **Cooling rate defaults reduced** (combined rate was 0.9/sec, now 0.36/sec → full cool in ~3 sec):
+  - `lavaCoolingRate`: 0.002 → 0.0008
+  - `lavaProportionalCooling`: 0.001 → 0.0004
+  - `lavaAmbientCoolingRate`: 0.001 → 0.0004
+- **Test preset** updated to match
