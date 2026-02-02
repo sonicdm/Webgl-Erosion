@@ -112,31 +112,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         crustThickness = max(0.0, crustThickness - speed * 0.001);
     }
 
-    // --- Solidification: lava → rock ---
-    // Only stalled or near-stalled lava solidifies. Flowing lava stays liquid.
-    // This prevents rock spires from building at the source while lava is actively flowing.
-    // Speed gate: solidification rate drops to near-zero when lava is moving.
-    let speedGate = 1.0 / (1.0 + speed * 10.0); // ~1 when stalled, ~0.1 at speed=1
+    // Solidification is handled by the separate lava-solidification pass
+    // (mobile → cool lava → basalt). No direct lava → terrain conversion here.
 
-    if (temperature < uniforms.u_SolidificationThreshold) {
-        let solidFrac = (uniforms.u_SolidificationThreshold - temperature) / uniforms.u_SolidificationThreshold;
-        // Gentle rate scaled by speed gate — stalled lava solidifies, flowing lava doesn't
-        // Rate kept low (0.01) to prevent rapid terrain buildup that blocks drainage
-        // Hard cap of 0.0001/step → max terrain growth 0.018/sec at 180 steps/sec
-        let solidRate = solidFrac * 0.01 * speedGate;
-        let solidAmount = min(min(lavaHeight * solidRate, lavaHeight), 0.0001);
-
-        terrainHeight += solidAmount;
-        rock = min(1.0, rock + solidAmount * uniforms.u_RockFraction);
-        if (rock > 0.1 && baseRock < 0.001) {
-            baseRock = terrainHeight;
-        }
-        lavaHeight -= solidAmount;
-    }
-
-    // Clean up: negligible lava remnants are discarded (not added to terrain).
-    // Adding thin films to terrain creates mounding artifacts over thousands of steps.
-    if (lavaHeight < 0.001) {
+    // Clean up properties when lava is truly gone (already converted by solidification)
+    if (lavaHeight < 0.0001) {
         crustThickness = 0.0;
         temperature = 0.0;
         viscosity = 0.0;
