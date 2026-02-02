@@ -29,6 +29,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let curFlux = textureLoad(readLavaFlux, coord, 0);
 
     let lavaHeight = curLava.r;
+    let temperature = curLava.g;
     let viscosity_val = curLava.b;
 
     // No lava → zero flux
@@ -37,7 +38,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // Surface height = terrain + water + lava (lava sits on top)
+    // --- Hot-over-cool: only mobile (hot) lava can flow out ---
+    // Cool lava is effectively frozen in place, acting as terrain for flow purposes.
+    // mobileFrac: 0 at T=0 (all frozen), 1 at T≥0.5 (all mobile)
+    let mobileFrac = clamp(temperature * 2.0, 0.0, 1.0);
+    let mobileLava = lavaHeight * mobileFrac;
+
+    // Surface height = terrain + water + lava (total, for height gradient computation)
     let surfaceHeight = curTerrain.r + curTerrain.g + lavaHeight;
 
     let topT = textureLoad(readTerrain, coord + vec2<i32>(0, 1), 0);
@@ -85,7 +92,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Thick crust at a neighbor acts as a structural barrier that redirects flow.
     // However, hot lava can thermally override neighbor crust — it melts through.
     // Only cooled lava is fully blocked by crusted margins, creating levees.
-    let temperature = curLava.g;
     let thermalOverride = clamp(temperature * 2.0 - 0.5, 0.0, 1.0); // 0 at T<0.25, 1 at T>0.75
     let effectiveCrustStr = uniforms.u_CrustStrength * (1.0 - thermalOverride);
     let topBarrier = yieldThreshold + topL.a * effectiveCrustStr;
@@ -98,9 +104,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (abs(Hbottom) < bottomBarrier) { fbottom = 0.0; }
     if (abs(Hleft) < leftBarrier) { fleft = 0.0; }
 
-    // Conservation factor - matches water flow shader
+    // Conservation factor — only mobile (hot) lava can flow out.
+    // Cool lava is effectively frozen in place (acts as terrain for flow purposes).
     let lavaOut = uniforms.u_timestep * (ftop + fright + fbottom + fleft);
-    let k = min(1.0, (lavaHeight * uniforms.u_PipeLen * uniforms.u_PipeLen) / max(lavaOut, 0.0001));
+    let k = min(1.0, (mobileLava * uniforms.u_PipeLen * uniforms.u_PipeLen) / max(lavaOut, 0.0001));
     ftop *= k;
     fright *= k;
     fbottom *= k;

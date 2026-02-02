@@ -608,3 +608,18 @@ No flux memory between steps. Each step computes flow purely from current height
 - Hot lava (T=1.0): viscFactor ≈ 0.25 → flows at ~1/4 water speed
 - Cool lava (T=0.5): viscFactor ≈ 0.11 → ~1/9 water speed
 - Cold lava (T=0.0): viscFactor ≈ 0.04 → nearly stopped
+
+### Change 40: Hot lava flows over cool lava (mobile fraction conservation)
+**File:** `lava-flux.wgsl`
+**Why:** Hot and cool lava share the same `lavaHeight` channel. The conservation factor limited outflow to total `lavaHeight`, so cold lava could flow out even though it should be frozen. Hot lava pooled behind cooled fronts instead of flowing over them because the cooled lava was counted as available flow volume.
+**Changes:**
+- Added `mobileFrac = clamp(T * 2.0, 0.0, 1.0)` — fraction of lava that's hot enough to flow (0 at T=0, 1 at T≥0.5)
+- `mobileLava = lavaHeight * mobileFrac` — only the mobile fraction can flow
+- Conservation factor now limits outflow to `mobileLava` instead of total `lavaHeight`
+- Height gradient computation unchanged (uses total surface heights)
+- Removed duplicate `temperature` variable declaration (now declared once at top)
+**Expected behavior:**
+- Cold lava (T<0.25) is effectively frozen — zero mobile fraction means zero outflow regardless of height gradient
+- Hot lava (T≥0.5) flows freely, limited only by its own volume
+- Hot lava arriving at a cooled front sees the cooled lava as immobile ground and flows over it
+- Combined with viscosity (which also increases as T drops), creates a smooth flow-to-stop transition
