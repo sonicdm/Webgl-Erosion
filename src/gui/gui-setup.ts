@@ -294,6 +294,20 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lavaColor.add(controls, 'lavaYellowTemp', 480, 1080).step(10).name('Yellow °C');
     lavaColor.add(controls, 'lavaEmissiveStrength', 0.0, 4.0).step(0.1).name('Emissive Glow');
 
+    // Channeling — controls how lava forms focused channels
+    var lavaChannel = lavapara.addFolder('Channeling');
+    lavaChannel.add(controls, 'lavaDepthBoost', 0.0, 40.0).name('Depth Boost');
+    lavaChannel.add(controls, 'lavaMomentum', 0.0, 0.95).name('Momentum');
+    lavaChannel.add(controls, 'lavaNoiseResist', 1.0, 5.0).name('Noise Power');
+
+    // Layer system — controls three-layer solidification
+    var lavaSolid = lavapara.addFolder('Solidification');
+    lavaSolid.add(controls, 'lavaCoolificationRate', 0.0, 0.1).name('Cooling Rate');
+    lavaSolid.add(controls, 'lavaBasaltificationRate', 0.0, 0.05).name('Basalt Rate');
+    lavaSolid.add(controls, 'lavaReMeltRate', 0.0, 0.2).name('Re-Melt Rate');
+    lavaSolid.add(controls, 'lavaBasaltMeltRate', 0.0, 0.02).name('Basalt Melt');
+    lavaSolid.add(controls, 'lavaNoiseModulation', 0.0, 1.0).name('Noise Variation');
+
     // Water interaction
     var lavaWater = lavapara.addFolder('Water');
     lavaWater.add(controls, 'lavaWaterInteraction').name('Enabled');
@@ -326,6 +340,14 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             controls.lavaOrangeTemp = 540;
             controls.lavaYellowTemp = 780;
             controls.lavaEmissiveStrength = 1.5;
+            controls.lavaDepthBoost = 20.0;
+            controls.lavaMomentum = 0.7;
+            controls.lavaNoiseResist = 3.0;
+            controls.lavaCoolificationRate = 0.02;
+            controls.lavaBasaltificationRate = 0.01;
+            controls.lavaReMeltRate = 0.05;
+            controls.lavaBasaltMeltRate = 0.005;
+            controls.lavaNoiseModulation = 0.5;
             gui.controllersRecursive().forEach((c: any) => c.updateDisplay?.());
             console.log('[LAVA_SIM] Applied lava test preset');
         }

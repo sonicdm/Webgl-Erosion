@@ -128,7 +128,17 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaErosionSpeedClamp: 3.0,
         lavaOrangeTemp: 540,
         lavaYellowTemp: 780,
-        lavaEmissiveStrength: 1.5
+        lavaEmissiveStrength: 1.5,
+        // Lava channeling mechanics
+        lavaDepthBoost: 20.0,
+        lavaMomentum: 0.7,
+        lavaNoiseResist: 3.0,
+        // Lava layer system
+        lavaCoolificationRate: 0.02,
+        lavaBasaltificationRate: 0.01,
+        lavaReMeltRate: 0.05,
+        lavaBasaltMeltRate: 0.005,
+        lavaNoiseModulation: 0.5
     };
 
     if (actions.resetErosionParameters) {

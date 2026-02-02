@@ -137,4 +137,14 @@ export interface IAppControls {
     lavaViscTempScale: number;
     lavaMaxErosionPerStep: number;
     lavaErosionSpeedClamp: number;
+    // Lava channeling mechanics
+    lavaDepthBoost: number;
+    lavaMomentum: number;
+    lavaNoiseResist: number;
+    // Lava layer system (solidification chain)
+    lavaCoolificationRate: number;
+    lavaBasaltificationRate: number;
+    lavaReMeltRate: number;
+    lavaBasaltMeltRate: number;
+    lavaNoiseModulation: number;
 }
