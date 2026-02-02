@@ -623,3 +623,14 @@ No flux memory between steps. Each step computes flow purely from current height
 - Hot lava (T≥0.5) flows freely, limited only by its own volume
 - Hot lava arriving at a cooled front sees the cooled lava as immobile ground and flows over it
 - Combined with viscosity (which also increases as T drops), creates a smooth flow-to-stop transition
+
+### Change 41: Source vent clamps temperature (cooling can't reach source)
+**File:** `lava-source.wgsl`
+**Why:** Cooling subtracts temperature every step from ALL cells, including right at the source. Volume-weighted mixing in the source pass can't keep up once the pool is large — adding 0.1 hot lava to a pool of 10 barely changes temperature. So cooling propagated all the way back to the vent, which makes no physical sense (a volcanic vent continuously supplies heat).
+**Changes:**
+- After source injection, clamp temperature to a minimum: `max(temperature, emissionTemp * 0.9 * dens)`
+- `dens` = radial falloff from center (1 at center, 0 at edge)
+- Cells at source center stay at ~90% emission temperature
+- Fades to normal at the radius edge
+- Cooling only takes effect once lava flows away from the source
+**Physics basis:** Real volcanic vents maintain near-eruption temperatures at the outlet. Cooling is a transport phenomenon — lava cools as it travels, not at the source.
