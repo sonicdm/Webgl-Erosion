@@ -55,20 +55,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let Hbottom = surfaceHeight - (bottomT.r + bottomT.g + bottomL.r);
     let Hleft = surfaceHeight - (leftT.r + leftT.g + leftL.r);
 
-    // Viscosity reduces the NEW acceleration only, not the accumulated flux.
-    // This way viscosity slows how fast flux builds, but doesn't drain existing momentum.
-    // Water shader: flux = max(0, oldFlux + accel). Lava: flux = max(0, oldFlux + accel * viscDamp).
-    let viscDamp = 1.0 / (1.0 + viscosity_val * uniforms.u_ViscosityScale);
+    // Pure viscous flow model (Stokes regime, Re << 1):
+    // Flux is computed fresh each step from height gradient / viscosity.
+    // No momentum carry-over — lava is viscosity-dominated, not inertia-dominated.
+    // At T=1.0 (hot): visc=0.6, viscFactor = 1/(1+0.6*5) ≈ 0.25 → lava flows at ~1/4 water speed
+    // At T=0.5: visc=1.6, viscFactor = 1/(1+1.6*5) ≈ 0.11 → ~1/9 water speed
+    // At T=0.0: visc=4.6+, viscFactor ≈ 0.04 → ~1/24 water speed, nearly stopped
+    let viscFactor = 1.0 / (1.0 + viscosity_val * uniforms.u_ViscosityScale);
 
-    let accelTop = (uniforms.u_timestep * g * uniforms.u_PipeArea * Htop) / uniforms.u_PipeLen;
-    let accelRight = (uniforms.u_timestep * g * uniforms.u_PipeArea * Hright) / uniforms.u_PipeLen;
-    let accelBottom = (uniforms.u_timestep * g * uniforms.u_PipeArea * Hbottom) / uniforms.u_PipeLen;
-    let accelLeft = (uniforms.u_timestep * g * uniforms.u_PipeArea * Hleft) / uniforms.u_PipeLen;
+    let flowCoeff = g * uniforms.u_PipeArea / uniforms.u_PipeLen;
+    let accelTop = flowCoeff * Htop;
+    let accelRight = flowCoeff * Hright;
+    let accelBottom = flowCoeff * Hbottom;
+    let accelLeft = flowCoeff * Hleft;
 
-    var ftop = max(0.0, curFlux.r + accelTop * viscDamp);
-    var fright = max(0.0, curFlux.g + accelRight * viscDamp);
-    var fbottom = max(0.0, curFlux.b + accelBottom * viscDamp);
-    var fleft = max(0.0, curFlux.a + accelLeft * viscDamp);
+    var ftop = max(0.0, accelTop * viscFactor);
+    var fright = max(0.0, accelRight * viscFactor);
+    var fbottom = max(0.0, accelBottom * viscFactor);
+    var fleft = max(0.0, accelLeft * viscFactor);
 
     // Yield stress (Bingham plastic): only develops as lava cools.
     // Hot basaltic lava at eruption temp is Newtonian — no yield stress.

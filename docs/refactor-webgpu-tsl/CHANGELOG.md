@@ -592,3 +592,19 @@ No flux memory between steps. Each step computes flow purely from current height
 **Changes:**
 - **lava-cooling.wgsl**: Solidification rate reduced 10x (0.1 → 0.01) + hard cap of 0.0001/step (max terrain growth 0.018/sec at 180 steps/sec)
 - **lava-water-interaction.wgsl**: Quench solidification rate reduced 10x (0.03 → 0.003) + same 0.0001/step cap
+
+### Change 39: Replace momentum-based pipe model with pure viscous flow
+**File:** `lava-flux.wgsl`
+**Why:** The water flux model (`flux_new = old_flux + accel`) is a momentum-based pipe model (Saint-Venant shallow water equations). This is physically incompatible with lava. Water uses inertial flow where flux accumulates over time. Lava is a viscous creeping flow (Re << 1) — velocity should be proportional to driving force / viscosity, with NO momentum carry-over. The previous approach (`viscDamp` on acceleration only) just slowed how fast lava reached water speed. Over many steps, lava eventually flowed just as fast as water because old flux was preserved at 100%.
+**Changes:**
+- Removed reading of previous flux values (`curFlux.r/g/b/a` no longer used in flux computation)
+- Flux computed fresh each step: `flux = flowCoeff * heightDiff * viscFactor`
+- `viscFactor = 1/(1 + viscosity * ViscosityScale)` — same formula, now applied to total flux not just acceleration
+- `readLavaFlux` binding kept for pipeline compatibility but previous values ignored
+- Yield stress, crust barrier, conservation factor, boundary conditions all unchanged
+**Expected behavior:**
+- No standing waves or ripples (no momentum to oscillate)
+- No spires from accumulated flux feeding solidifying cells
+- Hot lava (T=1.0): viscFactor ≈ 0.25 → flows at ~1/4 water speed
+- Cool lava (T=0.5): viscFactor ≈ 0.11 → ~1/9 water speed
+- Cold lava (T=0.0): viscFactor ≈ 0.04 → nearly stopped
