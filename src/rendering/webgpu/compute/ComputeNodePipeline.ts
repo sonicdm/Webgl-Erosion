@@ -18,6 +18,7 @@ import lavaThermalTransferShader from './shaders/lava-thermal-transfer.wgsl?raw'
 import lavaThermalErosionShader from './shaders/lava-thermal-erosion.wgsl?raw';
 import lavaCoolingShader from './shaders/lava-cooling.wgsl?raw';
 import lavaWaterInteractionShader from './shaders/lava-water-interaction.wgsl?raw';
+import lavaSolidificationShader from './shaders/lava-solidification.wgsl?raw';
 
 // Rain compute shader WGSL code
 const RAIN_COMPUTE_SHADER = `
@@ -1269,6 +1270,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     private lavaThermalTransferBindGroupLayout: GPUBindGroupLayout | null = null;
     private lavaWaterInteractionPipeline: GPUComputePipeline | null = null;
     private lavaWaterInteractionBindGroupLayout: GPUBindGroupLayout | null = null;
+    private lavaSolidificationPipeline: GPUComputePipeline | null = null;
+    private lavaSolidificationBindGroupLayout: GPUBindGroupLayout | null = null;
 
     /**
      * Flow (flux) compute pass.
@@ -2115,18 +2118,26 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             viscosityScale: number;
             yieldStress: number;
             crustStrength: number;
+            depthBoostStrength: number;
+            momentumStrength: number;
+            noiseResistPower: number;
         }
     ): void {
         const device = this.device;
 
         if (!this.lavaFluxPipeline) {
-            
+
             this.lavaFluxBindGroupLayout = this.createBindGroupLayout([
-                createSampledTextureLayoutEntry(0),
-                createSampledTextureLayoutEntry(1),
-                createSampledTextureLayoutEntry(2),
-                createStorageTextureLayoutEntry(3, 'write-only'),
-                createUniformBufferLayoutEntry(4),
+                createSampledTextureLayoutEntry(0),   // readTerrain
+                createSampledTextureLayoutEntry(1),   // readLava
+                createSampledTextureLayoutEntry(2),   // readLavaFlux
+                createStorageTextureLayoutEntry(3, 'write-only'),  // writeLavaFlux
+                createSampledTextureLayoutEntry(4),   // readLavaVel
+                createSampledTextureLayoutEntry(5),   // readNoise
+                createSampledTextureLayoutEntry(6),   // readCoolLava
+                createSampledTextureLayoutEntry(7),   // readBasalt
+                createStorageTextureLayoutEntry(8, 'write-only'),  // writeLavaFlux2
+                createUniformBufferLayoutEntry(9),    // uniforms
             ]);
             this.lavaFluxPipeline = this.createComputePipeline(
                 lavaFluxShader, 'main', this.lavaFluxBindGroupLayout
@@ -2135,7 +2146,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         const uniformData = new Float32Array([
             uniforms.simRes, uniforms.pipeLen, uniforms.timestep, uniforms.pipeArea,
-            uniforms.viscosityScale, uniforms.yieldStress, uniforms.crustStrength, 0.0,
+            uniforms.viscosityScale, uniforms.yieldStress, uniforms.crustStrength,
+            uniforms.depthBoostStrength, uniforms.momentumStrength, uniforms.noiseResistPower,
+            0.0, 0.0, // padding to 48 bytes (12 floats)
         ]);
 
         let uniformBuffer = this.uniformBuffers.get('lavaFlux');
@@ -2152,7 +2165,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             createSampledTextureBinding(texturePool.readLavaTexture, 1),
             createSampledTextureBinding(texturePool.readLavaFluxTexture, 2),
             createStorageTextureBinding(texturePool.writeLavaFluxTexture, 3),
-            { binding: 4, resource: { buffer: uniformBuffer } },
+            createSampledTextureBinding(texturePool.readLavaVelTexture, 4),
+            createSampledTextureBinding(texturePool.noiseTexture, 5),
+            createSampledTextureBinding(texturePool.readCoolLavaTexture, 6),
+            createSampledTextureBinding(texturePool.readBasaltTexture, 7),
+            createStorageTextureBinding(texturePool.writeLavaFlux2Texture, 8),
+            { binding: 9, resource: { buffer: uniformBuffer } },
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
@@ -2182,14 +2200,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         const device = this.device;
 
         if (!this.lavaHeightVelPipeline) {
-            
+
             this.lavaHeightVelBindGroupLayout = this.createBindGroupLayout([
-                createSampledTextureLayoutEntry(0),
-                createSampledTextureLayoutEntry(1),
-                createSampledTextureLayoutEntry(2),
-                createStorageTextureLayoutEntry(3, 'write-only'),
-                createStorageTextureLayoutEntry(4, 'write-only'),
-                createUniformBufferLayoutEntry(5),
+                createSampledTextureLayoutEntry(0),   // readLavaFlux
+                createSampledTextureLayoutEntry(1),   // readLava
+                createSampledTextureLayoutEntry(2),   // readLavaVel
+                createStorageTextureLayoutEntry(3, 'write-only'),  // writeLava
+                createStorageTextureLayoutEntry(4, 'write-only'),  // writeLavaVel
+                createSampledTextureLayoutEntry(5),   // readLavaFlux2
+                createUniformBufferLayoutEntry(6),    // uniforms
             ]);
             this.lavaHeightVelPipeline = this.createComputePipeline(
                 lavaHeightVelShader, 'main', this.lavaHeightVelBindGroupLayout
@@ -2216,7 +2235,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             createSampledTextureBinding(texturePool.readLavaVelTexture, 2),
             createStorageTextureBinding(texturePool.writeLavaTexture, 3),
             createStorageTextureBinding(texturePool.writeLavaVelTexture, 4),
-            { binding: 5, resource: { buffer: uniformBuffer } },
+            createSampledTextureBinding(texturePool.readLavaFlux2Texture, 5),
+            { binding: 6, resource: { buffer: uniformBuffer } },
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
@@ -2310,13 +2330,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         const device = this.device;
 
         if (!this.lavaThermalErosionPipeline) {
-            
+
             this.lavaThermalErosionBindGroupLayout = this.createBindGroupLayout([
-                createSampledTextureLayoutEntry(0),
-                createSampledTextureLayoutEntry(1),
-                createSampledTextureLayoutEntry(2),
-                createStorageTextureLayoutEntry(3, 'write-only'),
-                createUniformBufferLayoutEntry(4),
+                createSampledTextureLayoutEntry(0),   // readLava
+                createSampledTextureLayoutEntry(1),   // readLavaVel
+                createSampledTextureLayoutEntry(2),   // readTerrain
+                createStorageTextureLayoutEntry(3, 'write-only'),  // writeTerrain
+                createSampledTextureLayoutEntry(4),   // readBasalt
+                createStorageTextureLayoutEntry(5, 'write-only'),  // writeBasalt
+                createUniformBufferLayoutEntry(6),    // uniforms
             ]);
             this.lavaThermalErosionPipeline = this.createComputePipeline(
                 lavaThermalErosionShader, 'main', this.lavaThermalErosionBindGroupLayout
@@ -2344,7 +2366,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             createSampledTextureBinding(texturePool.readLavaVelTexture, 1),
             createSampledTextureBinding(texturePool.readTerrainTexture, 2),
             createStorageTextureBinding(texturePool.writeTerrainTexture, 3),
-            { binding: 4, resource: { buffer: uniformBuffer } },
+            createSampledTextureBinding(texturePool.readBasaltTexture, 4),
+            createStorageTextureBinding(texturePool.writeBasaltTexture, 5),
+            { binding: 6, resource: { buffer: uniformBuffer } },
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
@@ -2501,6 +2525,82 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     /**
+     * Lava solidification pass.
+     * Three-layer phase transitions: mobile lava → cool lava → basalt.
+     * Includes re-melting by hot lava and noise-modulated crusting rates.
+     */
+    lavaSolidificationPass(
+        texturePool: WebGPUTexturePool,
+        uniforms: {
+            simRes: number;
+            coolThreshold: number;
+            basaltThreshold: number;
+            coolificationRate: number;
+            basaltificationRate: number;
+            reMeltRate: number;
+            basaltMeltRate: number;
+            noiseModulation: number;
+        }
+    ): void {
+        const device = this.device;
+
+        if (!this.lavaSolidificationPipeline) {
+
+            this.lavaSolidificationBindGroupLayout = this.createBindGroupLayout([
+                createSampledTextureLayoutEntry(0),   // readLava
+                createSampledTextureLayoutEntry(1),   // readCoolLava
+                createSampledTextureLayoutEntry(2),   // readBasalt
+                createSampledTextureLayoutEntry(3),   // readNoise
+                createSampledTextureLayoutEntry(4),   // readLavaVel
+                createStorageTextureLayoutEntry(5, 'write-only'),  // writeLava
+                createStorageTextureLayoutEntry(6, 'write-only'),  // writeCoolLava
+                createStorageTextureLayoutEntry(7, 'write-only'),  // writeBasalt
+                createUniformBufferLayoutEntry(8),    // uniforms
+            ]);
+            this.lavaSolidificationPipeline = this.createComputePipeline(
+                lavaSolidificationShader, 'main', this.lavaSolidificationBindGroupLayout
+            );
+        }
+
+        const uniformData = new Float32Array([
+            uniforms.coolThreshold, uniforms.basaltThreshold,
+            uniforms.coolificationRate, uniforms.basaltificationRate,
+            uniforms.reMeltRate, uniforms.basaltMeltRate,
+            uniforms.noiseModulation, 0.0,
+        ]);
+
+        let uniformBuffer = this.uniformBuffers.get('lavaSolidification');
+        if (!uniformBuffer || uniformBuffer.size < uniformData.byteLength) {
+            if (uniformBuffer) uniformBuffer.destroy();
+            uniformBuffer = createUniformBuffer(device, uniformData, 'lavaSolidification-uniforms');
+            this.uniformBuffers.set('lavaSolidification', uniformBuffer);
+        } else {
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer);
+        }
+
+        const bindGroup = this.createBindGroup(this.lavaSolidificationBindGroupLayout!, [
+            createSampledTextureBinding(texturePool.readLavaTexture, 0),
+            createSampledTextureBinding(texturePool.readCoolLavaTexture, 1),
+            createSampledTextureBinding(texturePool.readBasaltTexture, 2),
+            createSampledTextureBinding(texturePool.noiseTexture, 3),
+            createSampledTextureBinding(texturePool.readLavaVelTexture, 4),
+            createStorageTextureBinding(texturePool.writeLavaTexture, 5),
+            createStorageTextureBinding(texturePool.writeCoolLavaTexture, 6),
+            createStorageTextureBinding(texturePool.writeBasaltTexture, 7),
+            { binding: 8, resource: { buffer: uniformBuffer } },
+        ]);
+
+        const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.lavaSolidificationPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
+    }
+
+    /**
      * Dispose of all resources.
      */
     override dispose(): void {
@@ -2548,5 +2648,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         this.lavaCoolingBindGroupLayout = null;
         this.lavaWaterInteractionPipeline = null;
         this.lavaWaterInteractionBindGroupLayout = null;
+        this.lavaSolidificationPipeline = null;
+        this.lavaSolidificationBindGroupLayout = null;
     }
 }

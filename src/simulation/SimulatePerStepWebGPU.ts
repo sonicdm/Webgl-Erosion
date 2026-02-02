@@ -209,7 +209,7 @@ export function SimulatePerStepWebGPU(
         });
         texturePool.swapLavaTextures();
 
-        // 9b. Lava Flux
+        // 9b. Lava Flux (8-neighbor with channeling mechanics)
         computePipeline.lavaFluxPass(texturePool, {
             simRes: simres,
             pipeLen: controls.pipelen,
@@ -218,8 +218,12 @@ export function SimulatePerStepWebGPU(
             viscosityScale: controls.lavaViscosityScale,
             yieldStress: controls.lavaYieldStress,
             crustStrength: controls.lavaCrustStrength,
+            depthBoostStrength: controls.lavaDepthBoost,
+            momentumStrength: controls.lavaMomentum,
+            noiseResistPower: controls.lavaNoiseResist,
         });
         texturePool.swapLavaFluxTextures();
+        texturePool.swapLavaFlux2Textures();
 
         // 9c. Lava Height/Velocity Update (stores deltaH in vel.w for thermal transfer)
         computePipeline.lavaHeightVelPass(texturePool, {
@@ -242,7 +246,7 @@ export function SimulatePerStepWebGPU(
         });
         texturePool.swapLavaTextures();
 
-        // 9e. Lava Thermal Erosion (bounded — hot lava erodes terrain beneath)
+        // 9e. Lava Thermal Erosion (bounded — hot lava erodes terrain and basalt beneath)
         computePipeline.lavaThermalErosionPass(texturePool, {
             simRes: simres,
             thermalErosionRate: controls.lavaThermalErosionRate,
@@ -252,6 +256,7 @@ export function SimulatePerStepWebGPU(
             timestep: controls.timestep,
         });
         texturePool.swapTerrainTextures();
+        texturePool.swapBasaltTextures();
 
         // 9f. Lava Cooling & Solidification
         computePipeline.lavaCoolingPass(texturePool, {
@@ -268,7 +273,22 @@ export function SimulatePerStepWebGPU(
         texturePool.swapLavaTextures();
         texturePool.swapTerrainTextures();
 
-        // 9g. Lava-Water Interaction (mutual exclusion, quench cooling, evaporation)
+        // 9g. Lava Solidification (three-layer: mobile → cool → basalt)
+        computePipeline.lavaSolidificationPass(texturePool, {
+            simRes: simres,
+            coolThreshold: 0.5,
+            basaltThreshold: 0.0,
+            coolificationRate: controls.lavaCoolificationRate,
+            basaltificationRate: controls.lavaBasaltificationRate,
+            reMeltRate: controls.lavaReMeltRate,
+            basaltMeltRate: controls.lavaBasaltMeltRate,
+            noiseModulation: controls.lavaNoiseModulation,
+        });
+        texturePool.swapLavaTextures();
+        texturePool.swapCoolLavaTextures();
+        texturePool.swapBasaltTextures();
+
+        // 9h. Lava-Water Interaction (mutual exclusion, quench cooling, evaporation)
         if (controls.lavaWaterInteraction) {
             computePipeline.lavaWaterInteractionPass(texturePool, {
                 simRes: simres,
@@ -283,7 +303,7 @@ export function SimulatePerStepWebGPU(
             texturePool.swapTerrainTextures();
         }
 
-        // 9h. Lava diagnostics (rate-limited logging)
+        // 9i. Lava diagnostics (rate-limited logging)
         if (lavaSourceCount > 0) {
             lavaLogger.log(LogCategory.LAVA_SIM, 'step',
                 `sources=${lavaSourceCount} dt=${controls.timestep.toFixed(4)} viscScale=${controls.lavaViscosityScale} erosionCap=${controls.lavaMaxErosionPerStep}`);
