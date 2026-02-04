@@ -14,13 +14,20 @@ import {
     getOriginalBrushOperation,
     setOriginalBrushOperation
 } from '../brush-handler';
-import { 
+import {
     MAX_WATER_SOURCES,
     addWaterSource,
     removeNearestWaterSource,
     clearAllWaterSources,
     getWaterSourceCount
 } from '../utils/water-sources';
+import {
+    MAX_LAVA_SOURCES,
+    addLavaSource,
+    removeNearestLavaSource,
+    clearAllLavaSources,
+    getLavaSourceCount
+} from '../utils/lava-sources';
 import Camera from '../Camera';
 import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 
@@ -55,6 +62,11 @@ export function createEventHandlers(
     function onKeyDown(event: KeyboardEvent) {
         const key = event.key.toLowerCase();
         const action = getKeyAction(key, controlsConfig);
+
+        // DEBUG: trace all key actions
+        if (action) {
+            console.log(`[KeyHandler] key='${key}' action='${action}'`);
+        }
         
         // Track WASD movement keys (don't interfere with brush controls)
         if (controlsConfig.camera.movement.enableWASD) {
@@ -129,11 +141,30 @@ export function createEventHandlers(
             }
         }
         
+        if (action === 'permanentLavaSource') {
+            console.log(`[LavaSource] Handler entered. shiftKey=${event.shiftKey}, posTemp=[${controls.posTemp[0]?.toFixed(3)}, ${controls.posTemp[1]?.toFixed(3)}], brushSize=${controls.brushSize}, brushStrength=${controls.brushStrenth}`);
+            if (event.shiftKey) {
+                if (removeNearestLavaSource(controls.posTemp)) {
+                    controls.lavaSourceCount = getLavaSourceCount();
+                    console.log(`Removed lava source. Remaining: ${getLavaSourceCount()}`);
+                }
+            } else {
+                if (addLavaSource(controls.posTemp, controls.brushSize, controls.brushStrenth)) {
+                    controls.lavaSourceCount = getLavaSourceCount();
+                    console.log(`Added lava source at (${controls.posTemp[0].toFixed(3)}, ${controls.posTemp[1].toFixed(3)}). Total: ${getLavaSourceCount()}`);
+                } else {
+                    console.log(`Maximum ${MAX_LAVA_SOURCES} lava sources reached`);
+                }
+            }
+        }
+
         if (action === 'removePermanentSource') {
             // Remove all sources
             clearAllWaterSources();
+            clearAllLavaSources();
             controls.sourceCount = 0;
-            console.log('Removed all water sources');
+            controls.lavaSourceCount = 0;
+            console.log('Removed all sources');
         }
     }
 

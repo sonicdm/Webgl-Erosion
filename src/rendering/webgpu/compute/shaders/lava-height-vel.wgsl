@@ -10,7 +10,7 @@ struct Uniforms {
     u_PipeLen: f32,
     u_timestep: f32,
     u_PipeArea: f32,
-    u_VelAdvMag: f32,
+    u_Momentum: f32,
     _pad0: f32,
     _pad1: f32,
     _pad2: f32,
@@ -87,57 +87,67 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         fout += getOwnFlux(curFlux1, curFlux2, d);
     }
 
+    // Volume conversion: flux is in physical units (pipe model), convert to height change.
+    // Same formula as water: deltaVol = dt * (fin - fout) / L²
     let deltaVol = uniforms.u_timestep * (fin - fout) / (uniforms.u_PipeLen * uniforms.u_PipeLen);
 
     let d1 = cur.r;
     let d2 = max(d1 + deltaVol, 0.0);
     let da = (d1 + d2) / 2.0;
 
-    // Velocity from flux field (8-neighbor)
+    // --- Velocity from outflow direction (reference: outflow-only, stable signal) ---
     var vel = vec2<f32>(0.0);
-    for (var d: i32 = 0; d < 8; d++) {
-        let outFlux = getOwnFlux(curFlux1, curFlux2, d);
 
-        var inFlux: f32 = 0.0;
-        let nx = coord.x + dirDx[d];
-        let ny = coord.y + dirDy[d];
-        if (nx >= 0 && nx < i32(uniforms.u_SimRes) && ny >= 0 && ny < i32(uniforms.u_SimRes)) {
+    if (d2 > 0.001) {
+        // 1. Outflow direction: weighted sum of flux * direction vector
+        var flowDir = vec2<f32>(0.0);
+        for (var d: i32 = 0; d < 8; d++) {
+            let outFlux = getOwnFlux(curFlux1, curFlux2, d);
+            if (outFlux > 0.0) {
+                flowDir += vec2<f32>(dirNx[d], dirNy[d]) * outFlux;
+            }
+        }
+        // Normalize by lava height to get velocity-like quantity
+        let flowScale = 1.0 / max(d2, 0.01);
+        flowDir *= flowScale;
+
+        // 2. Upstream velocity advection: neighbors pushing lava into us carry their velocity
+        var upstreamVel = vec2<f32>(0.0);
+        var upstreamWeight: f32 = 0.0;
+        for (var d: i32 = 0; d < 8; d++) {
+            let nx = coord.x + dirDx[d];
+            let ny = coord.y + dirDy[d];
+            if (nx < 0 || nx >= i32(uniforms.u_SimRes) || ny < 0 || ny >= i32(uniforms.u_SimRes)) {
+                continue;
+            }
             let nCoord = vec2<i32>(nx, ny);
             let nFlux1 = textureLoad(readLavaFlux, nCoord, 0);
             let nFlux2 = textureLoad(readLavaFlux2, nCoord, 0);
-            inFlux = getNeighborFluxTowardUs(nFlux1, nFlux2, d);
+            let fluxIn = getNeighborFluxTowardUs(nFlux1, nFlux2, d);
+            if (fluxIn > 0.001) {
+                let nVel = textureLoad(readLavaVel, nCoord, 0).xy;
+                upstreamVel += fluxIn * nVel;
+                upstreamWeight += fluxIn;
+            }
         }
 
-        let netFlux = outFlux - inFlux;
-        vel += vec2<f32>(dirNx[d], dirNy[d]) * netFlux;
-    }
+        // 3. Blend: 70% local outflow direction + 30% upstream velocity
+        var newVel = flowDir * 0.7;
+        if (upstreamWeight > 0.001) {
+            newVel += (upstreamVel / upstreamWeight) * 0.3;
+        }
 
-    if (da <= 0.0001) {
-        vel = vec2<f32>(0.0);
-    } else {
-        vel = vel / (da * uniforms.u_PipeLen);
-    }
+        // 4. Heavy exponential smoothing with momentum parameter
+        // momentum=0.7 → 70% old + 30% new (takes ~3 steps to shift direction)
+        // momentum=0.9 → 90% old + 10% new (takes ~10 steps, very stable)
+        let blend = 1.0 - uniforms.u_Momentum;
+        vel = curVel.xy * uniforms.u_Momentum + newVel * blend;
 
-    // Velocity advection
-    var useVel = curVel.xy / uniforms.u_SimRes * 0.5;
-    let oldLoc = curuv - useVel * uniforms.u_timestep;
-    let velDim = vec2<f32>(f32(textureDimensions(readLavaVel).x), f32(textureDimensions(readLavaVel).y));
-    let uvTex = oldLoc * velDim - 0.5;
-    let i0 = clamp(i32(floor(uvTex.x)), 0, i32(velDim.x) - 1);
-    let j0 = clamp(i32(floor(uvTex.y)), 0, i32(velDim.y) - 1);
-    let i1 = min(i0 + 1, i32(velDim.x) - 1);
-    let j1 = min(j0 + 1, i32(velDim.y) - 1);
-    let fx = fract(uvTex.x);
-    let fy = fract(uvTex.y);
-    let v00 = textureLoad(readLavaVel, vec2<i32>(i0, j0), 0);
-    let v10 = textureLoad(readLavaVel, vec2<i32>(i1, j0), 0);
-    let v01 = textureLoad(readLavaVel, vec2<i32>(i0, j1), 0);
-    let v11 = textureLoad(readLavaVel, vec2<i32>(i1, j1), 0);
-    let oldVel = mix(mix(v00.xy, v10.xy, fx), mix(v01.xy, v11.xy, fx), fy);
-    vel += oldVel * uniforms.u_VelAdvMag;
-
-    if (d2 < 0.01) {
-        vel = vec2<f32>(0.0);
+        // 5. Clamp velocity magnitude
+        let vMag = length(vel);
+        if (vMag > 4.0) {
+            vel *= 4.0 / vMag;
+        }
     }
 
     let speed = length(vel);
@@ -162,7 +172,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         let tempIn = tempWeightedSum / max(fin, 0.001);
-        let inFrac = clamp(uniforms.u_timestep * fin / (d2 * uniforms.u_PipeLen * uniforms.u_PipeLen), 0.0, 1.0);
+        // fin is height of incoming lava; d2 is total lava height after flow.
+        // inFrac = what fraction of the final pool is new material.
+        let inFrac = clamp(fin / max(d2, 0.001), 0.0, 1.0);
         newTemp = mix(cur.g, tempIn, inFrac);
     }
 

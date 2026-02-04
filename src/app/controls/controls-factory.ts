@@ -104,8 +104,8 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         // Lava simulation (speeds relative to water equivalents)
         lavaEnabled: false,
         lavaViscosityScale: 5.0,
-        lavaYieldStress: 0.2,
-        lavaCoolingRate: 0.0008,
+        lavaYieldStress: 0.1,
+        lavaCoolingRate: 0.002,
         lavaProportionalCooling: 0.0004,
         lavaSolidificationThreshold: 240,
         lavaRockFraction: 0.7,
@@ -130,11 +130,13 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaYellowTemp: 780,
         lavaEmissiveStrength: 1.5,
         // Lava channeling mechanics
+        lavaFlowStrength: 0.3,
+        lavaFlowIterations: 16,
         lavaDepthBoost: 20.0,
         lavaMomentum: 0.7,
         lavaNoiseResist: 3.0,
         // Lava layer system
-        lavaCoolificationRate: 0.02,
+        lavaCoolificationRate: 0.01,
         lavaBasaltificationRate: 0.01,
         lavaReMeltRate: 0.05,
         lavaBasaltMeltRate: 0.005,

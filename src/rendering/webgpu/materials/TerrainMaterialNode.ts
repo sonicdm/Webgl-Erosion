@@ -25,6 +25,10 @@ export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
     lavaMap?: Texture;
     /** Lava velocity map texture (R=velX, G=velY, B=speed, A=heat) */
     lavaVelocityMap?: Texture;
+    /** Cool lava map texture (R=coolLavaHeight) */
+    coolLavaMap?: Texture;
+    /** Basalt map texture (R=basaltHeight) */
+    basaltMap?: Texture;
 }
 
 /**
@@ -248,7 +252,14 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         if (inputs.heightmap) {
             const halfTexel = float(0.5).div(this.simresUniform);
             const safeUv = clamp(uv(), vec2(halfTexel, halfTexel), vec2(float(1).sub(halfTexel), float(1).sub(halfTexel)));
-            const vertexHeight = texture(inputs.heightmap, safeUv).x;
+            let vertexHeight = texture(inputs.heightmap, safeUv).x;
+            // Include basalt + coolLava in terrain mesh height so solidified lava is visible
+            if (inputs.basaltMap) {
+                vertexHeight = vertexHeight.add(texture(inputs.basaltMap, safeUv).x);
+            }
+            if (inputs.coolLavaMap) {
+                vertexHeight = vertexHeight.add(texture(inputs.coolLavaMap, safeUv).x);
+            }
             const displacementY = vertexHeight.div(this.simresUniform);
             this.positionNode = positionLocal.add(normalLocal.mul(displacementY));
         }
@@ -286,6 +297,15 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const ambientCol = vec3(0.01, 0.01, 0.01);
 
         let litColor = palette.color.mul(shadow.shadowFactor).mul(lamb).add(ambientCol);
+
+        // Basalt coloring: permanent solidified lava rendered as dark igneous rock.
+        // Blends terrain color toward dark blue-grey where basalt is present.
+        if (inputs.basaltMap) {
+            const basaltH = texture(inputs.basaltMap, sampling.uv).x;
+            const basaltBlend = clamp(basaltH.mul(float(500)).div(this.simresUniform), 0, 1);
+            const basaltColor = vec3(0.12, 0.11, 0.10).mul(lamb).add(ambientCol);
+            litColor = mix(litColor, basaltColor, basaltBlend);
+        }
 
         // Brush overlay — ring + fill. Color comes from a single uniform (set in updateBrush).
         const brushPos = this.brushPosUniform;

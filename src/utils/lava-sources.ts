@@ -58,3 +58,14 @@ export function clearAllLavaSources(): void {
 export function getLavaSourceCount(): number {
     return lavaSources.length;
 }
+
+// Expose for browser console testing
+(window as any).__lavaDebug = {
+    addSource: (x: number, y: number, size = 6, strength = 0.5) => {
+        const pos = vec2.fromValues(x, y);
+        return addLavaSource(pos, size, strength);
+    },
+    clear: clearAllLavaSources,
+    count: () => lavaSources.length,
+    list: () => lavaSources.map(s => ({ x: s.position[0], y: s.position[1], size: s.size, strength: s.strength })),
+};

@@ -57,7 +57,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (pdis < brushRadius) {
             let dens = max(0.0, (brushRadius - pdis * 0.5) / brushRadius);
             let nv = noise2D(uv * 50.0 + vec2<f32>(sin(uniforms.u_Time * 5.0), cos(uniforms.u_Time * 15.0)));
-            let amount = 0.0006 * uniforms.u_BrushStrength * dens * 200.0;
+            let amount = 0.0006 * uniforms.u_BrushStrength * dens * 50.0;
             if (uniforms.u_BrushOperation == 0) {
                 addLava = amount * (0.5 + 0.5 * nv);
                 if (addLava > 0.0 && cur.r + addLava > 0.001) {
@@ -71,7 +71,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    // Persistent lava sources
+    // Persistent lava sources — additive with low emission constant.
+    // GPU Jacobi can only propagate 16 cells/frame, so emission must be low enough
+    // that accumulation at the source stays reasonable (~10-80 peak after 10s).
+    // Thin lava films are made visible via boosted opacity in the rendering material.
     for (var i: i32 = 0; i < uniforms.u_SourceCount; i++) {
         let srcPos = sources.positions[i];
         let pdis = distance(srcPos, uv);
@@ -79,7 +82,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (pdis < srcRadius) {
             let dens = (srcRadius - pdis) / srcRadius;
             let nv = noise2D(uv * 100.0 + vec2<f32>(sin(uniforms.u_Time * 3.0), cos(uniforms.u_Time * 7.0)));
-            let sourceAmount = 0.0006 * sources.strengths[i] * dens * 200.0 * (0.5 + 0.5 * nv);
+            let sourceAmount = 0.0006 * sources.strengths[i] * dens * 50.0 * (0.5 + 0.5 * nv);
             addLava += sourceAmount;
             if (sourceAmount > 0.0) {
                 let totalLava = max(cur.r + addLava, 0.001);
@@ -88,8 +91,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
 
             // Vent area stays at near-emission temperature regardless of pool size.
-            // Cooling can't propagate back to the source — the vent continuously
-            // reheats. Full strength at center, fading at radius edge.
             let minSourceTemp = uniforms.u_EmissionTemp * 0.9;
             temperature = max(temperature, minSourceTemp * dens);
         }

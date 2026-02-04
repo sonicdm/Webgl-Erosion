@@ -296,6 +296,8 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
 
     // Channeling — controls how lava forms focused channels
     var lavaChannel = lavapara.addFolder('Channeling');
+    lavaChannel.add(controls, 'lavaFlowStrength', 0.01, 1.0).step(0.01).name('Flow Strength');
+    lavaChannel.add(controls, 'lavaFlowIterations', 1, 32).step(1).name('Flow Iterations');
     lavaChannel.add(controls, 'lavaDepthBoost', 0.0, 40.0).name('Depth Boost');
     lavaChannel.add(controls, 'lavaMomentum', 0.0, 0.95).name('Momentum');
     lavaChannel.add(controls, 'lavaNoiseResist', 1.0, 5.0).name('Noise Power');
@@ -319,7 +321,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         applyLavaTestPreset: () => {
             controls.lavaViscosityScale = 5.0;
             controls.lavaYieldStress = 0.2;
-            controls.lavaCoolingRate = 0.0008;
+            controls.lavaCoolingRate = 0.002;
             controls.lavaProportionalCooling = 0.0004;
             controls.lavaSolidificationThreshold = 240;
             controls.lavaRockFraction = 0.7;
@@ -340,10 +342,12 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             controls.lavaOrangeTemp = 540;
             controls.lavaYellowTemp = 780;
             controls.lavaEmissiveStrength = 1.5;
+            controls.lavaFlowStrength = 0.3;
+            controls.lavaFlowIterations = 16;
             controls.lavaDepthBoost = 20.0;
             controls.lavaMomentum = 0.7;
             controls.lavaNoiseResist = 3.0;
-            controls.lavaCoolificationRate = 0.02;
+            controls.lavaCoolificationRate = 0.01;
             controls.lavaBasaltificationRate = 0.01;
             controls.lavaReMeltRate = 0.05;
             controls.lavaBasaltMeltRate = 0.005;

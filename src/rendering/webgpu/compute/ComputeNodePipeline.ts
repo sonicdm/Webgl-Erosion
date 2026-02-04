@@ -2137,7 +2137,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 createSampledTextureLayoutEntry(6),   // readCoolLava
                 createSampledTextureLayoutEntry(7),   // readBasalt
                 createStorageTextureLayoutEntry(8, 'write-only'),  // writeLavaFlux2
-                createUniformBufferLayoutEntry(9),    // uniforms
+                createSampledTextureLayoutEntry(9),   // readLavaFlux2
+                createUniformBufferLayoutEntry(10),   // uniforms
             ]);
             this.lavaFluxPipeline = this.createComputePipeline(
                 lavaFluxShader, 'main', this.lavaFluxBindGroupLayout
@@ -2170,7 +2171,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             createSampledTextureBinding(texturePool.readCoolLavaTexture, 6),
             createSampledTextureBinding(texturePool.readBasaltTexture, 7),
             createStorageTextureBinding(texturePool.writeLavaFlux2Texture, 8),
-            { binding: 9, resource: { buffer: uniformBuffer } },
+            createSampledTextureBinding(texturePool.readLavaFlux2Texture, 9),
+            { binding: 10, resource: { buffer: uniformBuffer } },
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
@@ -2194,7 +2196,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pipeLen: number;
             timestep: number;
             pipeArea: number;
-            velAdvMag: number;
+            momentum: number;
         }
     ): void {
         const device = this.device;
@@ -2217,7 +2219,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         const uniformData = new Float32Array([
             uniforms.simRes, uniforms.pipeLen, uniforms.timestep, uniforms.pipeArea,
-            uniforms.velAdvMag, 0.0, 0.0, 0.0,
+            uniforms.momentum, 0.0, 0.0, 0.0,
         ]);
 
         let uniformBuffer = this.uniformBuffers.get('lavaHeightVel');
@@ -2404,12 +2406,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (!this.lavaCoolingPipeline) {
 
             this.lavaCoolingBindGroupLayout = this.createBindGroupLayout([
-                createSampledTextureLayoutEntry(0),
-                createSampledTextureLayoutEntry(1),
-                createStorageTextureLayoutEntry(2, 'write-only'),
-                createStorageTextureLayoutEntry(3, 'write-only'),
-                createUniformBufferLayoutEntry(4),
-                createSampledTextureLayoutEntry(5),
+                createSampledTextureLayoutEntry(0),   // readLava
+                createSampledTextureLayoutEntry(1),   // readTerrain
+                createStorageTextureLayoutEntry(2, 'write-only'),  // writeLava
+                createStorageTextureLayoutEntry(3, 'write-only'),  // writeTerrain
+                createUniformBufferLayoutEntry(4),    // uniforms
+                createSampledTextureLayoutEntry(5),   // readLavaVel
+                createSampledTextureLayoutEntry(6),   // readCoolLava
+                createSampledTextureLayoutEntry(7),   // readBasalt
             ]);
             this.lavaCoolingPipeline = this.createComputePipeline(
                 lavaCoolingShader, 'main', this.lavaCoolingBindGroupLayout
@@ -2439,6 +2443,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             createStorageTextureBinding(texturePool.writeTerrainTexture, 3),
             { binding: 4, resource: { buffer: uniformBuffer } },
             createSampledTextureBinding(texturePool.readLavaVelTexture, 5),
+            createSampledTextureBinding(texturePool.readCoolLavaTexture, 6),
+            createSampledTextureBinding(texturePool.readBasaltTexture, 7),
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);

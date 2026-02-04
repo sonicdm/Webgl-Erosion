@@ -19,6 +19,8 @@ export interface PoolSyncTextures {
   sedimentBlendMap: DataTexture;
   lavaMap: DataTexture;
   lavaVelocityMap: DataTexture;
+  coolLavaMap: DataTexture;
+  basaltMap: DataTexture;
 }
 
 /**
@@ -50,6 +52,8 @@ export function createPoolSyncTextures(simres: number): PoolSyncTextures {
     sedimentBlendMap: createFloatTexture(),
     lavaMap: createFloatTexture(),
     lavaVelocityMap: createFloatTexture(),
+    coolLavaMap: createFloatTexture(),
+    basaltMap: createFloatTexture(),
   };
 }
 
@@ -87,6 +91,8 @@ export function copyPoolToThreeTextures(
     [pool.readSedimentBlendTexture, sync.sedimentBlendMap],
     [pool.readLavaTexture, sync.lavaMap],
     [pool.readLavaVelTexture, sync.lavaVelocityMap],
+    [pool.readCoolLavaTexture, sync.coolLavaMap],
+    [pool.readBasaltTexture, sync.basaltMap],
   ];
 
   const copySize: GPUExtent3D = [simres, simres, 1];

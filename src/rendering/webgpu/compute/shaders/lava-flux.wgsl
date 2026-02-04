@@ -7,6 +7,7 @@
 @group(0) @binding(6) var readCoolLava: texture_2d<f32>;
 @group(0) @binding(7) var readBasalt: texture_2d<f32>;
 @group(0) @binding(8) var writeLavaFlux2: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(9) var readLavaFlux2: texture_2d<f32>;
 
 struct Uniforms {
     u_SimRes: f32,
@@ -23,23 +24,19 @@ struct Uniforms {
     _pad1: f32,
 };
 
-@group(0) @binding(9) var<uniform> uniforms: Uniforms;
+@group(0) @binding(10) var<uniform> uniforms: Uniforms;
 
 // 8-neighbor direction offsets: N, NE, E, SE, S, SW, W, NW
 const dirDx = array<i32, 8>(0, 1, 1, 1, 0, -1, -1, -1);
 const dirDy = array<i32, 8>(1, 1, 0, -1, -1, -1, 0, 1);
 // Distance scaling: cardinal = 1.0, diagonal = 1/sqrt(2)
 const dirDist = array<f32, 8>(1.0, 0.7071, 1.0, 0.7071, 1.0, 0.7071, 1.0, 0.7071);
-// Normalized direction vectors for momentum dot product
-const dirNx = array<f32, 8>(0.0, 0.7071, 1.0, 0.7071, 0.0, -0.7071, -1.0, -0.7071);
-const dirNy = array<f32, 8>(1.0, 0.7071, 0.0, -0.7071, -1.0, -0.7071, 0.0, 0.7071);
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let texture_size = textureDimensions(readTerrain);
     let uv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(texture_size);
     let div = 1.0 / uniforms.u_SimRes;
-    let g = 0.80;
     let coord = vec2<i32>(global_id.xy);
 
     let curTerrain = textureLoad(readTerrain, coord, 0);
@@ -58,94 +55,86 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // Hot-over-cool: only mobile (hot) lava can flow out
-    let mobileFrac = clamp(temperature * 2.0, 0.0, 1.0);
-    let mobileLava = lavaHeight * mobileFrac;
-
     // Surface height = terrain + basalt + coolLava + water + lava
     let surfaceHeight = curTerrain.r + curBasalt + curCoolLava + curTerrain.g + lavaHeight;
 
-    // Viscosity factor (Stokes regime)
-    let viscFactor = 1.0 / (1.0 + viscosity_val * uniforms.u_ViscosityScale);
+    // Gravity constant (same as water)
+    let g = 0.80;
+    let pipeLen = uniforms.u_PipeLen;
+    let pipeArea = uniforms.u_PipeArea;
+    let dt = uniforms.u_timestep;
 
-    let flowCoeff = g * uniforms.u_PipeArea / uniforms.u_PipeLen;
+    // Viscosity damping: scales the gravity-driven acceleration term only.
+    // Existing flux momentum persists — viscosity slows how fast NEW flow builds.
+    let viscDamping = 1.0 / (1.0 + viscosity_val * uniforms.u_ViscosityScale);
 
-    // Read current velocity for momentum bias
-    let vel = textureLoad(readLavaVel, coord, 0).xy;
-    let vMag = length(vel);
-    let momInfluence = uniforms.u_MomentumStrength * clamp(vMag * 3.0, 0.0, 1.0);
-
-    // Yield stress (Bingham plastic)
+    // Yield stress: minimum dh required to flow (Bingham plastic)
     let coolingYield = max(0.0, viscosity_val - 0.6);
     let yieldThreshold = uniforms.u_YieldStress * coolingYield;
 
-    // Crust barrier: hot lava overrides crust
-    let thermalOverride = clamp(temperature * 2.0 - 0.5, 0.0, 1.0);
-    let effectiveCrustStr = uniforms.u_CrustStrength * (1.0 - thermalOverride);
+    // Read previous flux values (flux persists across frames — this is the key difference
+    // from the old model. Flux accumulates like momentum, enabling proper pipe flow.)
+    let prevFlux1 = textureLoad(readLavaFlux, coord, 0);
+    let prevFlux2 = textureLoad(readLavaFlux2, coord, 0);
+    var prevFlux: array<f32, 8>;
+    prevFlux[0] = prevFlux1.r; // N
+    prevFlux[1] = prevFlux1.g; // NE
+    prevFlux[2] = prevFlux1.b; // E
+    prevFlux[3] = prevFlux1.a; // SE
+    prevFlux[4] = prevFlux2.r; // S
+    prevFlux[5] = prevFlux2.g; // SW
+    prevFlux[6] = prevFlux2.b; // W
+    prevFlux[7] = prevFlux2.a; // NW
 
-    // Compute flux for all 8 directions
+    // Gentle viscous drag: gradually decelerates flow at high viscosity.
+    // Hot lava (visc≈0): drag≈1.0, no friction. Cool lava (visc≈4): drag≈0.96, slow deceleration.
+    // Much gentler than the old model which destroyed 77% of flux per frame.
+    let viscDrag = 1.0 - 0.01 * viscosity_val;
+
+    // Compute new flux per direction using the pipe model:
+    // f_new = max(0, f_old * drag + dt * g * A * dh / L * viscDamping)
+    // Viscosity damps ACCELERATION only. Existing flux persists with gentle drag.
     var flux: array<f32, 8>;
+    var totalFlux: f32 = 0.0;
 
     for (var d: i32 = 0; d < 8; d++) {
         let nx = coord.x + dirDx[d];
         let ny = coord.y + dirDy[d];
-        let nCoord = vec2<i32>(nx, ny);
 
-        // Boundary check
         if (nx < 0 || nx >= i32(uniforms.u_SimRes) || ny < 0 || ny >= i32(uniforms.u_SimRes)) {
             flux[d] = 0.0;
             continue;
         }
 
+        let nCoord = vec2<i32>(nx, ny);
         let nTerrain = textureLoad(readTerrain, nCoord, 0);
         let nLava = textureLoad(readLava, nCoord, 0);
         let nCoolLava = textureLoad(readCoolLava, nCoord, 0).r;
         let nBasalt = textureLoad(readBasalt, nCoord, 0).r;
 
-        // Neighbor surface height includes all layers
         let nSurfaceHeight = nTerrain.r + nBasalt + nCoolLava + nTerrain.g + nLava.r;
-
         let dh = surfaceHeight - nSurfaceHeight;
-        if (dh <= 0.0) {
-            flux[d] = 0.0;
-            continue;
-        }
 
-        // DEPTH BOOST: Exponential preference for deeper channels
-        let terrainDiff = clamp(curTerrain.r - nTerrain.r, -0.1, 0.1);
-        let depthBoost = pow(2.0, terrainDiff * uniforms.u_DepthBoostStrength);
+        // Yield stress gate: no flow if dh is below threshold
+        let effectiveDh = select(dh, 0.0, dh < yieldThreshold);
 
-        // NOISE RESISTANCE: Cubed noise for extreme selectivity
-        let noiseVal = textureLoad(readNoise, nCoord, 0).r;
-        let noiseResist = pow(noiseVal, uniforms.u_NoiseResistPower);
-
-        // MOMENTUM BIAS: Velocity alignment preference
-        var momBias: f32 = 1.0;
-        if (vMag > 0.001) {
-            let dotProd = (vel.x * dirNx[d] + vel.y * dirNy[d]) / vMag;
-            momBias = max(0.05, 1.0 + dotProd * momInfluence);
-        }
-
-        // Yield + crust barrier
-        let nBarrier = yieldThreshold + nLava.a * effectiveCrustStr;
-        if (abs(dh) < nBarrier) {
-            flux[d] = 0.0;
-            continue;
-        }
-
-        // Combined flux: dh * viscosity * gravity * distance * channeling factors
-        flux[d] = max(0.0, flowCoeff * dh * viscFactor * dirDist[d] * momBias * depthBoost * noiseResist);
-    }
-
-    // Conservation factor — only mobile (hot) lava can flow out
-    var totalFlux: f32 = 0.0;
-    for (var d: i32 = 0; d < 8; d++) {
+        // Pipe model: accumulate flux with viscosity-damped acceleration
+        // Existing flux persists (with gentle drag), new acceleration is scaled by viscosity
+        let effectivePipeLen = pipeLen / dirDist[d];
+        let accel = dt * g * pipeArea * effectiveDh / effectivePipeLen;
+        flux[d] = max(0.0, prevFlux[d] * viscDrag + accel * viscDamping);
         totalFlux += flux[d];
     }
-    let lavaOut = uniforms.u_timestep * totalFlux;
-    let k = min(1.0, (mobileLava * uniforms.u_PipeLen * uniforms.u_PipeLen) / max(lavaOut, 0.0001));
-    for (var d: i32 = 0; d < 8; d++) {
-        flux[d] *= k;
+
+    // Conservation: scale fluxes so total outflow doesn't exceed available lava volume
+    // Same formula as water: k = min(1, lavaH * L² / (dt * totalFlux))
+    let maxOutflow = lavaHeight * pipeLen * pipeLen;
+    let scaledOutflow = dt * totalFlux;
+    if (scaledOutflow > 0.0) {
+        let k = min(1.0, maxOutflow / scaledOutflow);
+        for (var d: i32 = 0; d < 8; d++) {
+            flux[d] *= k;
+        }
     }
 
     // Boundary conditions

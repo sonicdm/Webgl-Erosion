@@ -20,6 +20,8 @@ struct Uniforms {
 
 @group(0) @binding(4) var<uniform> uniforms: Uniforms;
 @group(0) @binding(5) var readLavaVel: texture_2d<f32>;
+@group(0) @binding(6) var readCoolLava: texture_2d<f32>;
+@group(0) @binding(7) var readBasalt: texture_2d<f32>;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -38,6 +40,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var baseRock = terrain.a;
 
     let speed = lavaVel.b; // flow speed from velocity pass
+    let coolLavaHeight = textureLoad(readCoolLava, coord, 0).r;
+    let basaltHeight = textureLoad(readBasalt, coord, 0).r;
 
     if (lavaHeight < 0.0001) {
         textureStore(writeLava, coord, vec4<f32>(0.0, 0.0, 0.0, 0.0));
@@ -70,21 +74,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Exposure multiplier: center of flow = 1.0, fully exposed edge = 2.6
     let exposureMultiplier = 1.0 + exposedSides * 0.4;
 
-    // --- Temperature decay ---
-    // Flowing lava retains heat from shear/mixing — strongly reduce cooling when moving.
-    // At speed=1: flowCoolFactor ≈ 0.05 (95% cooling suppressed).
-    // Stalled lava (speed=0): flowCoolFactor = 1.0 (full cooling).
-    // This is the key mechanism preventing premature solidification at the flow front.
+    // --- Temperature decay (multiplicative, matching reference) ---
+    // Multiplicative cooling: T *= (1 - rate * factors). Hot lava cools slower than
+    // cool lava (proportional to T), creating smooth gradients. More physical than
+    // subtractive cooling which creates death spirals at low T.
+    //
+    // Reference: temp[i] = T * (1.0 - coolRate * flowCoolFactor * exposureMul * insulationFactor)
+    // Reference flowHeatK = 20. At speed=1: flowCoolFactor = 1/(1+20) ≈ 0.048.
+    // Flowing lava retains almost all heat — this is critical for flow distance.
     let flowCoolFactor = 1.0 / (1.0 + speed * 20.0);
 
-    // Ambient cooling: constant heat loss, scaled by lateral exposure
-    temperature -= uniforms.u_AmbientCoolingRate * flowCoolFactor * exposureMultiplier;
+    // Insulation: cool lava + basalt underneath act as thermal blanket (like lava tubes).
+    let insulationFactor = 1.0 / (1.0 + (coolLavaHeight + basaltHeight) * 5.0);
 
-    // Surface area cooling: thin lava cools faster, crust insulates.
-    // Cap the thin-lava multiplier to prevent blow-up at leading edge.
-    let surfaceAreaFactor = min(1.0 + uniforms.u_ProportionalCooling / max(lavaHeight, 0.05), 2.0);
-    let crustInsulation = 1.0 / (1.0 + crustThickness * 5.0);
-    temperature -= uniforms.u_CoolingRate * surfaceAreaFactor * crustInsulation * flowCoolFactor * exposureMultiplier;
+    // Single multiplicative cooling step (reference model)
+    temperature *= (1.0 - uniforms.u_CoolingRate * flowCoolFactor * exposureMultiplier * insulationFactor);
     temperature = max(temperature, 0.0);
 
     // --- Viscosity: base + temperature ramp ---

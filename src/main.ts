@@ -31,6 +31,7 @@ import { TerrainMaterialNode } from './rendering/webgpu/materials/TerrainMateria
 import { WaterMaterialNode } from './rendering/webgpu/materials/WaterMaterialNode';
 import { LavaMaterialNode } from './rendering/webgpu/materials/LavaMaterialNode';
 import { lavaSources } from './utils/lava-sources';
+import { initLavaDiagnostics } from './utils/lava-diagnostics';
 import { SkyMaterialNode } from './rendering/webgpu/materials/SkyMaterialNode';
 import {
   createPoolSyncTextures,
@@ -219,6 +220,8 @@ async function main() {
       sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
       lavaMap: webgpuPoolSyncTextures.lavaMap,
       lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
+      coolLavaMap: webgpuPoolSyncTextures.coolLavaMap,
+      basaltMap: webgpuPoolSyncTextures.basaltMap,
       simres,
       maxHeight: (controls?.TerrainHeight ?? 2) * 120,
     });
@@ -248,6 +251,8 @@ async function main() {
       heightmap: webgpuPoolSyncTextures.heightmap,
       lavaMap: webgpuPoolSyncTextures.lavaMap,
       lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
+      coolLavaMap: webgpuPoolSyncTextures.coolLavaMap,
+      basaltMap: webgpuPoolSyncTextures.basaltMap,
       simres,
     });
     webgpuLavaMesh = new Mesh(webgpuLavaGeometry, webgpuLavaMaterial as any);
@@ -510,6 +515,10 @@ async function main() {
             () => timer,
             () => currentBrushState
         );
+        // Wire up lava diagnostics (GPU readback)
+        if (webgpuDevice) {
+            initLavaDiagnostics(webgpuDevice, webgpuTexturePool, appContext.simulationState.simres, getControls);
+        }
     }
     // rayCast is now imported from utils/raycast.ts
 
@@ -695,6 +704,8 @@ async function main() {
                             sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
                             lavaMap: webgpuPoolSyncTextures.lavaMap,
                             lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
+                            coolLavaMap: webgpuPoolSyncTextures.coolLavaMap,
+                            basaltMap: webgpuPoolSyncTextures.basaltMap,
                             simres: newRes,
                             maxHeight: (controls?.TerrainHeight ?? 2) * 120,
                         });
@@ -715,6 +726,8 @@ async function main() {
                             heightmap: webgpuPoolSyncTextures.heightmap,
                             lavaMap: webgpuPoolSyncTextures.lavaMap,
                             lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
+                            coolLavaMap: webgpuPoolSyncTextures.coolLavaMap,
+                            basaltMap: webgpuPoolSyncTextures.basaltMap,
                             simres: newRes,
                         });
                         webgpuLavaMesh.material = newLavaMat as any;
@@ -1200,6 +1213,7 @@ async function main() {
             yellowTemp: (controls.lavaYellowTemp ?? 780) / 1200,
             emissiveStrength: controls.lavaEmissiveStrength ?? 0.35,
             time: timer,
+            debugMode: controls.TerrainDebug,
           });
         }
         // Update sky sun position

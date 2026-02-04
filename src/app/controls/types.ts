@@ -138,6 +138,8 @@ export interface IAppControls {
     lavaMaxErosionPerStep: number;
     lavaErosionSpeedClamp: number;
     // Lava channeling mechanics
+    lavaFlowStrength: number;
+    lavaFlowIterations: number;
     lavaDepthBoost: number;
     lavaMomentum: number;
     lavaNoiseResist: number;

@@ -38,49 +38,62 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var coolLava = curCoolLava;
     var basalt = curBasalt;
 
-    // Noise-modulated crusting rate (some areas solidify faster)
-    let crustMod = 1.0 + (noise - 1.0) * uniforms.u_NoiseModulation;
+    // Speed gate: flowing lava strongly resists solidification.
+    // At speed=0.1 → gate=0.17, at speed=0.5 → gate=0.04 (nearly immune)
+    let speedGate = 1.0 / (1.0 + speed * 50.0);
 
-    // Speed gate: flowing lava resists solidification
-    let speedGate = 1.0 / (1.0 + speed * 10.0);
-
-    // Phase 1: Mobile → Cool Lava (when temperature drops below threshold)
-    if (temperature < uniforms.u_CoolThreshold && mobileLava > 0.0001) {
-        let coolAmount = min(mobileLava, uniforms.u_CoolificationRate * crustMod * speedGate);
-        mobileLava -= coolAmount;
-        coolLava += coolAmount;
+    // Phase 1: Crusting — mobile lava → cool lava.
+    // Only crusts below CoolThreshold temperature. Lava above threshold stays fully mobile.
+    // This prevents the "dead zone" where warm lava is too viscous to flow but too warm to solidify.
+    if (mobileLava > 0.0001 && temperature < uniforms.u_CoolThreshold) {
+        let crustFrac = (uniforms.u_CoolThreshold - temperature) / uniforms.u_CoolThreshold;
+        let crustAmount = mobileLava * crustFrac * uniforms.u_CoolificationRate * speedGate * noise;
+        let capped = min(crustAmount, mobileLava);
+        if (capped > 0.00001) {
+            coolLava += capped;
+            mobileLava -= capped;
+        }
     }
 
-    // Phase 2: Cool Lava → Basalt (when fully frozen)
-    if (temperature < uniforms.u_BasaltThreshold && coolLava > 0.0001) {
-        let basaltAmount = min(coolLava, uniforms.u_BasaltificationRate * crustMod);
-        coolLava -= basaltAmount;
-        basalt += basaltAmount;
+    // Phase 2: Compaction — cool lava → basalt when no active hot flow (T < 0.1)
+    if (coolLava > 0.01 && temperature < 0.1) {
+        let compactRate = uniforms.u_BasaltificationRate;
+        let compactAmount = min(coolLava * compactRate, coolLava);
+        coolLava -= compactAmount;
+        basalt += compactAmount;
     }
 
     // Phase 3: Re-melting (hot lava can melt cool lava and basalt)
-    // Hysteresis: need T > CoolThreshold + 0.1 to re-melt
-    if (temperature > uniforms.u_CoolThreshold + 0.1 && mobileLava > 0.01) {
-        let thermalPower = (temperature - 0.5) * 2.0; // 0 at T=0.5, 1 at T=1.0
+    // Low mobileLava threshold: even thin incoming hot lava triggers re-melt
+    if (temperature > 0.3 && mobileLava > 0.0001) {
+        let tempExcess = temperature - 0.3;
+        let baseMeltRate = tempExcess * (1.0 + speed * 2.0) * min(mobileLava * 0.5, 3.0) * uniforms.u_ReMeltRate;
 
-        // Cool lava melts easily (lowest resistance)
-        if (coolLava > 0.0001) {
-            let remeltAmount = min(coolLava, uniforms.u_ReMeltRate * thermalPower);
-            coolLava -= remeltAmount;
-            mobileLava += remeltAmount;
+        // Cool lava melts easily (recently crusted)
+        if (coolLava > 0.001) {
+            let meltAmount = min(coolLava * baseMeltRate, coolLava * 0.08);
+            if (meltAmount > 0.00001) {
+                coolLava -= meltAmount;
+                mobileLava += meltAmount;
+                // Heat loss from melting
+                temperature *= (1.0 - meltAmount / max(mobileLava, 0.01) * 0.2);
+            }
         }
 
-        // Basalt melts at moderate rate (harder than terrain, easier than rock)
-        if (basalt > 0.0001 && temperature > 0.8) {
-            let basaltMeltAmount = min(basalt, uniforms.u_BasaltMeltRate * thermalPower);
-            basalt -= basaltMeltAmount;
-            mobileLava += basaltMeltAmount;
+        // Basalt melts at ~40% the rate (solid but igneous — harder to melt)
+        if (basalt > 0.001 && coolLava < 0.05 && temperature > 0.5) {
+            let basaltRate = baseMeltRate * 0.4;
+            let meltAmount = min(basalt * basaltRate, basalt * 0.03);
+            if (meltAmount > 0.00001) {
+                basalt -= meltAmount;
+                mobileLava += meltAmount;
+                temperature *= (1.0 - meltAmount / max(mobileLava, 0.01) * 0.4);
+            }
         }
     }
 
     // Clean up: negligible mobile lava remnants
     if (mobileLava < 0.001 && temperature < 0.1) {
-        // Convert remaining thin film to cool lava instead of discarding
         coolLava += mobileLava;
         mobileLava = 0.0;
         temperature = 0.0;

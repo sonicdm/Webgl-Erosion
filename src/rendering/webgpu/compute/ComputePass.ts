@@ -28,6 +28,19 @@ export class ComputePass {
             code: shaderCode,
         });
 
+        // Check for WGSL compile errors asynchronously
+        shaderModule.getCompilationInfo().then((info) => {
+            for (const msg of info.messages) {
+                const prefix = `[WGSL ${msg.type}]`;
+                const loc = msg.lineNum > 0 ? ` (line ${msg.lineNum}:${msg.linePos})` : '';
+                if (msg.type === 'error') {
+                    console.error(`${prefix}${loc} ${msg.message}`);
+                } else {
+                    console.warn(`${prefix}${loc} ${msg.message}`);
+                }
+            }
+        });
+
         const layout = bindGroupLayout
             ? this.device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] })
             : 'auto';

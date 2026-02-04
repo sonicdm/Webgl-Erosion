@@ -3,6 +3,7 @@ export interface ControlsConfig {
     keys: {
         brushActivate: string;      // Key OR mouse button ('LEFT', 'MIDDLE', 'RIGHT') to hold for brush painting
         permanentWaterSource: string; // Key to toggle permanent water source
+        permanentLavaSource: string; // Key to toggle permanent lava source
         removePermanentSource: string; // Key to remove all permanent sources
     };
     mouse: {
@@ -47,6 +48,7 @@ export const defaultControlsConfig: ControlsConfig = {
     keys: {
         brushActivate: 'LEFT',              // Keyboard key OR mouse button ('LEFT', 'MIDDLE', 'RIGHT') for brush
         permanentWaterSource: 'r',       // Toggle permanent water source at cursor
+        permanentLavaSource: 't',        // Toggle permanent lava source at cursor
         removePermanentSource: 'p',      // Remove all permanent sources
     },
     mouse: {
@@ -90,6 +92,7 @@ export function getKeyAction(key: string, config: ControlsConfig): string | null
     if (key !== 'LEFT' && key !== 'MIDDLE' && key !== 'RIGHT') {
         if (key === config.keys.brushActivate) return 'brushActivate';
         if (key === config.keys.permanentWaterSource) return 'permanentWaterSource';
+        if (key === config.keys.permanentLavaSource) return 'permanentLavaSource';
         if (key === config.keys.removePermanentSource) return 'removePermanentSource';
     }
     return null;

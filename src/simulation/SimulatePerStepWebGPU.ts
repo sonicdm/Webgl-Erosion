@@ -191,7 +191,10 @@ export function SimulatePerStepWebGPU(
             }
         }
 
-        // 9a. Lava Source Injection
+        // 9a. Source injection — once per frame, then multiple flow iterations drain it.
+        // Interleaving (emit inside loop) was counterproductive: the center got refilled
+        // each sub-step, preventing drainage. Better: emit once, then let N iterations
+        // propagate the lava outward without interference.
         computePipeline.lavaSourcePass(texturePool, {
             simRes: simres,
             brushSize: controls.brushSize,
@@ -209,32 +212,37 @@ export function SimulatePerStepWebGPU(
         });
         texturePool.swapLavaTextures();
 
-        // 9b. Lava Flux (8-neighbor with channeling mechanics)
-        computePipeline.lavaFluxPass(texturePool, {
-            simRes: simres,
-            pipeLen: controls.pipelen,
-            timestep: controls.timestep,
-            pipeArea: controls.pipeAra,
-            viscosityScale: controls.lavaViscosityScale,
-            yieldStress: controls.lavaYieldStress,
-            crustStrength: controls.lavaCrustStrength,
-            depthBoostStrength: controls.lavaDepthBoost,
-            momentumStrength: controls.lavaMomentum,
-            noiseResistPower: controls.lavaNoiseResist,
-        });
-        texturePool.swapLavaFluxTextures();
-        texturePool.swapLavaFlux2Textures();
+        // 9b/9c. Flow sub-iterations (flux + height/velocity).
+        // Each iteration propagates lava one cell outward. More iterations = wider
+        // propagation per frame, reducing accumulation at sources.
+        const flowIters = Math.max(1, Math.round(controls.lavaFlowIterations));
 
-        // 9c. Lava Height/Velocity Update (stores deltaH in vel.w for thermal transfer)
-        computePipeline.lavaHeightVelPass(texturePool, {
-            simRes: simres,
-            pipeLen: controls.pipelen,
-            timestep: controls.timestep,
-            pipeArea: controls.pipeAra,
-            velAdvMag: controls.VelocityAdvectionMag * 0.5,
-        });
-        texturePool.swapLavaTextures();
-        texturePool.swapLavaVelTextures();
+        for (let iter = 0; iter < flowIters; iter++) {
+            computePipeline.lavaFluxPass(texturePool, {
+                simRes: simres,
+                pipeLen: controls.pipelen,
+                timestep: controls.timestep,
+                pipeArea: controls.lavaFlowStrength,
+                viscosityScale: controls.lavaViscosityScale,
+                yieldStress: controls.lavaYieldStress,
+                crustStrength: controls.lavaCrustStrength,
+                depthBoostStrength: controls.lavaDepthBoost,
+                momentumStrength: controls.lavaMomentum,
+                noiseResistPower: controls.lavaNoiseResist,
+            });
+            texturePool.swapLavaFluxTextures();
+            texturePool.swapLavaFlux2Textures();
+
+            computePipeline.lavaHeightVelPass(texturePool, {
+                simRes: simres,
+                pipeLen: controls.pipelen,
+                timestep: controls.timestep,
+                pipeArea: controls.pipeAra,
+                momentum: controls.lavaMomentum,
+            });
+            texturePool.swapLavaTextures();
+            texturePool.swapLavaVelTextures();
+        }
 
         // 9d. Lava Thermal Transfer (heat conduction between lava cells, re-mobilization)
         computePipeline.lavaThermalTransferPass(texturePool, {
@@ -276,7 +284,7 @@ export function SimulatePerStepWebGPU(
         // 9g. Lava Solidification (three-layer: mobile → cool → basalt)
         computePipeline.lavaSolidificationPass(texturePool, {
             simRes: simres,
-            coolThreshold: 0.5,
+            coolThreshold: 0.2,
             basaltThreshold: 0.0,
             coolificationRate: controls.lavaCoolificationRate,
             basaltificationRate: controls.lavaBasaltificationRate,

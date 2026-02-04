@@ -9,6 +9,10 @@ export interface LavaMaterialNodeInputs {
     lavaMap?: Texture;
     /** Lava velocity map texture (R=velX, G=velY, B=speed, A=deltaH) */
     lavaVelocityMap?: Texture;
+    /** Cool lava map texture (R=coolLavaHeight) */
+    coolLavaMap?: Texture;
+    /** Basalt map texture (R=basaltHeight) */
+    basaltMap?: Texture;
     /** Simulation resolution */
     simres?: number;
     /** Light direction */
@@ -36,6 +40,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
     private yellowTempUniform: any;
     private emissiveStrengthUniform: any;
     private timeUniform: any;
+    private debugModeUniform: any;
     private inputs: LavaMaterialNodeInputs;
 
     constructor(inputs: LavaMaterialNodeInputs = {}) {
@@ -51,6 +56,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         this.yellowTempUniform = uniform(inputs.yellowTemp ?? 0.65);
         this.emissiveStrengthUniform = uniform(inputs.emissiveStrength ?? 0.35);
         this.timeUniform = uniform(0.0);
+        this.debugModeUniform = uniform(0);
 
         this.transparent = true;
         this.depthWrite = true;
@@ -72,6 +78,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         yellowTemp?: number;
         emissiveStrength?: number;
         time?: number;
+        debugMode?: number;
     }): void {
         if (params.lightDir !== undefined) {
             this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
@@ -87,6 +94,9 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         }
         if (params.time !== undefined) {
             this.timeUniform.value = params.time;
+        }
+        if (params.debugMode !== undefined) {
+            this.debugModeUniform.value = params.debugMode;
         }
     }
 
@@ -108,9 +118,12 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const temperature = lava.y;
         const crustThickness = lava.w;
 
-        // Vertex displacement: terrain + full lava height.
-        // Lava is a volume sitting on terrain — the mesh represents the lava surface.
-        const totalHeight = terrainHeight.add(lavaHeight);
+        // Sample coolLava and basalt layers for surface height stacking
+        const coolLavaHeight = inputs.coolLavaMap ? texture(inputs.coolLavaMap, safeUv).x : float(0);
+        const basaltHeight = inputs.basaltMap ? texture(inputs.basaltMap, safeUv).x : float(0);
+
+        // Vertex displacement: terrain + basalt + coolLava + lava (full surface stack)
+        const totalHeight = terrainHeight.add(basaltHeight).add(coolLavaHeight).add(lavaHeight);
         const displacementY = totalHeight.div(this.simresUniform).add(float(0.0002));
         this.positionNode = positionLocal.add(normalLocal.mul(displacementY));
 
@@ -124,10 +137,19 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         const lavaR = texture(inputs.lavaMap, safeUv.add(vec2(eps, 0)));
         const lavaD = texture(inputs.lavaMap, safeUv.add(vec2(0, eps.negate())));
         const lavaU = texture(inputs.lavaMap, safeUv.add(vec2(0, eps)));
-        const hL = hmL.x.add(lavaL.x);
-        const hR = hmR.x.add(lavaR.x);
-        const hD = hmD.x.add(lavaD.x);
-        const hU = hmU.x.add(lavaU.x);
+        // Include basalt + coolLava in normal estimation
+        const clL = inputs.coolLavaMap ? texture(inputs.coolLavaMap, safeUv.add(vec2(eps.negate(), 0))).x : float(0);
+        const clR = inputs.coolLavaMap ? texture(inputs.coolLavaMap, safeUv.add(vec2(eps, 0))).x : float(0);
+        const clD = inputs.coolLavaMap ? texture(inputs.coolLavaMap, safeUv.add(vec2(0, eps.negate()))).x : float(0);
+        const clU = inputs.coolLavaMap ? texture(inputs.coolLavaMap, safeUv.add(vec2(0, eps))).x : float(0);
+        const bL = inputs.basaltMap ? texture(inputs.basaltMap, safeUv.add(vec2(eps.negate(), 0))).x : float(0);
+        const bR = inputs.basaltMap ? texture(inputs.basaltMap, safeUv.add(vec2(eps, 0))).x : float(0);
+        const bD = inputs.basaltMap ? texture(inputs.basaltMap, safeUv.add(vec2(0, eps.negate()))).x : float(0);
+        const bU = inputs.basaltMap ? texture(inputs.basaltMap, safeUv.add(vec2(0, eps))).x : float(0);
+        const hL = hmL.x.add(bL).add(clL).add(lavaL.x);
+        const hR = hmR.x.add(bR).add(clR).add(lavaR.x);
+        const hD = hmD.x.add(bD).add(clD).add(lavaD.x);
+        const hU = hmU.x.add(bU).add(clU).add(lavaU.x);
         const dhdx = hR.sub(hL).mul(0.5);
         const dhdy = hU.sub(hD).mul(0.5);
         const surfaceNormal = normalize(vec3(dhdx.negate(), float(1), dhdy.negate()));
@@ -189,7 +211,7 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         baseColor = mix(baseColor, colYellow, t4);
 
         // --- Crust darkening ---
-        const crustFactor = clamp(crustThickness.mul(8), 0, 1);
+        const crustFactor = clamp(crustThickness.mul(20), 0, 1);
         const crustMeltthrough = smoothstep(float(0.5), float(0.8), T);
         const crustDarkening = crustFactor.mul(float(1).sub(crustMeltthrough));
         const crustColor = vec3(0.06, 0.05, 0.04);
@@ -256,8 +278,17 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
             finalColor = finalColor.add(vec3(heatGlow, heatGlow.mul(0.3), float(0)));
         }
 
-        // --- Opacity: solid where there's lava, fades at thin edges ---
-        const opacity = clamp(lavaHeight.mul(float(500)).div(this.simresUniform), 0, 1);
+        // --- Opacity: visible where mobile lava or cool lava exists ---
+        // Cool lava is still part of the lava system (can re-melt).
+        // Basalt is permanent and rendered by the terrain shader instead.
+        const lavaPresence = lavaHeight.add(coolLavaHeight);
+        // High multiplier (5000) makes thin lava films visible. With GPU Jacobi's low
+        // emission rate (K=5), average lava cell height is ~0.1-0.4 — at the old 500x
+        // multiplier these were nearly invisible. 5000x gives opacity ~0.5 at h=0.1.
+        const baseOpacity = clamp(lavaPresence.mul(float(5000)).div(this.simresUniform), 0, 1);
+        // When any debug view is active, hide the lava material so terrain debug views show through
+        const dbg = this.debugModeUniform;
+        const opacity = dbg.equal(0).select(baseOpacity, float(0));
 
         this.colorNode = finalColor;
         this.opacityNode = opacity;
