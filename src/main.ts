@@ -26,7 +26,7 @@ import { ComputeNodePipeline } from './rendering/webgpu/compute/ComputeNodePipel
 import { TerrainGeneratorCompute } from './rendering/webgpu/compute/TerrainGeneratorCompute';
 import { WebGPUTexturePool } from './simulation/WebGPUTexturePool';
 import { WebGPUSimulationRunner } from './app/runtime/WebGPUSimulationRunner';
-import { Scene, Mesh, PlaneGeometry, SphereGeometry } from 'three';
+import { Scene, Mesh, PlaneGeometry, SphereGeometry, DirectionalLight, AmbientLight, Color, MathUtils } from 'three';
 import { TerrainMaterialNode } from './rendering/webgpu/materials/TerrainMaterialNode';
 import { WaterMaterialNode } from './rendering/webgpu/materials/WaterMaterialNode';
 import { LavaMaterialNode } from './rendering/webgpu/materials/LavaMaterialNode';
@@ -196,6 +196,17 @@ async function main() {
     webgpuScene = new Scene();
     webgpuRendererWrapper.setClearColor(0, 0, 0, 1);
     webgpuRendererWrapper.setSize(window.innerWidth, window.innerHeight);
+
+    // Scene lights for PBR materials (terrain uses MeshStandardNodeMaterial)
+    // Sun color shifts warm at low elevation angles (sunset/sunrise) and
+    // stays slightly warm-white at high elevation (noon).
+    const directionalLight = new DirectionalLight(0xffffff, 2.5);
+    directionalLight.position.set(0.4, 0.8, 0.0);
+    webgpuScene.add(directionalLight);
+    const ambientLight = new AmbientLight(0xffffff, 1.0);
+    webgpuScene.add(ambientLight);
+    (webgpuScene as any)._directionalLight = directionalLight;
+    (webgpuScene as any)._ambientLight = ambientLight;
 
     // Pool-sync textures: Three.js DataTextures (rgba32float) that we copy from pool each frame
     const simres = appContext.simulationState.simres;
@@ -1178,12 +1189,46 @@ async function main() {
             debugMode: controls.TerrainDebug,
             showFlowTrace: controls.ShowFlowTrace,
             showSedimentTrace: controls.SedimentTrace,
-            lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
             grassLine: controls.GrassLine,
             rockLine: controls.RockLine,
             snowLine: controls.SnowLine,
             slopeRockAmount: controls.SlopeRockAmount,
           });
+          // Update scene directional light from GUI controls (drives PBR terrain lighting)
+          // Sun color based on elevation: low angle → warm orange/red, high angle → slightly warm white
+          const sceneLight = (webgpuScene as any)?._directionalLight as DirectionalLight | undefined;
+          const sceneAmbient = (webgpuScene as any)?._ambientLight as AmbientLight | undefined;
+          if (sceneLight) {
+            const lx = controls.lightPosX ?? 0.4;
+            const ly = controls.lightPosY ?? 0.8;
+            const lz = controls.lightPosZ ?? 0.0;
+            sceneLight.position.set(lx, ly, lz);
+
+            // Elevation: Y component relative to length of (X,Y,Z) vector
+            const mag = Math.sqrt(lx * lx + ly * ly + lz * lz) || 1;
+            const elevation = Math.max(ly / mag, 0); // 0 = horizon, 1 = zenith
+
+            // Noon (elevation ~1): warm white (1.0, 0.97, 0.92)
+            // Sunset (elevation ~0): deep orange (1.0, 0.45, 0.15)
+            const t = MathUtils.smoothstep(elevation, 0.0, 0.6);
+            const sunR = 1.0;
+            const sunG = MathUtils.lerp(0.45, 0.97, t);
+            const sunB = MathUtils.lerp(0.15, 0.92, t);
+            sceneLight.color.setRGB(sunR, sunG, sunB);
+
+            // Intensity: compensate for PBR 1/PI diffuse factor (~3x manual Lambert)
+            // Sunset dims to ~1.2, noon peaks at ~2.5
+            sceneLight.intensity = MathUtils.lerp(1.2, 2.5, t);
+
+            // Ambient fills shadows so they aren't pitch-black
+            // Noon: cool blue-grey sky fill; Sunset: warm fill
+            if (sceneAmbient) {
+              const ambR = MathUtils.lerp(0.12, 0.08, t);
+              const ambG = MathUtils.lerp(0.08, 0.09, t);
+              const ambB = MathUtils.lerp(0.05, 0.12, t);
+              sceneAmbient.color.setRGB(ambR, ambG, ambB);
+            }
+          }
           // Pass water source positions for glow indicators (Loop in shader)
           terrainMat.updateSources(waterSources.map(s => ({
             position: [s.position[0], s.position[1]] as [number, number],
