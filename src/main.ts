@@ -1173,8 +1173,6 @@ async function main() {
           );
           // Push per-frame control values to terrain material uniforms
           terrainMat.updateUniforms({
-            snowRange: controls.SnowRange,
-            forestRange: controls.ForestRange,
             terrainPalette: controls.TerrainPlatte,
             maxHeight: (controls?.TerrainHeight ?? 2) * 120,
             debugMode: controls.TerrainDebug,

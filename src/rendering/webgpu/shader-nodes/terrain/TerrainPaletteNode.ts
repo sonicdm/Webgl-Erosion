@@ -8,10 +8,6 @@ export interface TerrainPaletteInputs {
     normal: any;
     /** Rock material value from heightmap (B channel), 0-1 */
     rock: any;
-    /** Controls snow line height (GUI parameter, legacy — prefer snowLine) */
-    snowRange: any;
-    /** Controls forest/grass steepness threshold (GUI parameter, legacy — prefer slopeRockAmount) */
-    forestRange: any;
     /** Palette variant selector (0=default, 1=desert, 2=extended range) */
     terrainPalette: any;
     /** Max terrain height for normalization (terrainHeight * 120, default 240) */
@@ -37,10 +33,16 @@ export interface TerrainPaletteEvaluationInputs {
     height: number;
     normalY: number;
     rock: number;
-    snowRange: number;
-    forestRange: number;
     terrainPalette: number;
     maxHeight?: number;
+    /** Normalised height where grass starts blending in (default 0.10) */
+    grassLine?: number;
+    /** Normalised height where rock starts blending in (default 0.50) */
+    rockLine?: number;
+    /** Normalised height where snow starts blending in (default 0.70) */
+    snowLine?: number;
+    /** How aggressively slopes show rock (0-3, default 1.0) */
+    slopeRockAmount?: number;
 }
 
 // Procedural biome colors (no textures — matches THREE.Terrain color spirit)
@@ -65,7 +67,7 @@ const ROCK_LIGHT = new Color(0.35, 0.38, 0.45);
  *   0.20 – 0.55   grass dominant
  *   0.40 – 0.65   rock blends in
  *   0.65 – 0.85   rock dominant
- *   0.70 – 0.95   snow blends in (controlled by snowRange)
+ *   0.70 – 0.95   snow blends in (controlled by snowLine)
  *
  * Slope override:
  *   slope > 27 °  rock starts blending in
@@ -166,30 +168,48 @@ export class TerrainPaletteNode {
         const cosSlope = clampNumber(Math.abs(inputs.normalY));
         const slopeAngle = Math.acos(cosSlope);
 
-        // Height bands
+        const grassLineVal = inputs.grassLine ?? 0.10;
+        const rockLineVal = inputs.rockLine ?? 0.50;
+        const snowLineVal = inputs.snowLine ?? 0.70;
+        const slopeRockAmt = inputs.slopeRockAmount ?? 1.0;
+
+        // Height bands (matching GPU build() logic)
         let base = SAND_COLOR.clone();
-        const grassIn = smoothstepNum(0.05, 0.15, normHeight);
-        const grassOut = smoothstepNum(0.55, 0.70, normHeight);
+
+        // Grass band
+        const grassStart = grassLineVal - 0.02;
+        const grassEnd = grassLineVal + 0.08;
+        const grassOutStart = rockLineVal - 0.05;
+        const grassOutEnd = rockLineVal + 0.10;
+        const grassIn = smoothstepNum(grassStart, grassEnd, normHeight);
+        const grassOut = smoothstepNum(grassOutStart, grassOutEnd, normHeight);
         const grassBlend = clampNumber(grassIn * (1 - grassOut));
         base = mixColor(base, GRASS_COLOR, grassBlend);
 
-        const rockIn = smoothstepNum(0.40, 0.60, normHeight);
-        const rockOut = smoothstepNum(0.80, 0.95, normHeight);
+        // Rock band
+        const rockStart = rockLineVal - 0.05;
+        const rockEnd = rockLineVal + 0.10;
+        const rockOutStart = snowLineVal - 0.05;
+        const rockOutEnd = snowLineVal + 0.10;
+        const rockIn = smoothstepNum(rockStart, rockEnd, normHeight);
+        const rockOut = smoothstepNum(rockOutStart, rockOutEnd, normHeight);
         const rockHBlend = clampNumber(rockIn * (1 - rockOut));
         base = mixColor(base, ROCK_COLOR_MID, rockHBlend);
 
-        const snowStart = 0.60 + inputs.snowRange * 0.10;
-        const snowEnd = snowStart + 0.15;
+        // Snow band
+        const snowStart = snowLineVal - 0.05;
+        const snowEnd = snowLineVal + 0.10;
         const snowBlend = clampNumber(smoothstepNum(snowStart, snowEnd, normHeight));
         base = mixColor(base, SNOW_COLOR, snowBlend);
 
         // Slope rock
         const slopeFactor = smoothstepNum(0.47, 0.79, slopeAngle);
-        const slopeRock = clampNumber(slopeFactor * inputs.forestRange);
+        const slopeRock = clampNumber(slopeFactor * slopeRockAmt);
         base = mixColor(base, ROCK_COLOR_MID, slopeRock);
 
-        // Dirt
-        const dirtBlend = clampNumber(1 - normHeight / 0.06);
+        // Dirt (below grass line)
+        const dirtThresh = grassLineVal * 0.6;
+        const dirtBlend = clampNumber(1 - normHeight / Math.max(dirtThresh, 0.001));
         base = mixColor(base, DIRT_COLOR, dirtBlend * 0.4);
 
         // Desert palette

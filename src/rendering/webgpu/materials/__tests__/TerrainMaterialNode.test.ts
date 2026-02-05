@@ -38,7 +38,7 @@ describe('TerrainMaterialNode', () => {
         } as any;
 
         const material = new TerrainMaterialNode({}, mockController);
-        material.updateInputs({ snowRange: 0.5, forestRange: 0.2, terrainPalette: 2 });
+        material.updateInputs({ terrainPalette: 2 });
 
         expect(mockController.getSamplingNode).toHaveBeenCalledTimes(2);
         expect(mockController.getPaletteNode).toHaveBeenCalledTimes(2);

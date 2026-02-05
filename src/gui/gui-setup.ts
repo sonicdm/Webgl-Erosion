@@ -447,10 +447,6 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         'Normalized height where snow begins');
     tip(terrainLayers.add(controls, 'SlopeRockAmount', 0.0, 3.0).step(0.1).name('Slope Rock'),
         'How much steep slopes force rock texture regardless of height');
-    tip(terrainLayers.add(controls, 'SnowRange', 0.0, 100.0).name('Snow Range'),
-        'Vertical spread of the snow transition band');
-    tip(terrainLayers.add(controls, 'ForestRange', 0.0, 50.0).name('Forest Range'),
-        'Vertical spread of the forest/grass transition band');
 
     // Light direction subfolder
     const lightFolder = renderingpara.addFolder('Sun Direction');

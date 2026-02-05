@@ -89,8 +89,6 @@ export interface IAppControls {
     SedimentTrace: boolean;
     ShowFlowTrace: boolean;
     TerrainPlatte: number;
-    SnowRange: number;
-    ForestRange: number;
     // Terrain layer controls (normalised height 0-1)
     GrassLine: number;
     RockLine: number;

@@ -5,8 +5,6 @@ import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShad
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
 export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
-    snowRange?: number;
-    forestRange?: number;
     terrainPalette?: number;
     /** Max terrain height for palette normalization (terrainHeight * 120) */
     maxHeight?: number;
@@ -41,8 +39,6 @@ export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
  */
 export class TerrainMaterialNode extends MeshBasicNodeMaterial {
     private controller: TerrainShaderNodeController;
-    private snowRangeUniform: any;
-    private forestRangeUniform: any;
     private terrainPaletteUniform: any;
     private simresUniform: any;
     private maxHeightUniform: any;
@@ -74,8 +70,6 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         super();
         this.controller = controller;
         this.inputs = { ...inputs };
-        this.snowRangeUniform = uniform(inputs.snowRange ?? 1);
-        this.forestRangeUniform = uniform(inputs.forestRange ?? 1);
         this.terrainPaletteUniform = uniform(inputs.terrainPalette ?? 0);
         this.simresUniform = uniform(inputs.simres ?? 512);
         this.maxHeightUniform = uniform(inputs.maxHeight ?? 240);
@@ -116,12 +110,6 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
 
     updateInputs(inputs: Partial<TerrainMaterialNodeInputs>): void {
         this.inputs = { ...this.inputs, ...inputs };
-        if (inputs.snowRange !== undefined) {
-            this.snowRangeUniform.value = inputs.snowRange;
-        }
-        if (inputs.forestRange !== undefined) {
-            this.forestRangeUniform.value = inputs.forestRange;
-        }
         if (inputs.terrainPalette !== undefined) {
             this.terrainPaletteUniform.value = inputs.terrainPalette;
         }
@@ -213,8 +201,6 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
 
     /** Update per-frame uniforms from controls (no graph rebuild). */
     updateUniforms(params: {
-        snowRange?: number;
-        forestRange?: number;
         terrainPalette?: number;
         maxHeight?: number;
         debugMode?: number;
@@ -226,8 +212,6 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         snowLine?: number;
         slopeRockAmount?: number;
     }): void {
-        if (params.snowRange !== undefined) this.snowRangeUniform.value = params.snowRange;
-        if (params.forestRange !== undefined) this.forestRangeUniform.value = params.forestRange;
         if (params.terrainPalette !== undefined) this.terrainPaletteUniform.value = params.terrainPalette;
         if (params.maxHeight !== undefined) this.maxHeightUniform.value = params.maxHeight;
         if (params.debugMode !== undefined) this.debugModeUniform.value = params.debugMode;
@@ -275,8 +259,6 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             height: sampling.height,
             normal: sampling.normal,
             rock: sampling.rock,
-            snowRange: this.snowRangeUniform,
-            forestRange: this.forestRangeUniform,
             terrainPalette: this.terrainPaletteUniform,
             maxHeight: this.maxHeightUniform,
             grassLine: this.grassLineUniform,

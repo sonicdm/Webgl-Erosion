@@ -336,8 +336,6 @@ export class ThreeJSSimulationRuntime {
         const newMaterial = createTerrainProceduralMaterial({
           minHeight: minHeight || 0.0,
           maxHeight: maxHeight || 240.0,
-          snowRange: this.controls?.SnowRange || 0.0,
-          forestRange: this.controls?.ForestRange || 0.0,
           terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
           // Debug defaults: show UVs (2) to verify VTF and geometry mapping quickly
           debugMode: 2,
@@ -524,8 +522,6 @@ export class ThreeJSSimulationRuntime {
             material = createTerrainProceduralMaterial({
               minHeight: minHeight,
               maxHeight: maxHeight,
-              snowRange: this.controls?.SnowRange || 0.0,
-              forestRange: this.controls?.ForestRange || 0.0,
               terrainPalette: this.controls?.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
             });
             console.log('[Terrain Update] Material created with procedural terrain material');
@@ -623,8 +619,6 @@ export class ThreeJSSimulationRuntime {
         updateTerrainProceduralMaterial(material, {
           minHeight: minHeight,
           maxHeight: maxHeight,
-          snowRange: this.controls.SnowRange || 0.0,
-          forestRange: this.controls.ForestRange || 0.0,
           terrainPalette: this.controls.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
           debugScale: Math.max(maxHeight - minHeight, 1.0),
         });
@@ -672,8 +666,6 @@ export class ThreeJSSimulationRuntime {
       updateTerrainProceduralMaterial(material, {
         minHeight: minHeight,
         maxHeight: maxHeight,
-        snowRange: this.controls.SnowRange || 0.0,
-        forestRange: this.controls.ForestRange || 0.0,
         terrainPalette: this.controls.TerrainPlatte !== undefined ? this.controls.TerrainPlatte : 1,
         debugScale: Math.max(maxHeight - minHeight, 1.0),
         debugMode: (this.controls as any).DebugMode ?? 0,
@@ -716,8 +708,6 @@ export class ThreeJSSimulationRuntime {
       updateTerrainProceduralMaterial(this.terrainMesh.material as THREE.ShaderMaterial | THREE.RawShaderMaterial, {
         minHeight: minHeight,
         maxHeight: maxHeight,
-        snowRange: controlsToUse.SnowRange || 0.0,
-        forestRange: controlsToUse.ForestRange || 0.0,
         terrainPalette: controlsToUse.TerrainPlatte !== undefined ? controlsToUse.TerrainPlatte : 1,
         debugScale: Math.max(maxHeight - minHeight, 1.0),
         debugMode: (controlsToUse as any).DebugMode ?? 0,
@@ -1067,8 +1057,6 @@ export class ThreeJSSimulationRuntime {
         this.terrainMesh.material = createTerrainProceduralMaterial({
           minHeight: minHeight,
           maxHeight: maxHeight,
-          snowRange: controls.SnowRange || 0.0,
-          forestRange: controls.ForestRange || 0.0,
           terrainPalette: controls.TerrainPlatte !== undefined ? controls.TerrainPlatte : 1,
         });
 

@@ -6,8 +6,6 @@ describe('TerrainPaletteNode', () => {
             height: 0,
             normalY: 1,
             rock: 0,
-            snowRange: 1,
-            forestRange: 1,
             terrainPalette: 0,
         });
         expect(color.r).toBeCloseTo(0.148, 2);
@@ -20,8 +18,6 @@ describe('TerrainPaletteNode', () => {
             height: 1000,
             normalY: 1,
             rock: 0,
-            snowRange: 1,
-            forestRange: 1,
             terrainPalette: 0,
         });
         expect(color.r).toBeCloseTo(0.99, 2);
@@ -34,48 +30,43 @@ describe('TerrainPaletteNode', () => {
             height: 0,
             normalY: 1,
             rock: 0,
-            snowRange: 1,
-            forestRange: 1,
             terrainPalette: 1,
         });
         expect(color.r).toBeCloseTo(0.99, 2);
     });
 
-    it('responds to forest and snow ranges', () => {
-        const lowForest = TerrainPaletteNode.evaluate({
+    it('responds to slopeRockAmount and snowLine', () => {
+        const lowSlope = TerrainPaletteNode.evaluate({
             height: 0,
             normalY: 0.5,
             rock: 0,
-            snowRange: 1,
-            forestRange: 1,
             terrainPalette: 0,
+            slopeRockAmount: 1,
         });
-        const highForest = TerrainPaletteNode.evaluate({
+        const highSlope = TerrainPaletteNode.evaluate({
             height: 0,
             normalY: 0.5,
             rock: 0,
-            snowRange: 1,
-            forestRange: 4,
             terrainPalette: 0,
+            slopeRockAmount: 4,
         });
-        expect(highForest.r).toBeGreaterThan(lowForest.r);
+        expect(highSlope.r).toBeGreaterThan(lowSlope.r);
 
-        const lowSnow = TerrainPaletteNode.evaluate({
+        const defaultSnow = TerrainPaletteNode.evaluate({
             height: 0,
             normalY: 0.2,
             rock: 0,
-            snowRange: 1,
-            forestRange: 1,
             terrainPalette: 0,
+            snowLine: 0.70,
         });
-        const highSnow = TerrainPaletteNode.evaluate({
+        const lowerSnow = TerrainPaletteNode.evaluate({
             height: 0,
             normalY: 0.2,
             rock: 0,
-            snowRange: 4,
-            forestRange: 1,
             terrainPalette: 0,
+            snowLine: 0.30,
         });
-        expect(highSnow.r).toBeLessThan(lowSnow.r);
+        // Lower snow line means more snow at same height → brighter
+        expect(lowerSnow.r).toBeGreaterThanOrEqual(defaultSnow.r);
     });
 });

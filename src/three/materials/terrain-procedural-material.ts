@@ -14,8 +14,6 @@ import terrainProceduralFrag from '../../shaders/terrain-procedural-frag.glsl?ra
 export interface TerrainProceduralMaterialParams {
   minHeight?: number;
   maxHeight?: number;
-  snowRange?: number;
-  forestRange?: number;
   terrainPalette?: number; // 0 = AlpineMtn, 1 = Desert, 2 = Jungle
   debugMode?: number;      // 0 = normal, 1..n debug visualization
   debugScale?: number;     // scale for debug visualization (height normalization)
@@ -29,8 +27,6 @@ export function createTerrainProceduralMaterial(params: TerrainProceduralMateria
   const {
     minHeight = 0.0,
     maxHeight = 240.0, // Default from TerrainHeight * 120.0
-    snowRange = 0.0,
-    forestRange = 0.0,
     terrainPalette = 1, // Default to Desert
     debugMode = 0, // Default normal
   } = params;
@@ -76,8 +72,6 @@ export function createTerrainProceduralMaterial(params: TerrainProceduralMateria
       // Material uniforms
       u_MinHeight: { value: minHeight },
       u_MaxHeight: { value: maxHeight },
-      u_SnowRange: { value: snowRange },
-      u_ForestRange: { value: forestRange },
       u_TerrainPalette: { value: terrainPalette },
       u_DebugMode: { value: debugMode },
       u_DebugScale: { value: debugScale },
@@ -114,8 +108,6 @@ const terrainVertexShaderGLSL1 = `
 const terrainFragmentShaderGLSL1 = `
   uniform float u_MinHeight;
   uniform float u_MaxHeight;
-  uniform float u_SnowRange;
-  uniform float u_ForestRange;
   uniform int u_TerrainPalette;
   uniform int u_BrushType;
   uniform float u_BrushSize;
@@ -149,12 +141,6 @@ export function updateTerrainProceduralMaterial(
   }
   if (params.maxHeight !== undefined && material.uniforms.u_MaxHeight) {
     material.uniforms.u_MaxHeight.value = params.maxHeight;
-  }
-  if (params.snowRange !== undefined && material.uniforms.u_SnowRange) {
-    material.uniforms.u_SnowRange.value = params.snowRange;
-  }
-  if (params.forestRange !== undefined && material.uniforms.u_ForestRange) {
-    material.uniforms.u_ForestRange.value = params.forestRange;
   }
   if (params.terrainPalette !== undefined && material.uniforms.u_TerrainPalette) {
     material.uniforms.u_TerrainPalette.value = params.terrainPalette;

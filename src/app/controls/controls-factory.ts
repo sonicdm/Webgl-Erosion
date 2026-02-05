@@ -65,8 +65,6 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         SedimentTrace: true,
         ShowFlowTrace: false,
         TerrainPlatte: 1,
-        SnowRange: 0,
-        ForestRange: 0,
         GrassLine: 0.10,
         RockLine: 0.50,
         SnowLine: 0.70,
