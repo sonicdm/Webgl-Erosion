@@ -282,10 +282,9 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         // Cool lava is still part of the lava system (can re-melt).
         // Basalt is permanent and rendered by the terrain shader instead.
         const lavaPresence = lavaHeight.add(coolLavaHeight);
-        // High multiplier (5000) makes thin lava films visible. With GPU Jacobi's low
-        // emission rate (K=5), average lava cell height is ~0.1-0.4 — at the old 500x
-        // multiplier these were nearly invisible. 5000x gives opacity ~0.5 at h=0.1.
-        const baseOpacity = clamp(lavaPresence.mul(float(5000)).div(this.simresUniform), 0, 1);
+        // Lava is physically opaque. 100000x multiplier ensures any lava presence
+        // (even thin films at h=0.01) saturates to full opacity.
+        const baseOpacity = clamp(lavaPresence.mul(float(100000)).div(this.simresUniform), 0, 1);
         // When any debug view is active, hide the lava material so terrain debug views show through
         const dbg = this.debugModeUniform;
         const opacity = dbg.equal(0).select(baseOpacity, float(0));
