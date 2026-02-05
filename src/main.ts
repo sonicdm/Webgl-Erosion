@@ -1215,6 +1215,12 @@ async function main() {
             time: timer,
             debugMode: controls.TerrainDebug,
           });
+          const brushPosValid = reusablePos[0] >= 0 && reusablePos[0] <= 1 && reusablePos[1] >= 0 && reusablePos[1] <= 1;
+          lavaMat.updateBrush(
+            [reusablePos[0], reusablePos[1]],
+            brushPosValid ? controls.brushSize : 0,
+            controls.brushType
+          );
         }
         // Update sky sun position
         const skyMesh = (webgpuScene as any)?._skyMesh;

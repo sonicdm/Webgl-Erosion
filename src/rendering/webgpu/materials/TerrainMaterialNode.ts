@@ -466,6 +466,16 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             }
         }
 
+        // Basalt debug view: black→blue→cyan ramp by basalt height
+        let debugBasalt = vec3(0, 0, 0);
+        if (inputs.basaltMap) {
+            const basaltVal = texture(inputs.basaltMap, curUv).x;
+            const basaltNorm = clamp(basaltVal.mul(float(500)).div(this.simresUniform), 0, 1);
+            const basaltLow = mix(vec3(0, 0, 0), vec3(0.1, 0.2, 0.8), clamp(basaltNorm.mul(3), 0, 1));
+            const basaltHigh = mix(vec3(0.1, 0.2, 0.8), vec3(0.3, 0.9, 1.0), clamp(basaltNorm.sub(0.33).mul(3), 0, 1));
+            debugBasalt = basaltNorm.lessThan(float(0.33)).select(basaltLow, basaltHigh);
+        }
+
         const finalColor = dbg.equal(3).select(debugTerrain,
             dbg.equal(1).select(debugSediment,
                 dbg.equal(2).select(debugVelocity,
@@ -482,7 +492,8 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
                                                             dbg.equal(17).select(debugLavaCrust,
                                                                 dbg.equal(18).select(debugLavaDeltaH,
                                                                     dbg.equal(19).select(debugThermalErosionRate,
-                                                                        litColor))))))))))))))));
+                                                                        dbg.equal(20).select(debugBasalt,
+                                                                            litColor)))))))))))))))));
 
         this.colorNode = finalColor;
     }

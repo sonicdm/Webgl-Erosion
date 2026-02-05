@@ -145,7 +145,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     const kcController = erosionpara.add(controls, 'Kc', 0.01, 0.5);
     const ksController = erosionpara.add(controls, 'Ks', 0.001, 0.2);
     const kdController = erosionpara.add(controls, 'Kd', 0.0001, 0.1);
-    erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10, lavaHeight: 11, lavaTemperature: 12, lavaVelocity: 13, lavaVolume: 14, lavaLayering: 15, waterLavaContact: 16, lavaCrust: 17, lavaDeltaH: 18, thermalErosionRate: 19 });
+    erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10, basaltHeight: 20, lavaHeight: 11, lavaTemperature: 12, lavaVelocity: 13, lavaVolume: 14, lavaLayering: 15, waterLavaContact: 16, lavaCrust: 17, lavaDeltaH: 18, thermalErosionRate: 19 });
     const advectionMethodController = erosionpara.add(controls, 'AdvectionMethod', { Semilagrangian: 0, MacCormack: 1 });
     const velocityMultiplierController = erosionpara.add(controls, 'VelocityMultiplier', 1.0, 5.0);
     erosionpara.add(controls, 'AdvectionSpeedScaling', 0.1, 3.0);

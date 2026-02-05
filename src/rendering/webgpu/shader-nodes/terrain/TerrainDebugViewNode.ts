@@ -23,6 +23,7 @@ export enum TerrainDebugMode {
     LavaCrust = 17,
     LavaDeltaH = 18,
     ThermalErosionRate = 19,
+    BasaltHeight = 20,
 }
 
 export interface TerrainDebugViewInputs {

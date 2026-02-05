@@ -1,6 +1,6 @@
-import { Texture, Vector3 } from 'three';
+import { Texture, Vector2, Vector3 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { clamp, dot, float, fract, max, min, mix, normalize, normalLocal, positionLocal, pow, sin, cos, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { clamp, dot, float, fract, length, max, min, mix, normalize, normalLocal, positionLocal, pow, sin, cos, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
 
 export interface LavaMaterialNodeInputs {
     /** Heightmap texture (R=terrainHeight, G=water, B=rock, A=baseRock) */
@@ -41,6 +41,10 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
     private emissiveStrengthUniform: any;
     private timeUniform: any;
     private debugModeUniform: any;
+    private brushPosUniform: any;
+    private brushSizeUniform: any;
+    private brushTypeUniform: any;
+    private brushColorUniform: any;
     private inputs: LavaMaterialNodeInputs;
 
     constructor(inputs: LavaMaterialNodeInputs = {}) {
@@ -57,6 +61,10 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         this.emissiveStrengthUniform = uniform(inputs.emissiveStrength ?? 0.35);
         this.timeUniform = uniform(0.0);
         this.debugModeUniform = uniform(0);
+        this.brushPosUniform = uniform(new Vector2(-10, -10));
+        this.brushSizeUniform = uniform(0);
+        this.brushTypeUniform = uniform(0);
+        this.brushColorUniform = uniform(new Vector3(0.1, 0.3, 0.8));
 
         this.transparent = true;
         this.depthWrite = true;
@@ -98,6 +106,24 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         if (params.debugMode !== undefined) {
             this.debugModeUniform.value = params.debugMode;
         }
+    }
+
+    /** Update brush uniforms only (no graph rebuild). Call each frame. */
+    updateBrush(brushPos: [number, number], brushSize: number, brushType: number): void {
+        this.brushPosUniform.value.set(brushPos[0], brushPos[1]);
+        this.brushSizeUniform.value = brushSize;
+        this.brushTypeUniform.value = brushType;
+        const colors: Record<number, [number, number, number]> = {
+            1: [214 / 255, 184 / 255, 96 / 255],
+            2: [0.1, 0.3, 0.8],
+            3: [0.35, 0.38, 0.45],
+            4: [0.5, 0.8, 1.0],
+            5: [1.0, 1.0, 0.3],
+            6: [0.3, 1.0, 0.3],
+            7: [0.88, 0.34, 0.13],
+        };
+        const c = colors[brushType] ?? [0, 0, 0];
+        this.brushColorUniform.value.set(c[0], c[1], c[2]);
     }
 
     private buildGraph(inputs: LavaMaterialNodeInputs): void {
@@ -277,6 +303,23 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
             const heatGlow = clamp(speed.mul(0.15), 0, 0.06);
             finalColor = finalColor.add(vec3(heatGlow, heatGlow.mul(0.3), float(0)));
         }
+
+        // --- Brush overlay (same as terrain, so brush shows over lava) ---
+        const brushPos = this.brushPosUniform;
+        const brushSize = this.brushSizeUniform;
+        const brushType = this.brushTypeUniform;
+        const brushDelta = safeUv.sub(brushPos);
+        const distToBrush = length(brushDelta);
+        const brushRadius = float(0.01).mul(brushSize);
+        const brushCol = this.brushColorUniform;
+        const ringWidth = brushRadius.mul(0.06).max(float(0.0008));
+        const ringDist = distToBrush.sub(brushRadius).abs();
+        const ringFactor = float(1).sub(ringDist.div(ringWidth)).clamp(0, 1);
+        const insideFill = float(1).sub(distToBrush.div(brushRadius)).clamp(0, 1).mul(0.12);
+        const brushIntensity = ringFactor.mul(0.95).add(insideFill);
+        const brushActiveFloat = brushType.greaterThan(0).select(float(1), float(0));
+        const brushBlend = brushActiveFloat.mul(brushIntensity);
+        finalColor = finalColor.add(brushCol.mul(brushBlend));
 
         // --- Opacity: visible where mobile lava or cool lava exists ---
         // Cool lava is still part of the lava system (can re-melt).
