@@ -14,7 +14,7 @@ import {
     getOriginalBrushOperation,
     setOriginalBrushOperation
 } from '../brush-handler';
-import { 
+import {
     MAX_WATER_SOURCES,
     addWaterSource,
     removeNearestWaterSource,
@@ -28,9 +28,8 @@ import {
     clearAllLavaSources,
     getLavaSourceCount
 } from '../utils/lava-sources';
-import { simres, HightMapCpuBuf } from '../simulation/simulation-state';
-import { ThreeJSSimulationRuntime } from '../three/integration';
 import Camera from '../Camera';
+import { SimulationStateHolder } from '../app/state/SimulationStateHolder';
 
 export interface Controls {
     [key: string]: any;
@@ -54,24 +53,20 @@ export interface EventHandlers {
     onMouseUp: (event: MouseEvent | PointerEvent) => void;
 }
 
-export interface EventHandlerDependencies {
-    heightMapBuffer: Float32Array;
-    threeRuntime?: ThreeJSSimulationRuntime;
-    camera: Camera;
-    controls: Controls;
-    controlsConfig: ControlsConfig;
-    simres: number;
-}
-
 export function createEventHandlers(
     controls: Controls,
     controlsConfig: ControlsConfig,
     camera: Camera,
-    deps?: EventHandlerDependencies
+    simulationState: SimulationStateHolder
 ): EventHandlers {
     function onKeyDown(event: KeyboardEvent) {
         const key = event.key.toLowerCase();
         const action = getKeyAction(key, controlsConfig);
+
+        // DEBUG: trace all key actions
+        if (action) {
+            console.log(`[KeyHandler] key='${key}' action='${action}'`);
+        }
         
         // Track WASD movement keys (don't interfere with brush controls)
         if (controlsConfig.camera.movement.enableWASD) {
@@ -146,29 +141,30 @@ export function createEventHandlers(
             }
         }
         
-        if (action === 'removePermanentSource') {
-            // Remove all sources (both water and lava)
-            clearAllWaterSources();
-            clearAllLavaSources();
-            controls.sourceCount = 0;
-            console.log('Removed all water and lava sources');
-        }
-
         if (action === 'permanentLavaSource') {
-            // Check if Shift is held for removal
+            console.log(`[LavaSource] Handler entered. shiftKey=${event.shiftKey}, posTemp=[${controls.posTemp[0]?.toFixed(3)}, ${controls.posTemp[1]?.toFixed(3)}], brushSize=${controls.brushSize}, brushStrength=${controls.brushStrenth}`);
             if (event.shiftKey) {
-                // Remove nearest source to cursor
                 if (removeNearestLavaSource(controls.posTemp)) {
+                    controls.lavaSourceCount = getLavaSourceCount();
                     console.log(`Removed lava source. Remaining: ${getLavaSourceCount()}`);
                 }
             } else {
-                // Add new source at cursor position
                 if (addLavaSource(controls.posTemp, controls.brushSize, controls.brushStrenth)) {
+                    controls.lavaSourceCount = getLavaSourceCount();
                     console.log(`Added lava source at (${controls.posTemp[0].toFixed(3)}, ${controls.posTemp[1].toFixed(3)}). Total: ${getLavaSourceCount()}`);
                 } else {
                     console.log(`Maximum ${MAX_LAVA_SOURCES} lava sources reached`);
                 }
             }
+        }
+
+        if (action === 'removePermanentSource') {
+            // Remove all sources
+            clearAllWaterSources();
+            clearAllLavaSources();
+            controls.sourceCount = 0;
+            controls.lavaSourceCount = 0;
+            console.log('Removed all sources');
         }
     }
 
@@ -222,14 +218,11 @@ export function createEventHandlers(
         const action = getMouseButtonAction(event.button, controlsConfig);
         
         if (action === 'brushActivate') {
-            // Use dependency injection - prefer Three.js runtime buffer if available
-            const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() || deps?.heightMapBuffer || HightMapCpuBuf;
-            
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
-                simres: deps?.simres || Number(simres), // Use injected simres if available
-                HightMapCpuBuf: heightMapBuffer,
+                simulationState: simulationState,
+                terrainState: (controls as any).terrainState, // Passed from main
                 camera: camera
             };
             
@@ -255,14 +248,11 @@ export function createEventHandlers(
         if (action === 'brushActivate') {
             controls.brushPressed = 0;
             
-            // Use dependency injection - prefer Three.js runtime buffer if available
-            const heightMapBuffer = deps?.threeRuntime?.getHeightMapCpuBuffer() || deps?.heightMapBuffer || HightMapCpuBuf;
-            
             const brushContext: BrushContext = {
                 controls: controls as BrushControls,
                 controlsConfig: controlsConfig,
-                simres: deps?.simres || Number(simres), // Use injected simres if available
-                HightMapCpuBuf: heightMapBuffer,
+                simulationState: simulationState,
+                terrainState: (controls as any).terrainState, // Passed from main
                 camera: camera
             };
             
@@ -282,3 +272,4 @@ export function createEventHandlers(
         onMouseUp
     };
 }
+

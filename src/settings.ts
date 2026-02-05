@@ -75,6 +75,7 @@ function mergeWithDefaults(loaded: any): ControlsConfig {
         keys: {
             brushActivate: loaded.keys?.brushActivate ?? defaultControlsConfig.keys.brushActivate,
             permanentWaterSource: loaded.keys?.permanentWaterSource ?? defaultControlsConfig.keys.permanentWaterSource,
+            permanentLavaSource: loaded.keys?.permanentLavaSource ?? defaultControlsConfig.keys.permanentLavaSource,
             removePermanentSource: loaded.keys?.removePermanentSource ?? defaultControlsConfig.keys.removePermanentSource,
             permanentLavaSource: loaded.keys?.permanentLavaSource ?? defaultControlsConfig.keys.permanentLavaSource,
             removePermanentLavaSource: loaded.keys?.removePermanentLavaSource ?? defaultControlsConfig.keys.removePermanentLavaSource,

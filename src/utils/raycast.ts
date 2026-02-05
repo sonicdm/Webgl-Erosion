@@ -59,6 +59,11 @@ export function sampleHeightBilinear(uv: vec2, simres: number, buffer: Float32Ar
     return result;
 }
 
+function worldZToV(z: number): number {
+    // PlaneGeometry uv.v is flipped after rotateX(-PI/2): v = 0.5 - worldZ
+    return 0.5 - z;
+}
+
 export function rayCast(
     ro: vec3,
     rd: vec3,
@@ -89,7 +94,7 @@ export function rayCast(
     // Check if ray starts below terrain - if so, use current position as hit
     let startTexSpace = vec2.create();
     startTexSpace[0] = (ro[0] + 0.50) / 1.0;
-    startTexSpace[1] = (ro[2] + 0.50) / 1.0;
+    startTexSpace[1] = worldZToV(ro[2]);
     if (startTexSpace[0] >= 0.0 && startTexSpace[0] <= 1.0 && 
         startTexSpace[1] >= 0.0 && startTexSpace[1] <= 1.0) {
         // Use bilinear sampling for smooth height
@@ -112,7 +117,7 @@ export function rayCast(
         
         // Convert current position to texture space (unclamped for bounds checks)
         curTexSpace[0] = (cur[0] + 0.50) / 1.0;
-        curTexSpace[1] = (cur[2] + 0.50) / 1.0;
+        curTexSpace[1] = worldZToV(cur[2]);
         
         // Check bounds - early exit if out of valid terrain bounds
         if (curTexSpace[0] < 0.0 || curTexSpace[0] > 1.0 || 
@@ -160,7 +165,7 @@ export function rayCast(
                 // Check height at midpoint using bilinear sampling
                 let midTexSpace = vec2.create();
                 midTexSpace[0] = (binarySearchMid[0] + 0.50) / 1.0;
-                midTexSpace[1] = (binarySearchMid[2] + 0.50) / 1.0;
+                midTexSpace[1] = worldZToV(binarySearchMid[2]);
                 
                 if (midTexSpace[0] < 0.0 || midTexSpace[0] > 1.0 || 
                     midTexSpace[1] < 0.0 || midTexSpace[1] > 1.0) {
@@ -195,7 +200,7 @@ export function rayCast(
             // This avoids expensive refinement passes while maintaining reasonable accuracy
             let finalTexSpace = vec2.create();
             finalTexSpace[0] = (hitPosition[0] + 0.50) / 1.0;
-            finalTexSpace[1] = (hitPosition[2] + 0.50) / 1.0;
+            finalTexSpace[1] = worldZToV(hitPosition[2]);
             
             if (finalTexSpace[0] >= 0.0 && finalTexSpace[0] <= 1.0 && 
                 finalTexSpace[1] >= 0.0 && finalTexSpace[1] <= 1.0) {
@@ -213,7 +218,7 @@ export function rayCast(
             
             // Convert to texture coordinates
             out[0] = (hitPosition[0] + 0.50) / 1.0;
-            out[1] = (hitPosition[2] + 0.50) / 1.0;
+            out[1] = worldZToV(hitPosition[2]);
             break;
         }
         

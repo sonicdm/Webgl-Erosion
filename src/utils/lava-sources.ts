@@ -35,10 +35,10 @@ export function removeLavaSource(index: number): void {
 
 export function removeNearestLavaSource(position: vec2): boolean {
     if (lavaSources.length === 0) return false;
-    
+
     let nearestIndex = 0;
     let nearestDist = Number.MAX_VALUE;
-    
+
     for (let i = 0; i < lavaSources.length; i++) {
         const dist = vec2.distance(lavaSources[i].position, position);
         if (dist < nearestDist) {
@@ -46,7 +46,7 @@ export function removeNearestLavaSource(position: vec2): boolean {
             nearestIndex = i;
         }
     }
-    
+
     lavaSources.splice(nearestIndex, 1);
     return true;
 }
@@ -59,3 +59,13 @@ export function getLavaSourceCount(): number {
     return lavaSources.length;
 }
 
+// Expose for browser console testing
+(window as any).__lavaDebug = {
+    addSource: (x: number, y: number, size = 6, strength = 0.5) => {
+        const pos = vec2.fromValues(x, y);
+        return addLavaSource(pos, size, strength);
+    },
+    clear: clearAllLavaSources,
+    count: () => lavaSources.length,
+    list: () => lavaSources.map(s => ({ x: s.position[0], y: s.position[1], size: s.size, strength: s.strength })),
+};

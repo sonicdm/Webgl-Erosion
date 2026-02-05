@@ -1,161 +1,96 @@
 /**
- * Progress tracking for terrain loading pipeline
- * Tracks phases: decode, GPU upload, readback, geometry, BVH
+ * Enum for different loading phases
  */
-
 export enum LoadPhase {
-    DECODE = 'decode',
-    GPU_UPLOAD = 'gpu_upload',
-    READBACK = 'readback',
-    GEOMETRY = 'geometry',
-    BVH = 'bvh'
+    DECODE = 'DECODE',
+    GPU_UPLOAD = 'GPU_UPLOAD',
+    READBACK = 'READBACK',
+    GEOMETRY = 'GEOMETRY',
+    BVH = 'BVH'
 }
 
-export interface PhaseTiming {
-    phase: LoadPhase;
-    startTime: number;
-    endTime?: number;
-    duration?: number;
-}
+/**
+ * Progress callback type
+ */
+export type ProgressCallback = (progress: number, phase: LoadPhase | null) => void;
 
-export interface LoadProgress {
-    currentPhase: LoadPhase | null;
-    progress: number; // 0.0 to 1.0
-    phaseTimings: Map<LoadPhase, PhaseTiming>;
-    totalStartTime: number;
-}
-
-// Phase progress fractions (cumulative)
-const PHASE_PROGRESS: Record<LoadPhase, number> = {
-    [LoadPhase.DECODE]: 0.2,
-    [LoadPhase.GPU_UPLOAD]: 0.4,
-    [LoadPhase.READBACK]: 0.6,
-    [LoadPhase.GEOMETRY]: 0.75,
-    [LoadPhase.BVH]: 1.0
-};
-
+/**
+ * Tracks loading progress across multiple phases.
+ * Each phase can have sub-progress (0.0 to 1.0).
+ */
 export class LoadProgressTracker {
-    private progress: LoadProgress;
-    private onProgressUpdate?: (progress: number, phase: LoadPhase | null) => void;
-
-    constructor(onProgressUpdate?: (progress: number, phase: LoadPhase | null) => void) {
-        this.progress = {
-            currentPhase: null,
-            progress: 0.0,
-            phaseTimings: new Map(),
-            totalStartTime: performance.now()
-        };
-        this.onProgressUpdate = onProgressUpdate;
-    }
-
-    startPhase(phase: LoadPhase): void {
-        // End previous phase if any
-        if (this.progress.currentPhase) {
-            this.endPhase(this.progress.currentPhase);
-        }
-
-        this.progress.currentPhase = phase;
-        const timing: PhaseTiming = {
-            phase,
-            startTime: performance.now()
-        };
-        this.progress.phaseTimings.set(phase, timing);
+    private callback: ProgressCallback;
+    private currentPhase: LoadPhase | null = null;
+    private subPhaseProgress: number = 0.0;
+    
+    // Phase weights (how much of total progress each phase represents)
+    private readonly phaseWeights: Record<LoadPhase, number> = {
+        [LoadPhase.DECODE]: 0.1,      // 10%
+        [LoadPhase.GPU_UPLOAD]: 0.2,  // 20%
+        [LoadPhase.READBACK]: 0.1,    // 10%
+        [LoadPhase.GEOMETRY]: 0.3,    // 30%
+        [LoadPhase.BVH]: 0.3          // 30%
+    };
+    
+    // Cumulative phase start positions (calculated from weights)
+    private phaseStarts: Record<LoadPhase, number>;
+    
+    constructor(callback: ProgressCallback) {
+        this.callback = callback;
         
-        // Calculate phase progress bounds
-        const phases = Object.values(LoadPhase);
-        const currentPhaseIndex = phases.indexOf(phase);
-        const phaseStartProgress = currentPhaseIndex > 0
-            ? PHASE_PROGRESS[phases[currentPhaseIndex - 1] as LoadPhase]
-            : 0.0;
-        const phaseEndProgress = PHASE_PROGRESS[phase];
-
-        // Immediately advance to the start-of-phase completion to keep UI responsive
-        this.progress.progress = phaseEndProgress;
-        console.log(`[Progress] Phase started: ${phase}, progress: ${(phaseStartProgress * 100).toFixed(1)}% -> ${(phaseEndProgress * 100).toFixed(1)}%`);
-        
-        if (this.onProgressUpdate) {
-            this.onProgressUpdate(this.progress.progress, this.progress.currentPhase);
-        }
+        // Calculate cumulative phase start positions
+        this.phaseStarts = {
+            [LoadPhase.DECODE]: 0.0,
+            [LoadPhase.GPU_UPLOAD]: this.phaseWeights[LoadPhase.DECODE],
+            [LoadPhase.READBACK]: this.phaseWeights[LoadPhase.DECODE] + this.phaseWeights[LoadPhase.GPU_UPLOAD],
+            [LoadPhase.GEOMETRY]: this.phaseWeights[LoadPhase.DECODE] + this.phaseWeights[LoadPhase.GPU_UPLOAD] + this.phaseWeights[LoadPhase.READBACK],
+            [LoadPhase.BVH]: this.phaseWeights[LoadPhase.DECODE] + this.phaseWeights[LoadPhase.GPU_UPLOAD] + this.phaseWeights[LoadPhase.READBACK] + this.phaseWeights[LoadPhase.GEOMETRY]
+        };
     }
-
-    endPhase(phase: LoadPhase): void {
-        const timing = this.progress.phaseTimings.get(phase);
-        if (timing && !timing.endTime) {
-            timing.endTime = performance.now();
-            timing.duration = timing.endTime - timing.startTime;
-            this.progress.phaseTimings.set(phase, timing);
-            console.log(`[Progress] Phase ended: ${phase}, duration: ${timing.duration.toFixed(2)}ms`);
-        }
-    }
-
-    updateProgress(): void {
-        if (!this.progress.currentPhase) {
-            this.progress.progress = 0.0;
-        } else {
-            this.progress.progress = PHASE_PROGRESS[this.progress.currentPhase];
-        }
-
-        console.log(`[Progress] Update: ${(this.progress.progress * 100).toFixed(1)}%, phase: ${this.progress.currentPhase || 'none'}`);
-        if (this.onProgressUpdate) {
-            this.onProgressUpdate(this.progress.progress, this.progress.currentPhase);
-        }
-    }
-
+    
     /**
-     * Updates progress within the current phase (0.0 to 1.0).
-     * Interpolates between the current phase's start and end progress values.
-     * @param phaseProgress - Progress within current phase (0.0 to 1.0)
+     * Start a new phase
      */
-    updateSubPhaseProgress(phaseProgress: number): void {
-        if (!this.progress.currentPhase) {
+    startPhase(phase: LoadPhase): void {
+        this.currentPhase = phase;
+        this.subPhaseProgress = 0.0;
+        this.updateProgress();
+    }
+    
+    /**
+     * End the current phase
+     */
+    endPhase(phase: LoadPhase): void {
+        if (this.currentPhase === phase) {
+            this.subPhaseProgress = 1.0;
+            this.updateProgress();
+            this.currentPhase = null;
+            this.subPhaseProgress = 0.0;
+        }
+    }
+    
+    /**
+     * Update sub-phase progress (0.0 to 1.0)
+     */
+    updateSubPhaseProgress(progress: number): void {
+        this.subPhaseProgress = Math.max(0.0, Math.min(1.0, progress));
+        this.updateProgress();
+    }
+    
+    /**
+     * Calculate and report total progress
+     */
+    private updateProgress(): void {
+        if (this.currentPhase === null) {
+            // No active phase, report 0 progress
+            this.callback(0.0, null);
             return;
         }
-
-        // Clamp phaseProgress to [0, 1]
-        phaseProgress = Math.max(0.0, Math.min(1.0, phaseProgress));
-
-        // Get the current phase's progress boundaries
-        const currentPhaseProgress = PHASE_PROGRESS[this.progress.currentPhase];
         
-        // Find the previous phase's progress (or 0.0 if this is the first phase)
-        const phases = Object.values(LoadPhase);
-        const currentPhaseIndex = phases.indexOf(this.progress.currentPhase);
-        const previousPhaseProgress = currentPhaseIndex > 0 
-            ? PHASE_PROGRESS[phases[currentPhaseIndex - 1] as LoadPhase]
-            : 0.0;
-
-        // Interpolate between previous and current phase progress
-        const phaseRange = currentPhaseProgress - previousPhaseProgress;
-        this.progress.progress = previousPhaseProgress + (phaseRange * phaseProgress);
-
-        console.log(`[Progress] Sub-phase update: ${(this.progress.progress * 100).toFixed(1)}% (phase: ${this.progress.currentPhase}, sub-progress: ${(phaseProgress * 100).toFixed(1)}%)`);
-        if (this.onProgressUpdate) {
-            this.onProgressUpdate(this.progress.progress, this.progress.currentPhase);
-        }
-    }
-
-    getProgress(): LoadProgress {
-        return { ...this.progress };
-    }
-
-    getPhaseTiming(phase: LoadPhase): PhaseTiming | undefined {
-        return this.progress.phaseTimings.get(phase);
-    }
-
-    getAllTimings(): PhaseTiming[] {
-        return Array.from(this.progress.phaseTimings.values());
-    }
-
-    getTotalDuration(): number {
-        if (this.progress.phaseTimings.size === 0) {
-            return 0;
-        }
-        const lastPhase = Array.from(this.progress.phaseTimings.values())
-            .reduce((latest, timing) => {
-                const endTime = timing.endTime || performance.now();
-                return endTime > (latest.endTime || 0) ? timing : latest;
-            });
-        return (lastPhase.endTime || performance.now()) - this.progress.totalStartTime;
+        const phaseStart = this.phaseStarts[this.currentPhase];
+        const phaseWeight = this.phaseWeights[this.currentPhase];
+        const totalProgress = phaseStart + (phaseWeight * this.subPhaseProgress);
+        
+        this.callback(totalProgress, this.currentPhase);
     }
 }
-

@@ -5,7 +5,7 @@ export default defineConfig({
   root: './',
   base: '',
   optimizeDeps: {
-    exclude: ['three.terrain.js'], // Don't pre-bundle THREE.Terrain - it needs THREE to be global
+    include: ['three', 'three/webgpu', 'three/tsl'],
   },
   build: {
     outDir: './dist',

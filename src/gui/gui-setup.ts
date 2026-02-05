@@ -1,6 +1,7 @@
 import * as DAT from 'dat-gui';
 import { updatePaletteSelection, initBrushPalette } from '../brush-palette';
 import { loadSettings, saveSettings } from '../settings';
+import { generatorRegistry } from '../terrain/TerrainGenerator';
 
 export interface Controls {
     [key: string]: any;
@@ -17,15 +18,12 @@ export interface GUIControllers {
     brushStrengthController: DAT.GUIController;
     brushOperationController: DAT.GUIController;
     flattenTargetHeightController: DAT.GUIController;
+    terrainBaseTypeController: DAT.GUIController;
+    simulationResolutionController: DAT.GUIController;
 }
 
-export interface GUISetupOptions {
-    threeRuntime?: any; // ThreeJSSimulationRuntime - injected dependency
-}
-
-export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: DAT.GUI, controllers: GUIControllers } {
+export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUIControllers } {
     const gui = new DAT.GUI();
-    const threeRuntime = options?.threeRuntime;
     
     // Simulation Controls
     var simcontrols = gui.addFolder('Simulation Controls');
@@ -35,7 +33,7 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
     
     // Terrain Parameters
     var terrainParameters = gui.addFolder('Terrain Parameters');
-    terrainParameters.add(controls, 'SimulationResolution', { 256: 256, 512: 512, 1024: 1024, 2048: 2048, 4096: 4096 });
+    const simulationResolutionController = terrainParameters.add(controls, 'SimulationResolution', { 256: 256, 512: 512, 1024: 1024, 2048: 2048, 4096: 4096 });
     terrainParameters.add(controls, 'TerrainScale', 0.1, 4.0);
     terrainParameters.add(controls, 'TerrainHeight', 1.0, 5.0);
     terrainParameters.add(controls, 'TerrainMask', { 
@@ -51,65 +49,87 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
         Craters: 10,
         Dunes: 11
     });
-    // Add ALL THREE.Terrain methods from the demo (matching demo exactly)
-    const terrainBaseTypeController = terrainParameters.add(controls, 'TerrainBaseType', { 
-        'Brownian': 'Brownian',
-        'Cosine': 'Cosine',
-        'CosineLayers': 'CosineLayers',
-        'DiamondSquare': 'DiamondSquare',
-        'Fault': 'Fault',
-        'Hill': 'Hill',
-        'HillIsland': 'HillIsland',
-        'Particles': 'Particles',
-        'Perlin': 'Perlin',
-        'PerlinDiamond': 'PerlinDiamond',
-        'PerlinLayers': 'PerlinLayers',
-        'Simplex': 'Simplex',
-        'SimplexLayers': 'SimplexLayers',
-        'Value': 'Value',
-        'Weierstrass': 'Weierstrass',
-        'Worley': 'Worley',
-        // Keep old numeric IDs for backward compatibility
-        'Ordinary FBM (Legacy)': 0, 
-        'Domain Warp (Legacy)': 1, 
-        'Terrace (Legacy)': 2, 
-        'Voroni (Legacy)': 3, 
-        'Ridge Noise (Legacy)': 4,
-        'Billow Noise (Legacy)': 5,
-        'Turbulence (Legacy)': 6,
-        'Craters (Legacy)': 7,
-        'Dunes (Legacy)': 8,
-        'Canyons (Legacy)': 9,
-        'Mountains (Legacy)': 10,
-        'Billowy Ridges (Legacy)': 11
+    const terrainBaseTypeController = terrainParameters.add(controls, 'TerrainBaseType', {
+        // Procedural generators
+        ordinaryFBM: 0,
+        domainWarp: 1,
+        terrace: 2,
+        voroni: 3,
+        ridgeNoise: 4,
+        billowNoise: 5,
+        turbulence: 6,
+        craters: 7,
+        dunes: 8,
+        canyons: 9,
+        mountains: 10,
+        billowyRidges: 11,
+        // THREE.Terrain ports
+        perlin: 12,
+        simplex: 13,
+        diamondSquare: 14,
+        fault: 15,
+        hill: 16,
+        hillIsland: 17,
+        particles: 18,
+        value: 19,
+        cosine: 20,
+        weierstrass: 21,
+        perlinLayers: 22,
+        simplexLayers: 23,
+        perlinDiamond: 24,
+        cosineLayers: 25,
+        // Imported heightmap (uses cached data)
+        importedHeightmap: 100
     });
-    
-    // Add onChange handler to regenerate terrain when type changes (dependency injection)
-    if (threeRuntime) {
-        console.log('[GUI] TerrainBaseType handler attached, threeRuntime available');
-        terrainBaseTypeController.onFinishChange((value: any) => {
-            console.log('[GUI] TerrainBaseType changed to:', value);
-            if (!threeRuntime) {
-                console.warn('[GUI] WARNING: threeRuntime not available when TerrainBaseType changed');
-                return;
-            }
-            const terrainRandom = {
-                seedOffset: [Math.random() * 256.0, Math.random() * 256.0],
-                duneDir: [Math.cos(Math.random() * Math.PI * 2.0), Math.sin(Math.random() * Math.PI * 2.0)],
-                craterDensity: 0.8 + Math.random() * 0.7,
-                canyonDepth: 0.45 + Math.random() * 0.5
-            };
-            threeRuntime.regenerateTerrain(controls, terrainRandom).catch((error) => {
-                console.error('[GUI] ERROR: Failed to regenerate terrain:', error);
-            });
-        });
-    } else {
-        console.warn('[GUI] WARNING: threeRuntime not available, TerrainBaseType handler not attached');
-    }
-    terrainParameters.add(controls, 'ResetTerrain');
+    terrainParameters.add(controls, 'Generate Terrain');
     terrainParameters.add(controls, 'Import Height Map');
     terrainParameters.add(controls, 'Clear Height Map');
     terrainParameters.add(controls, 'Export Height Map');
+
+    // Advanced Generator Parameters subfolder
+    var advancedGenParams = terrainParameters.addFolder('Advanced Generator');
+
+    // Noise parameters — store controller references for programmatic updates
+    const advancedControllers: DAT.GUIController[] = [];
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainFrequency', 0.1, 4.0).name('Frequency'));
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainAmplitude', 0.1, 2.0).name('Amplitude'));
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainOctaves', 1, 12).step(1).name('Octaves'));
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainLacunarity', 1.5, 3.0).name('Lacunarity'));
+    advancedControllers.push(advancedGenParams.add(controls, 'terrainPersistence', 0.3, 0.7).name('Persistence'));
+
+    // Seed and offset
+    advancedGenParams.add(controls, 'terrainSeed', 0, 1000).name('Seed');
+    advancedGenParams.add(controls, 'terrainOffsetX', -100, 100).name('Offset X');
+    advancedGenParams.add(controls, 'terrainOffsetY', -100, 100).name('Offset Y');
+
+    // Generator-specific parameters
+    var genSpecificParams = advancedGenParams.addFolder('Generator Specific');
+    advancedControllers.push(genSpecificParams.add(controls, 'terrainRidgeOffset', 0.5, 2.0).name('Ridge Offset'));
+    advancedControllers.push(genSpecificParams.add(controls, 'terrainRidgeGain', 1.0, 4.0).name('Ridge Gain'));
+    advancedControllers.push(genSpecificParams.add(controls, 'terrainTerraceCount', 4, 20).step(1).name('Terrace Count'));
+    advancedControllers.push(genSpecificParams.add(controls, 'terrainDomainWarpStrength', 0.5, 3.0).name('Domain Warp'));
+    advancedControllers.push(genSpecificParams.add(controls, 'craterDensity', 0.5, 2.0).name('Crater Density'));
+    advancedControllers.push(genSpecificParams.add(controls, 'canyonDepth', 0.3, 1.0).name('Canyon Depth'));
+
+    // Heightmap parameters (for imported heightmaps)
+    var heightmapParams = advancedGenParams.addFolder('Heightmap');
+    heightmapParams.add(controls, 'heightmapAmplitude', 0.1, 2.0).name('Amplitude');
+    heightmapParams.add(controls, 'heightmapInvert').name('Invert');
+
+    advancedGenParams.close(); // Closed by default to reduce clutter
+
+    // Apply per-generator defaults when terrain type changes
+    terrainBaseTypeController.onChange((value: number) => {
+        const generator = generatorRegistry.getByGPUTypeId(Number(value));
+        if (generator) {
+            const typeDefaults = generator.getGPUControlDefaults();
+            for (const [key, val] of Object.entries(typeDefaults)) {
+                (controls as any)[key] = val;
+            }
+            advancedControllers.forEach(c => c.updateDisplay());
+        }
+    });
+
     terrainParameters.open();
     
     // Erosion Parameters
@@ -125,9 +145,13 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
     const kcController = erosionpara.add(controls, 'Kc', 0.01, 0.5);
     const ksController = erosionpara.add(controls, 'Ks', 0.001, 0.2);
     const kdController = erosionpara.add(controls, 'Kd', 0.0001, 0.1);
-    erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10, lavaVolume: 11, lavaTemperature: 12, lavaTempVolume: 13, waterLavaContact: 14, rockLayering: 15 });
+    erosionpara.add(controls, 'TerrainDebug', { noDebugView: 0, sediment: 1, velocity: 2, velocityHeatmap: 9, terrain: 3, flux: 4, terrainflux: 5, maxslippage: 6, flowMap: 7, spikeDiffusion: 8, rockMaterial: 10, basaltHeight: 20, lavaHeight: 11, lavaTemperature: 12, lavaVelocity: 13, lavaVolume: 14, lavaLayering: 15, waterLavaContact: 16, lavaCrust: 17, lavaDeltaH: 18, thermalErosionRate: 19 });
     const advectionMethodController = erosionpara.add(controls, 'AdvectionMethod', { Semilagrangian: 0, MacCormack: 1 });
     const velocityMultiplierController = erosionpara.add(controls, 'VelocityMultiplier', 1.0, 5.0);
+    erosionpara.add(controls, 'AdvectionSpeedScaling', 0.1, 3.0);
+    erosionpara.add(controls, 'RainDegree', 0.5, 10.0);
+    erosionpara.add(controls, 'rockErosionResistance', 0.0, 1.0).name('Rock Resistance');
+    erosionpara.add(controls, 'basaltErosionResistance', 0.0, 1.0).name('Basalt Resistance');
     erosionpara.add(controls, 'Reset Erosion Parameters');
     erosionpara.open();
     
@@ -149,26 +173,8 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
     // Thermal Erosion Parameters
     var thermalerosionpara = gui.addFolder("Thermal Erosion Parameters");
     thermalerosionpara.add(controls, 'thermalTalusAngleScale', 1.0, 10.0);
+    thermalerosionpara.add(controls, 'thermalRate', 0.0, 2.0);
     thermalerosionpara.add(controls, 'thermalErosionScale', 0.0, 5.0);
-    
-    // Lava Physics Parameters
-    var lavapara = gui.addFolder("Lava Physics Parameters");
-    lavapara.add(controls, 'LavaViscosityPreExp', 1e-6, 1e-4);
-    lavapara.add(controls, 'LavaActivationEnergy', 100000.0, 300000.0);
-    lavapara.add(controls, 'LavaDensity', 2000.0, 3000.0);
-    lavapara.add(controls, 'LavaSpecificHeat', 800.0, 1500.0);
-    lavapara.add(controls, 'LavaAirHeatTransfer', 50.0, 500.0);
-    lavapara.add(controls, 'LavaWaterHeatTransfer', 1000.0, 5000.0);
-    lavapara.add(controls, 'LavaAmbientTemp', 0.0, 30.0);
-    lavapara.add(controls, 'LavaWaterTemp', 0.0, 20.0);
-    lavapara.add(controls, 'LavaContactHeatTransfer', 100.0, 500.0);
-    lavapara.add(controls, 'LavaMeltThreshold', 1000.0, 1400.0);
-    lavapara.add(controls, 'LavaLatentHeatFusion', 200000.0, 600000.0);
-    lavapara.add(controls, 'LavaSolidificationTemp', 700.0, 1000.0);
-    lavapara.add(controls, 'LavaInitialTemp', 1000.0, 1300.0);
-    lavapara.add(controls, 'LavaGlowIntensity', 0.5, 5.0);
-    lavapara.add(controls, 'LavaPatternFrequency', 1.0, 32.0);
-    lavapara.close();
     
     // Terrain Editor
     var terraineditor = gui.addFolder('Terrain Editor');
@@ -191,7 +197,6 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
         }
     });
     const flattenTargetHeightController = terraineditor.add(controls, 'flattenTargetHeight', 0.0, 500.0);
-    terraineditor.add(controls, 'rockErosionResistance', 0.0, 1.0);
     const brushSizeController = terraineditor.add(controls, 'brushSize', 0.1, 20.0);
     const brushStrengthController = terraineditor.add(controls, 'brushStrenth', 0.1, 2.0);
     const brushOperationController = terraineditor.add(controls, 'brushOperation', { Add: 0, Subtract: 1 });
@@ -251,54 +256,122 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
         }
     });
     
-  // Rendering Parameters
-  var renderingpara = gui.addFolder('Rendering Parameters');
-  renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);
+    // Lava Parameters — organized into logical subfolders
+    var lavapara = gui.addFolder('Lava Parameters');
 
-  // Ensure DebugMode exists on controls to avoid dat-gui runtime errors
-  if (!(controls as any).hasOwnProperty('DebugMode')) {
-    (controls as any).DebugMode = 0;
-  }
-  // Opt-in to live heightmap from simulation (otherwise uses initial CPU texture)
-  if (!(controls as any).hasOwnProperty('UseSimHeightmap')) {
-    (controls as any).UseSimHeightmap = false;
-  }
+    // Flow — controls how lava moves
+    var lavaFlow = lavapara.addFolder('Flow');
+    lavaFlow.add(controls, 'lavaViscosityScale', 0.1, 10.0).name('Viscosity');
+    lavaFlow.add(controls, 'lavaYieldStress', 0.0, 2.0).name('Yield Stress');
+    lavaFlow.add(controls, 'lavaViscTempScale', 1.0, 10.0).name('Visc-Temp Curve');
+    lavaFlow.add(controls, 'lavaEmissionTemp', 600, 1200).step(10).name('Source °C');
 
-  const terrainPaletteController = renderingpara.add(controls, 'TerrainPlatte', { AlpineMtn: 0, Desert: 1, Jungle: 2 });
-  const snowRangeController = renderingpara.add(controls, 'SnowRange', 0.0, 100.0);
-  const forestRangeController = renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
-  const useSimHeightmapController = renderingpara.add(controls as any, 'UseSimHeightmap');
-  const threeDebugController = renderingpara.add(controls as any, 'DebugMode', {
-    Normal: 0,
-    HeightGray: 1,
-    UVs: 2,
-    Normals: 3,
-    WorldY: 4,
-    FlatDetector: 5
-  });
-  
-  // Update terrain material when rendering parameters change
-  if (threeRuntime) {
-    terrainPaletteController.onFinishChange(() => {
-      threeRuntime.updateMaterialFromControls();
-      });
-    snowRangeController.onFinishChange(() => {
-      threeRuntime.updateMaterialFromControls();
-    });
-    forestRangeController.onFinishChange(() => {
-      threeRuntime.updateMaterialFromControls();
-    });
-    useSimHeightmapController.onFinishChange(() => {
-      threeRuntime.updateMaterialFromControls();
-    });
-    threeDebugController.onFinishChange(() => {
-      threeRuntime.updateMaterialFromControls();
-    });
-  }
+    // Cooling — controls how lava loses heat and solidifies
+    var lavaCooling = lavapara.addFolder('Cooling');
+    lavaCooling.add(controls, 'lavaCoolingRate', 0.0001, 0.02).name('Surface Cooling');
+    lavaCooling.add(controls, 'lavaProportionalCooling', 0.0, 0.02).name('Thin-Edge Cooling');
+    lavaCooling.add(controls, 'lavaAmbientCoolingRate', 0.0, 0.02).name('Ambient Cooling');
+    lavaCooling.add(controls, 'lavaSolidificationThreshold', 60, 600).step(10).name('Solidify °C');
+    lavaCooling.add(controls, 'lavaRockFraction', 0.0, 1.0).name('Rock Fraction');
+    lavaCooling.add(controls, 'lavaKCond', 0.01, 1.0).name('Conductivity');
+
+    // Crust — controls crust formation and its effect on flow
+    var lavaCrust = lavapara.addFolder('Crust');
+    lavaCrust.add(controls, 'lavaCrustStrength', 0.1, 2.0).name('Barrier Strength');
+    lavaCrust.add(controls, 'lavaCrustGrowthRate', 0.001, 0.1).name('Growth Rate');
+    lavaCrust.add(controls, 'lavaSofteningTemp', 360, 1080).step(10).name('Re-melt °C');
+    lavaCrust.add(controls, 'lavaCrustMixSuppression', 0.0, 5.0).name('Insulation');
+
+    // Erosion — controls thermal erosion of terrain by hot lava
+    var lavaErosion = lavapara.addFolder('Erosion');
+    lavaErosion.add(controls, 'lavaThermalErosionRate', 0.01, 1.0).name('Erosion Rate');
+    lavaErosion.add(controls, 'lavaMaxErosionPerStep', 0.0001, 0.01).name('Max Per Step');
+    lavaErosion.add(controls, 'lavaErosionSpeedClamp', 1.0, 20.0).name('Speed Clamp');
+    lavaErosion.add(controls, 'lavaRockMeltThreshold', 360, 1080).step(10).name('Rock Melt °C');
+
+    // Color — controls the temperature-to-color ramp (live preview)
+    var lavaColor = lavapara.addFolder('Color Ramp');
+    lavaColor.add(controls, 'lavaOrangeTemp', 240, 840).step(10).name('Orange °C');
+    lavaColor.add(controls, 'lavaYellowTemp', 480, 1080).step(10).name('Yellow °C');
+    lavaColor.add(controls, 'lavaEmissiveStrength', 0.0, 4.0).step(0.1).name('Emissive Glow');
+
+    // Channeling — controls how lava forms focused channels
+    var lavaChannel = lavapara.addFolder('Channeling');
+    lavaChannel.add(controls, 'lavaFlowStrength', 0.01, 1.0).step(0.01).name('Flow Strength');
+    lavaChannel.add(controls, 'lavaFlowIterations', 1, 32).step(1).name('Flow Iterations');
+    lavaChannel.add(controls, 'lavaDepthBoost', 0.0, 40.0).name('Depth Boost');
+    lavaChannel.add(controls, 'lavaMomentum', 0.0, 0.95).name('Momentum');
+    lavaChannel.add(controls, 'lavaNoiseResist', 1.0, 5.0).name('Noise Power');
+
+    // Layer system — controls three-layer solidification
+    var lavaSolid = lavapara.addFolder('Solidification');
+    lavaSolid.add(controls, 'lavaCoolificationRate', 0.0, 0.1).name('Cooling Rate');
+    lavaSolid.add(controls, 'lavaBasaltificationRate', 0.0, 0.05).name('Basalt Rate');
+    lavaSolid.add(controls, 'lavaReMeltRate', 0.0, 0.2).name('Re-Melt Rate');
+    lavaSolid.add(controls, 'lavaBasaltMeltRate', 0.0, 0.02).name('Basalt Melt');
+    lavaSolid.add(controls, 'lavaNoiseModulation', 0.0, 1.0).name('Noise Variation');
+
+    // Water interaction
+    var lavaWater = lavapara.addFolder('Water');
+    lavaWater.add(controls, 'lavaWaterInteraction').name('Enabled');
+    lavaWater.add(controls, 'lavaHeatRadius', 1, 4).step(1).name('Heat Radius');
+    lavaWater.add(controls, 'lavaHeatScale', 0.1, 5.0).name('Heat Scale');
+
+    // Test preset — resets all lava params to tuned defaults
+    lavapara.add({
+        applyLavaTestPreset: () => {
+            controls.lavaViscosityScale = 5.0;
+            controls.lavaYieldStress = 0.2;
+            controls.lavaCoolingRate = 0.002;
+            controls.lavaProportionalCooling = 0.0004;
+            controls.lavaSolidificationThreshold = 240;
+            controls.lavaRockFraction = 0.7;
+            controls.lavaThermalErosionRate = 0.05;
+            controls.lavaRockMeltThreshold = 840;
+            controls.lavaEmissionTemp = 1200;
+            controls.lavaCrustStrength = 0.3;
+            controls.lavaCrustGrowthRate = 0.005;
+            controls.lavaSofteningTemp = 720;
+            controls.lavaKCond = 0.3;
+            controls.lavaCrustMixSuppression = 2.0;
+            controls.lavaAmbientCoolingRate = 0.0004;
+            controls.lavaViscTempScale = 4.0;
+            controls.lavaMaxErosionPerStep = 0.0003;
+            controls.lavaErosionSpeedClamp = 3.0;
+            controls.lavaWaterInteraction = true;
+            controls.lavaHeatRadius = 2;
+            controls.lavaOrangeTemp = 540;
+            controls.lavaYellowTemp = 780;
+            controls.lavaEmissiveStrength = 1.5;
+            controls.lavaFlowStrength = 0.3;
+            controls.lavaFlowIterations = 16;
+            controls.lavaDepthBoost = 20.0;
+            controls.lavaMomentum = 0.7;
+            controls.lavaNoiseResist = 3.0;
+            controls.lavaCoolificationRate = 0.01;
+            controls.lavaBasaltificationRate = 0.01;
+            controls.lavaReMeltRate = 0.05;
+            controls.lavaBasaltMeltRate = 0.005;
+            controls.lavaNoiseModulation = 0.5;
+            gui.controllersRecursive().forEach((c: any) => c.updateDisplay?.());
+            console.log('[LAVA_SIM] Applied lava test preset');
+        }
+    }, 'applyLavaTestPreset').name('Reset Defaults');
+    lavapara.close();
+
+    // Rendering Parameters
+    var renderingpara = gui.addFolder('Rendering Parameters');
+    renderingpara.add(controls, 'WaterTransparency', 0.0, 1.0);
+    renderingpara.add(controls, 'TerrainPlatte', { AlpineMtn: 0, Desert: 1, Jungle: 2 });
+    renderingpara.add(controls, 'SnowRange', 0.0, 100.0);
+    renderingpara.add(controls, 'ForestRange', 0.0, 50.0);
     renderingpara.add(controls, 'ShowFlowTrace');
     renderingpara.add(controls, 'SedimentTrace');
-    renderingpara.add(controls, 'showScattering');
-    renderingpara.add(controls, 'enableBilateralBlur');
+    var terrainLayers = renderingpara.addFolder('Terrain Layers');
+    terrainLayers.add(controls, 'GrassLine', 0.0, 0.5).step(0.01).name('Grass Line');
+    terrainLayers.add(controls, 'RockLine', 0.2, 0.9).step(0.01).name('Rock Line');
+    terrainLayers.add(controls, 'SnowLine', 0.3, 1.0).step(0.01).name('Snow Line');
+    terrainLayers.add(controls, 'SlopeRockAmount', 0.0, 3.0).step(0.1).name('Slope Rock');
     var renderingparalightpos = renderingpara.addFolder('sunPos/Dir');
     renderingparalightpos.add(controls, 'lightPosX', -1.0, 1.0);
     renderingparalightpos.add(controls, 'lightPosY', 0.0, 1.0);
@@ -313,7 +386,9 @@ export function setupGUI(controls: Controls, options?: GUISetupOptions): { gui: 
             brushSizeController,
             brushStrengthController,
             brushOperationController,
-            flattenTargetHeightController
+            flattenTargetHeightController,
+            terrainBaseTypeController,
+            simulationResolutionController
         }
     };
 }

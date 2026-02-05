@@ -1,4 +1,13 @@
-import { simres, shadowMapResolution } from './simulation-state';
+/**
+ * @deprecated This module is deprecated. Use LegacyTexturePool instead.
+ * No production code should import simulation-state; this module uses local defaults only.
+ *
+ * This module will be removed in a future version. All texture management
+ * should be done through the LegacyTexturePool class which provides proper
+ * dependency injection and eliminates module-level singletons.
+ */
+const DEFAULT_SIMRES = 1024;
+const DEFAULT_SHADOW_MAP_RESOLUTION = 4096;
 
 // We need to get gl_context from the caller, so we'll pass it as a parameter
 let gl_context: WebGL2RenderingContext;
@@ -44,12 +53,6 @@ export let read_sediment_blend: WebGLTexture;
 export let write_sediment_blend: WebGLTexture;
 export let sediment_advect_a: WebGLTexture;
 export let sediment_advect_b: WebGLTexture;
-
-// Lava simulation textures
-export let read_lava_tex: WebGLTexture;
-export let write_lava_tex: WebGLTexture;
-export let read_lava_flux_tex: WebGLTexture;
-export let write_lava_flux_tex: WebGLTexture;
 
 // Height map texture for importing external height maps
 export let heightmap_tex: WebGLTexture | null = null;
@@ -109,10 +112,6 @@ export function resizeTextures4Simulation(context: WebGL2RenderingContext, simre
     LE_recreate_texture(simres, simres, simulationTextureSampler, write_sediment_blend);
     LE_recreate_texture(simres, simres, simulationTextureSampler, sediment_advect_a);
     LE_recreate_texture(simres, simres, simulationTextureSampler, sediment_advect_b);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_lava_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_lava_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, read_lava_flux_tex);
-    LE_recreate_texture(simres, simres, simulationTextureSampler, write_lava_flux_tex);
 
     // recreate all framebuffer/renderbuffer related to simulation
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, render_buffer);
@@ -157,13 +156,7 @@ export function setupFramebufferandtextures(context: WebGL2RenderingContext, sim
     sediment_advect_a = LE_create_texture(simres, simres, simulationTextureSampler);
     sediment_advect_b = LE_create_texture(simres, simres, simulationTextureSampler);
 
-    // Create lava textures
-    read_lava_tex = LE_create_texture(simres, simres, simulationTextureSampler);
-    write_lava_tex = LE_create_texture(simres, simres, simulationTextureSampler);
-    read_lava_flux_tex = LE_create_texture(simres, simres, simulationTextureSampler);
-    write_lava_flux_tex = LE_create_texture(simres, simres, simulationTextureSampler);
-
-    shadowMap_tex = LE_create_screen_texture(shadowMapResolution, shadowMapResolution, gl_context.LINEAR);
+    shadowMap_tex = LE_create_screen_texture(DEFAULT_SHADOW_MAP_RESOLUTION, DEFAULT_SHADOW_MAP_RESOLUTION, gl_context.LINEAR);
     scene_depth_tex = LE_create_screen_texture(window.innerWidth, window.innerHeight, gl_context.LINEAR);
     bilateral_filter_horizontal_tex = LE_create_screen_texture(window.innerWidth, window.innerHeight, gl_context.LINEAR);
     bilateral_filter_vertical_tex = LE_create_screen_texture(window.innerWidth, window.innerHeight, gl_context.LINEAR);
@@ -175,7 +168,7 @@ export function setupFramebufferandtextures(context: WebGL2RenderingContext, sim
     shadowMap_render_buffer = gl_context.createRenderbuffer();
     gl_context.bindRenderbuffer(gl_context.RENDERBUFFER, shadowMap_render_buffer);
     gl_context.renderbufferStorage(gl_context.RENDERBUFFER, gl_context.DEPTH_COMPONENT16,
-        shadowMapResolution, shadowMapResolution);
+        DEFAULT_SHADOW_MAP_RESOLUTION, DEFAULT_SHADOW_MAP_RESOLUTION);
 
     deferred_frame_buffer = gl_context.createFramebuffer();
     deferred_render_buffer = gl_context.createRenderbuffer();
@@ -305,14 +298,3 @@ export function swapBilateralFilterTextures(): void {
     bilateral_filter_vertical_tex = tmp;
 }
 
-export function swapLavaTextures(): void {
-    const tmp = read_lava_tex;
-    read_lava_tex = write_lava_tex;
-    write_lava_tex = tmp;
-}
-
-export function swapLavaFluxTextures(): void {
-    const tmp = read_lava_flux_tex;
-    read_lava_flux_tex = write_lava_flux_tex;
-    write_lava_flux_tex = tmp;
-}

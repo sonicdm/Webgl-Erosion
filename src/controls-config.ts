@@ -48,7 +48,7 @@ export const defaultControlsConfig: ControlsConfig = {
     keys: {
         brushActivate: 'LEFT',              // Keyboard key OR mouse button ('LEFT', 'MIDDLE', 'RIGHT') for brush
         permanentWaterSource: 'r',       // Toggle permanent water source at cursor
-        permanentLavaSource: 'l',       // Toggle permanent lava source at cursor
+        permanentLavaSource: 't',        // Toggle permanent lava source at cursor
         removePermanentSource: 'p',      // Remove all permanent sources
     },
     mouse: {
@@ -76,13 +76,13 @@ export const defaultControlsConfig: ControlsConfig = {
         dampingFactor: 0.08,             // Damping factor (0.0 to 1.0)
         movement: {
             enableWASD: true,             // Enable WASD movement
-            moveSpeed: 150.0,              // Base speed: 150.0 units/second (increased for terrain scale ~300 units)
+            moveSpeed: 0.3,                // Base speed: 0.3 units/second (reduced from 2.0)
             fastMoveMultiplier: 3.0,       // 3x speed with Shift
             enableVerticalMovement: true,   // Space = up, Shift = down
         },
     },
     raycast: {
-        method: 'heightmap',               // Default raycast method: 'heightmap' for performance (BVH is expensive)
+        method: 'bvh',                     // Default raycast method: 'bvh' for better accuracy
     },
 };
 

@@ -1,4 +1,4 @@
-﻿## Terrain erosion sandbox in WebGL
+﻿## Terrain Erosion Sandbox — WebGPU / Three.js TSL
 
 ![](screenshot/tt.PNG)
 ![](screenshot/mtnn.PNG)
@@ -212,11 +212,67 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 
 ![](screenshot/scatter1.PNG)
 
-## Note: MacOS currently unsupported, Recommended GPU is GTX 1060 and above
+## Requirements
+
+- A browser with **WebGPU** support (Chrome 113+, Edge 113+, Firefox Nightly with flag)
+- GPU with `float32-filterable` feature (most discrete GPUs from 2016+; GTX 1060 or equivalent and above recommended)
+- macOS: WebGPU is supported in recent Safari Technology Preview and Chrome; earlier versions may not work
 
 ## Enhanced Version Updates (Since Fork)
 
-## update 01/2025 (Latest):
+## update 02/2026 (Latest):
+- **Lava Channeling & Flow Mechanics**
+  - Upgraded lava flux from 4-neighbor cardinal to 8-neighbor (cardinal + diagonal) flow model
+  - Exponential depth boost (`pow(2.0, terrainDiff * strength)`) — lava strongly prefers existing channels
+  - Cubed noise resistance (`pow(noiseVal, power)`) — micro-terrain roughness creates path selectivity
+  - Momentum bias — velocity dot-product alignment encourages straight-line flow over random spread
+  - Multi-octave noise texture generated at startup (scales 12, 6, 3 cells) for channeling variation
+
+- **Three-Layer Solidification System**
+  - Mobile Lava → Cool Lava → Basalt phase transition chain replaces direct lava-to-terrain conversion
+  - Cool lava acts as an intermediate insulating crust that resists further flow
+  - Basalt is permanent volcanic rock — never converts to terrain, accumulates over eruptions
+  - Speed-gated solidification: fast-moving lava resists crusting
+  - Noise-modulated crusting for natural irregular crust patterns
+  - Hysteresis re-melting: hot lava (T > 0.6) can re-melt cool lava back to mobile
+
+- **Thermal Erosion with Basalt**
+  - Hot lava erodes basalt at 50% of terrain erosion rate before falling through to terrain
+  - Erosion resistance ordering: cool lava (easiest) < terrain < basalt < rock (hardest)
+  - Surface height stacking: terrain + basalt + coolLava + water + mobileLava
+
+- **New GUI Controls**
+  - Channeling subfolder: Depth Boost, Momentum, Noise Power
+  - Solidification subfolder: Cooling Rate, Basalt Rate, Re-Melt Rate, Basalt Melt, Noise Variation
+
+## update 01/2026:
+- **WebGPU Migration**
+  - Replaced the entire WebGL rendering pipeline with a single WebGPU pipeline using Three.js `WebGPURenderer`
+  - All simulation passes (water increment, flux, velocity, erosion, sediment advection, thermal erosion, evaporation) ported from GLSL fragment shaders to WGSL compute shaders
+  - Terrain generation (FBM, domain warp, terrace, voronoi, ridge, billow, etc.) now runs as a WebGPU compute pass
+  - Capability detection with adapter/device caching; graceful fallback messaging when WebGPU is unavailable
+
+- **Three.js TSL (Three Shading Language) Materials**
+  - Terrain, water, and sky materials rewritten as TSL node graphs (`MeshBasicNodeMaterial` with `colorNode`/`positionNode`)
+  - Vertex displacement from heightmap, 4-neighbor central-difference normals, palette selection, shadow mapping, and all debug visualizations built as composable TSL nodes
+  - Water material: depth-based transparency, animated normals, Fresnel reflection, soft specular (4-neighbor central-difference normals to eliminate stripe artifacts)
+  - Dependency-injected shader node architecture (`TerrainShaderNodeController` composing `TerrainSamplingNode`, `TerrainPaletteNode`, `TerrainDebugViewNode`, `TerrainShadowNode`)
+
+- **In-Shader Source Indicators**
+  - Water source positions packed into a 16x1 RGBA32F `DataTexture` (R=u, G=v, B=size, A=active), sampled per-fragment
+  - Subtle red glow overlay that conforms to terrain displacement in real time
+
+- **Performance**
+  - Async shader compilation (`compileAsync`) with loading screen
+  - TSL node count optimizations: algebraic simplification of additive blends (`mix(a, a+c, t)` to `a + c*t`) to prevent exponential node traversal in unrolled loops
+  - Chunked GPU readback for brush raycasting; HMR-safe device cleanup
+  - Adaptive flow trace and sediment trace overlays toggled via uniforms (no graph rebuild)
+
+- **Debug Visualizations**
+  - All 7 debug views restored under WebGPU: sediment, velocity, terrain heightmap, flux, terrain flux, flow map, rock material
+  - Flow trace overlay (yellow tint where water has flowed) and 3-band sediment trace overlay
+
+## update 01/2025:
 - **Terrain Mask System**
   - Added 6 new terrain masks: Square, Ring, RadialGradient, Corner, Diagonal, Cross
   - Total of 9 terrain mask options now available (OFF, Sphere, Slope, Square, Ring, RadialGradient, Corner, Diagonal, Cross)
@@ -324,21 +380,27 @@ To deploy manually, you can also trigger the workflow from the Actions tab in Gi
 ### Future Plans:
 - ~~Image (height map) I/O~~ ✅ **Completed** - Height map import/export functionality added
 - ~~Multi-layered (rock/sand/etc) erosion~~ ✅ **Partially Completed** - Rock material system with erosion resistance implemented
+- ~~WebGPU pipeline~~ ✅ **Completed** - Full WebGPU migration with WGSL compute shaders and TSL materials
 - PBR (Physically Based Rendering)
-- Adaptive simulation utilizing quadtree(or just tiles) for sim optimization
-- Depth upsampling/downsampling for volumetric rendering optimization
+- Adaptive simulation utilizing quadtree (or just tiles) for sim optimization
+- Ocean plane with animated waves and edge blending
 - Better GUI & Visualization (ongoing improvements)
 - Terrain features like instanced tree placements
 - Other postprocessing effects (ray marched cloud for example, since ray marched Mie scattering is done, cloud should be fairly simple to work based on it)
 - Biomes
-- Eventual goal : Erosion based games, "FROM DUST" would be a good example
+- Eventual goal: Erosion based games, "FROM DUST" would be a good example
 
 ### Limitations are there however for grid based method
 - mass conservation of sediment is not guaranteed 
 
 
 ### Reference
-- [Fast Hydraulic Erosion Simulation and Visualization on GPU](http://www-ljk.imag.fr/Publications/Basilic/com.lmc.publi.PUBLI_Inproceedings@117681e94b6_fff75c/FastErosion_PG07.pdf)
-- [Interactive Terrain Modeling Using Hydraulic Erosion](https://cgg.mff.cuni.cz/~jaroslav/papers/2008-sca-erosim/2008-sca-erosiom-fin.pdf)
-- [Volumetric Lights for Unity 5](https://github.com/SlightlyMad/VolumetricLights)
-- ShaderX7 Advanced Rendering Techniques : starting page 207
+- [Fast Hydraulic Erosion Simulation and Visualization on GPU](http://www-ljk.imag.fr/Publications/Basilic/com.lmc.publi.PUBLI_Inproceedings@117681e94b6_fff75c/FastErosion_PG07.pdf) — primary hydraulic erosion algorithm
+- [Interactive Terrain Modeling Using Hydraulic Erosion](https://cgg.mff.cuni.cz/~jaroslav/papers/2008-sca-erosim/2008-sca-erosiom-fin.pdf) — thermal erosion pipe model
+- ShaderX7 Advanced Rendering Techniques, p. 207 — MacCormack advection scheme
+- [Three.js WebGPU Renderer](https://threejs.org/docs/#api/en/renderers/WebGPURenderer) — WebGPU rendering backend
+- [Three.js TSL (Three Shading Language)](https://github.com/mrdoob/three.js/wiki/Three.js-Shading-Language) — node-based shader graph system
+- [WebGPU Specification](https://www.w3.org/TR/webgpu/) — W3C WebGPU API
+- [WGSL Specification](https://www.w3.org/TR/WGSL/) — WebGPU Shading Language
+- [Volumetric Lights for Unity 5](https://github.com/SlightlyMad/VolumetricLights) — depth-aware bilateral blur for volumetric scattering
+- [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) — BVH accelerated raycasting for terrain interaction

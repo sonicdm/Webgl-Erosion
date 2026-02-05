@@ -1,0 +1,26 @@
+---
+description: WebGPU+TSL refactor rules for Cursor agents
+alwaysApply: true
+---
+
+# WebGPU+TSL Refactor Rules
+
+- Work only on `feature/webgpu-tsl-pipeline` or its sub-branches.
+- Do not add or modify legacy WebGL/VTF GLSL in master.
+- No production imports of `simulation-state`; use holders and DI.
+- Use WebGPURenderer + TSL/NodeMaterial only.
+- Update `docs/refactor-webgpu-tsl/PROGRESS.md` (and phase files) for changes.
+- Run tests with `npm run test:ci`.
+- Use MCP browser tools for UI automation and screenshots.
+- Use MCP tools to run browser-based testing (navigation, clicks, screenshots).
+- Always use AppContext + holders; no module-level globals or simulation-state.
+
+# PowerShell + Commands
+
+- Shell commands must be PowerShell syntax (Windows):
+  - Env: `$env:VAR = "value"` (not `export VAR=value`)
+  - Remove: `Remove-Item -Recurse -Force path` (not `rm -rf`)
+  - Chain: `;` or `&&` (PowerShell 7+)
+- Tests: use `npm run test:ci` (not `npm test`).
+- Build: `npm run build`.
+- TS/TSX typecheck: `npx tsc -p tsconfig.json --noEmit`.

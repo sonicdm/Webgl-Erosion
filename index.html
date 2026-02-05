@@ -51,31 +51,30 @@
           font-size: 14px;
           margin-top: 10px;
         }
-        .progress-bar-container {
-          width: 300px;
-          height: 8px;
-          background: rgba(255, 255, 255, 0.1);
+        .loading-progress-bar {
+          width: 240px;
+          height: 6px;
+          margin-top: 12px;
+          background: rgba(255, 255, 255, 0.15);
           border-radius: 4px;
-          margin-top: 15px;
           overflow: hidden;
         }
-        .progress-bar {
+        .loading-progress-bar-fill {
           height: 100%;
-          background: linear-gradient(90deg, #4A90E2, #5BA3F5);
-          border-radius: 4px;
-          transition: width 0.2s ease-out;
           width: 0%;
+          background: #4A90E2;
+          transition: width 0.2s ease;
         }
       </style>
   </head>
   <body>
     <canvas id="canvas"></canvas>
-    <div id="terrain-loading-overlay">
+    <div id="terrain-loading-overlay" class="visible">
       <div class="loading-spinner"></div>
-      <div class="loading-text">Generating Terrain...</div>
+      <div class="loading-text" id="loading-text">Initializing WebGPU...</div>
       <div class="loading-progress" id="loading-progress-text"></div>
-      <div class="progress-bar-container">
-        <div class="progress-bar" id="loading-progress-bar"></div>
+      <div class="loading-progress-bar">
+        <div class="loading-progress-bar-fill" id="loading-progress-bar"></div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

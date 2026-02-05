@@ -10,20 +10,20 @@ import { sampleHeightBilinear } from './raycast';
  * @param simres - Simulation resolution (heightmap size)
  * @param heightMapBuffer - CPU buffer containing height data (Float32Array)
  * @param scale - Scale factor for terrain (default: 1.0)
- * @param onProgress - Optional callback to report progress (0.0 to 1.0) during geometry creation
+ * @param meshResolution - Grid resolution for BVH mesh (default: simres)
  * @returns Three.js BufferGeometry ready for BVH building
  */
 export function createTerrainGeometry(
     simres: number,
     heightMapBuffer: Float32Array,
     scale: number = 1.0,
-    onProgress?: (progress: number) => void
+    meshResolution: number = simres
 ): BufferGeometry {
     const geometry = new BufferGeometry();
     
     // Calculate number of vertices (grid size)
-    const width = simres;
-    const height = simres;
+    const width = meshResolution;
+    const height = meshResolution;
     const numVertices = width * height;
     
     // Create position array (x, y, z for each vertex)
@@ -36,24 +36,20 @@ export function createTerrainGeometry(
     // Use bilinear interpolation to match shader texture sampling and heightmap raycast
     let posIdx = 0;
     const uv = vec2.create();
-    const totalVertices = width * height;
-    let processedVertices = 0;
-    // Update more frequently for smoother progress (every ~2%)
-    const progressUpdateInterval = Math.max(1, Math.floor(totalVertices / 50));
-    
     for (let z = 0; z < height; z++) {
         for (let x = 0; x < width; x++) {
-            // Calculate UV coordinates in [0, 1] range
-            // Match Plane geometry UV calculation: uvs are x * normalize where normalize = 1.0 / width
+            // Calculate UV coordinates in [0, 1] range (match PlaneGeometry: v is flipped)
             const u = x / (width - 1);
             const v = z / (height - 1);
+            const vFlipped = 1 - v;
             
             // Use bilinear interpolation to sample height (matches shader texture() and heightmap raycast)
             uv[0] = u;
-            uv[1] = v;
+            uv[1] = vFlipped;
             const heightValue = sampleHeightBilinear(uv, simres, heightMapBuffer);
             
-            // Heights are stored as RAW: worldHeight * simres
+            // Convert height to world space (matching terrain-vert.glsl calculation)
+            // In shader: yval = texture(hightmap, vs_Uv).x / u_SimRes
             const worldHeight = heightValue / simres;
             
             // Position vertices in world space
@@ -71,23 +67,11 @@ export function createTerrainGeometry(
             // Store UV coordinates for this vertex (for accurate interpolation)
             const uvIdx = (z * width + x) * 2;
             uvs[uvIdx] = u;
-            uvs[uvIdx + 1] = v;
-            
-            // Report progress during vertex generation (0.0 to 0.7 of geometry phase)
-            processedVertices++;
-            if (onProgress && processedVertices % progressUpdateInterval === 0) {
-                const vertexProgress = processedVertices / totalVertices;
-                onProgress(vertexProgress * 0.7); // Vertices are 70% of geometry creation
-            }
+            uvs[uvIdx + 1] = vFlipped;
         }
     }
     
     // Generate indices for triangles (two triangles per quad)
-    const totalQuads = (width - 1) * (height - 1);
-    let processedQuads = 0;
-    // Update more frequently for smoother progress (every ~5%)
-    const quadProgressUpdateInterval = Math.max(1, Math.floor(totalQuads / 20));
-    
     for (let z = 0; z < height - 1; z++) {
         for (let x = 0; x < width - 1; x++) {
             const topLeft = z * width + x;
@@ -100,19 +84,7 @@ export function createTerrainGeometry(
             
             // Second triangle: topRight, bottomLeft, bottomRight
             indices.push(topRight, bottomLeft, bottomRight);
-            
-            // Report progress during index generation (0.7 to 1.0 of geometry phase)
-            processedQuads++;
-            if (onProgress && processedQuads % quadProgressUpdateInterval === 0) {
-                const quadProgress = processedQuads / totalQuads;
-                onProgress(0.7 + (quadProgress * 0.3)); // Indices are 30% of geometry creation
-            }
         }
-    }
-    
-    // Report completion
-    if (onProgress) {
-        onProgress(1.0);
     }
     
     // Set geometry attributes
@@ -134,12 +106,14 @@ export function createTerrainGeometry(
  * @param simres - Simulation resolution
  * @param heightMapBuffer - Updated height data
  * @param scale - Scale factor
+ * @param meshResolution - Grid resolution for BVH mesh (default: simres)
  */
 export function updateTerrainGeometry(
     geometry: BufferGeometry,
     simres: number,
     heightMapBuffer: Float32Array,
-    scale: number = 1.0
+    scale: number = 1.0,
+    meshResolution: number = simres
 ): void {
     const positionAttribute = geometry.getAttribute('position') as BufferAttribute;
     const uvAttribute = geometry.getAttribute('uv') as BufferAttribute;
@@ -151,8 +125,8 @@ export function updateTerrainGeometry(
     
     const positions = positionAttribute.array as Float32Array;
     const uvs = uvAttribute ? uvAttribute.array as Float32Array : null;
-    const width = simres;
-    const height = simres;
+    const width = meshResolution;
+    const height = meshResolution;
     
     // Update vertex positions using bilinear interpolation
     let posIdx = 0;
@@ -162,10 +136,11 @@ export function updateTerrainGeometry(
         for (let x = 0; x < width; x++) {
             const u = x / (width - 1);
             const v = z / (height - 1);
+            const vFlipped = 1 - v;
             
             // Use bilinear interpolation to match shader sampling
             uv[0] = u;
-            uv[1] = v;
+            uv[1] = vFlipped;
             const heightValue = sampleHeightBilinear(uv, simres, heightMapBuffer);
             
             const worldHeight = heightValue / simres;
@@ -180,7 +155,7 @@ export function updateTerrainGeometry(
             // Update UV coordinates if they exist
             if (uvs) {
                 uvs[uvIdx++] = u;
-                uvs[uvIdx++] = v;
+                uvs[uvIdx++] = vFlipped;
             }
         }
     }

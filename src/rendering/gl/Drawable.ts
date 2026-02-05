@@ -1,6 +1,11 @@
-import {gl} from '../../globals';
+// WebGL constants (standard values)
+const GL_TRIANGLES = 0x0004;
+const GL_ELEMENT_ARRAY_BUFFER = 0x8893;
+const GL_ARRAY_BUFFER = 0x8892;
+const GL_STATIC_DRAW = 0x88E4;
 
 abstract class Drawable {
+  protected gl: WebGL2RenderingContext;
   count: number = 0;
 
   bufIdx: WebGLBuffer;
@@ -13,61 +18,65 @@ abstract class Drawable {
   norBound: boolean = false;
   uvBound : boolean = false;
 
-  mode = gl.TRIANGLES;
+  mode = GL_TRIANGLES;
+
+  constructor(gl: WebGL2RenderingContext) {
+    this.gl = gl;
+  }
 
   abstract create() : void;
 
   destory() {
-    gl.deleteBuffer(this.bufIdx);
-    gl.deleteBuffer(this.bufPos);
-    gl.deleteBuffer(this.bufNor);
-    gl.deleteBuffer(this.bufUv);
+    this.gl.deleteBuffer(this.bufIdx);
+    this.gl.deleteBuffer(this.bufPos);
+    this.gl.deleteBuffer(this.bufNor);
+    this.gl.deleteBuffer(this.bufUv);
   }
 
   generateIdx() {
     this.idxBound = true;
-    this.bufIdx = gl.createBuffer();
+    this.bufIdx = this.gl.createBuffer()!;
   }
 
   generatePos() {
     this.posBound = true;
-    this.bufPos = gl.createBuffer();
+    this.bufPos = this.gl.createBuffer()!;
   }
 
   generateNor() {
     this.norBound = true;
-    this.bufNor = gl.createBuffer();
+    this.bufNor = this.gl.createBuffer()!;
   }
 
   generateUv(){
     this.uvBound = true;
-    this.bufUv = gl.createBuffer();
+    this.bufUv = this.gl.createBuffer()!;
   }
 
   bindIdx(): boolean {
     if (this.idxBound) {
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.bufIdx);
+      this.gl.bindBuffer(GL_ELEMENT_ARRAY_BUFFER, this.bufIdx);
     }
     return this.idxBound;
   }
 
   bindPos(): boolean {
     if (this.posBound) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
+      this.gl.bindBuffer(GL_ARRAY_BUFFER, this.bufPos);
     }
     return this.posBound;
   }
 
   bindNor(): boolean {
     if (this.norBound) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufNor);
+      this.gl.bindBuffer(GL_ARRAY_BUFFER, this.bufNor);
     }
     return this.norBound;
   }
 
   bindUv(): boolean {
     if(this.uvBound){
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufUv);
+      this.gl.bindBuffer(GL_ARRAY_BUFFER, this.bufUv);
     }
     return this.uvBound;
   }
