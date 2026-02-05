@@ -106,6 +106,7 @@ export interface IAppControls {
     showScattering: boolean;
     enableBilateralBlur: boolean;
     rockErosionResistance: number;
+    basaltErosionResistance: number;
     thermalTalusAngleScale: number;
     thermalRate: number;
     thermalErosionScale: number;

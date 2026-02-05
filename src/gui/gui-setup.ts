@@ -150,6 +150,8 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     const velocityMultiplierController = erosionpara.add(controls, 'VelocityMultiplier', 1.0, 5.0);
     erosionpara.add(controls, 'AdvectionSpeedScaling', 0.1, 3.0);
     erosionpara.add(controls, 'RainDegree', 0.5, 10.0);
+    erosionpara.add(controls, 'rockErosionResistance', 0.0, 1.0).name('Rock Resistance');
+    erosionpara.add(controls, 'basaltErosionResistance', 0.0, 1.0).name('Basalt Resistance');
     erosionpara.add(controls, 'Reset Erosion Parameters');
     erosionpara.open();
     
@@ -195,7 +197,6 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         }
     });
     const flattenTargetHeightController = terraineditor.add(controls, 'flattenTargetHeight', 0.0, 500.0);
-    terraineditor.add(controls, 'rockErosionResistance', 0.0, 1.0);
     const brushSizeController = terraineditor.add(controls, 'brushSize', 0.1, 20.0);
     const brushStrengthController = terraineditor.add(controls, 'brushStrenth', 0.1, 2.0);
     const brushOperationController = terraineditor.add(controls, 'brushOperation', { Add: 0, Subtract: 1 });

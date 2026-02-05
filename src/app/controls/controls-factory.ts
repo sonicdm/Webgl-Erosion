@@ -89,6 +89,7 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         slopeActive: 0,
         sourceCount: 0,
         rockErosionResistance: 0.8,
+        basaltErosionResistance: 0.4,
         thermalTalusAngleScale: 8.0,
         thermalRate: 0.5,
         thermalErosionScale: 1.0,
