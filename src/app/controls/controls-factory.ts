@@ -131,7 +131,12 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaBasaltificationRate: 0.01,
         lavaReMeltRate: 0.05,
         lavaBasaltMeltRate: 0.005,
-        lavaNoiseModulation: 0.5
+        lavaNoiseModulation: 0.5,
+        // Terrain detail (PBR micro-texture)
+        terrainDetailIntensity: 1.0,
+        terrainDetailNormalStrength: 0.5,
+        terrainDetailRoughnessVar: 0.5,
+        terrainDetailScale: 1.0
     };
 
     if (actions.resetErosionParameters) {

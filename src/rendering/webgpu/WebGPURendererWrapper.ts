@@ -1,5 +1,5 @@
 import { WebGPURenderer } from 'three/webgpu';
-import { Scene, Camera as ThreeCamera } from 'three';
+import { Scene, Camera as ThreeCamera, ACESFilmicToneMapping, SRGBColorSpace } from 'three';
 import { AppContext } from '../../app/context';
 import { checkWebGPUSupport } from './capability-check';
 
@@ -45,7 +45,14 @@ export class WebGPURendererWrapper {
 
             // Initialize the renderer (async operation)
             await this.renderer.init();
-            
+
+            // PBR tone mapping: ACES Filmic compresses HDR → LDR with natural
+            // highlight rolloff instead of hard-clipping at 1.0.  Without this,
+            // snow, wet surfaces, and specular highlights look flat/dark.
+            this.renderer.toneMapping = ACESFilmicToneMapping;
+            this.renderer.toneMappingExposure = 1.0;
+            this.renderer.outputColorSpace = SRGBColorSpace;
+
             this.initialized = true;
         })();
 

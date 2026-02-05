@@ -144,4 +144,9 @@ export interface IAppControls {
     lavaReMeltRate: number;
     lavaBasaltMeltRate: number;
     lavaNoiseModulation: number;
+    // Terrain detail (PBR micro-texture)
+    terrainDetailIntensity: number;
+    terrainDetailNormalStrength: number;
+    terrainDetailRoughnessVar: number;
+    terrainDetailScale: number;
 }

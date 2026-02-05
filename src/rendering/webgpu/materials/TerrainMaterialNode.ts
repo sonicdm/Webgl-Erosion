@@ -1,6 +1,6 @@
 import { Texture, Vector2, Vector3, DataTexture, FloatType, RGBAFormat, NearestFilter } from 'three';
-import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { abs, clamp, dot, float, length, max, mix, normalize, normalLocal, positionLocal, pow, smoothstep, texture, uniform, uv, vec2, vec3 } from 'three/tsl';
+import { MeshStandardNodeMaterial } from 'three/webgpu';
+import { abs, clamp, float, length, mix, normalize, normalLocal, output, positionLocal, pow, smoothstep, texture, transformNormalToView, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -8,7 +8,6 @@ export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
     terrainPalette?: number;
     /** Max terrain height for palette normalization (terrainHeight * 120) */
     maxHeight?: number;
-    shadowCoord?: any;
     /** Brush center in UV [0,1] (for overlay); (-10,-10) = off */
     brushPos?: [number, number] | any;
     brushSize?: number | any;
@@ -37,7 +36,7 @@ export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
  * Keep this graph minimal — debug modes, source indicators, and optional
  * overlays should be toggled via uniforms, not additional node branches.
  */
-export class TerrainMaterialNode extends MeshBasicNodeMaterial {
+export class TerrainMaterialNode extends MeshStandardNodeMaterial {
     private controller: TerrainShaderNodeController;
     private terrainPaletteUniform: any;
     private simresUniform: any;
@@ -48,13 +47,17 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
     private debugModeUniform: any;
     private showFlowTraceUniform: any;
     private showSedimentTraceUniform: any;
-    private lightDirUniform: any;
     private grassLineUniform: any;
     private rockLineUniform: any;
     private snowLineUniform: any;
     private slopeRockAmountUniform: any;
     /** Brush overlay color (set from JS based on brushType) */
     private brushColorUniform: any;
+    // Terrain detail uniforms
+    private detailIntensityUniform: any;
+    private detailNormalStrengthUniform: any;
+    private detailRoughnessVarUniform: any;
+    private detailScaleUniform: any;
     /** Water source data packed into a 16×1 RGBA32F DataTexture (R=u, G=v, B=size, A=active) */
     private sourceDataTexture: DataTexture;
     private sourceCountUniform: any;
@@ -79,12 +82,15 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         this.debugModeUniform = uniform(inputs.debugMode ?? 0);
         this.showFlowTraceUniform = uniform(inputs.showFlowTrace ? 1 : 0);
         this.showSedimentTraceUniform = uniform(inputs.showSedimentTrace !== false ? 1 : 0);
-        this.lightDirUniform = uniform(new Vector3(0.4, 0.8, 0.0));
         this.grassLineUniform = uniform(0.10);
         this.rockLineUniform = uniform(0.50);
         this.snowLineUniform = uniform(0.70);
         this.slopeRockAmountUniform = uniform(1.0);
         this.brushColorUniform = uniform(new Vector3(0.1, 0.3, 0.8)); // default: water brush blue
+        this.detailIntensityUniform = uniform(1.0);
+        this.detailNormalStrengthUniform = uniform(0.5);
+        this.detailRoughnessVarUniform = uniform(0.5);
+        this.detailScaleUniform = uniform(1.0);
 
         // 16×1 RGBA32F texture packing source data: R=u, G=v, B=size, A=active(0/1)
         const MAX_SOURCES = 16;
@@ -206,11 +212,14 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         debugMode?: number;
         showFlowTrace?: boolean;
         showSedimentTrace?: boolean;
-        lightDir?: [number, number, number];
         grassLine?: number;
         rockLine?: number;
         snowLine?: number;
         slopeRockAmount?: number;
+        detailIntensity?: number;
+        detailNormalStrength?: number;
+        detailRoughnessVar?: number;
+        detailScale?: number;
     }): void {
         if (params.terrainPalette !== undefined) this.terrainPaletteUniform.value = params.terrainPalette;
         if (params.maxHeight !== undefined) this.maxHeightUniform.value = params.maxHeight;
@@ -221,7 +230,10 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         if (params.slopeRockAmount !== undefined) this.slopeRockAmountUniform.value = params.slopeRockAmount;
         if (params.showFlowTrace !== undefined) this.showFlowTraceUniform.value = params.showFlowTrace ? 1 : 0;
         if (params.showSedimentTrace !== undefined) this.showSedimentTraceUniform.value = params.showSedimentTrace ? 1 : 0;
-        if (params.lightDir !== undefined) this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
+        if (params.detailIntensity !== undefined) this.detailIntensityUniform.value = params.detailIntensity;
+        if (params.detailNormalStrength !== undefined) this.detailNormalStrengthUniform.value = params.detailNormalStrength;
+        if (params.detailRoughnessVar !== undefined) this.detailRoughnessVarUniform.value = params.detailRoughnessVar;
+        if (params.detailScale !== undefined) this.detailScaleUniform.value = params.detailScale;
     }
 
     /** getValueType() returns null for plain arrays; use Vector2 so WGSL gets type 'vec2'. */
@@ -266,28 +278,28 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             snowLine: this.snowLineUniform,
             slopeRockAmount: this.slopeRockAmountUniform,
         });
-        const shadowCoord = inputs.shadowCoord ?? vec3(sampling.uv, float(1));
-        const shadow = this.controller.getShadowNode({
-            shadowMap: inputs.shadowMap,
-            shadowCoord,
-        });
 
-        // Directional light
-        const surfaceNormal = sampling.normal.negate();
-        const lightDir = normalize(this.lightDirUniform);
-        const lamb = max(dot(surfaceNormal, lightDir), float(0));
-        const ambientCol = vec3(0.01, 0.01, 0.01);
+        // --- Albedo (PBR handles lighting via MeshStandardNodeMaterial) ---
+        let albedo = palette.color;
+        let roughness = palette.roughness;
 
-        let litColor = palette.color.mul(shadow.shadowFactor).mul(lamb).add(ambientCol);
-
-        // Basalt coloring: permanent solidified lava rendered as dark igneous rock.
-        // Blends terrain color toward dark blue-grey where basalt is present.
+        // Basalt: blend dark igneous rock into albedo + max roughness (volcanic rock)
         if (inputs.basaltMap) {
             const basaltH = texture(inputs.basaltMap, sampling.uv).x;
             const basaltBlend = clamp(basaltH.mul(float(500)).div(this.simresUniform), 0, 1);
-            const basaltColor = vec3(0.12, 0.11, 0.10).mul(lamb).add(ambientCol);
-            litColor = mix(litColor, basaltColor, basaltBlend);
+            albedo = mix(albedo, vec3(0.12, 0.11, 0.10), basaltBlend);
+            roughness = mix(roughness, float(1.0), basaltBlend);
         }
+
+        // Procedural detail: multi-scale FBM for color, normals, and roughness variation
+        const detail = this.controller.getDetailNode(sampling.uv, palette.biomeWeights, {
+            intensity: this.detailIntensityUniform,
+            normalStrength: this.detailNormalStrengthUniform,
+            roughnessVar: this.detailRoughnessVarUniform,
+            scale: this.detailScaleUniform,
+        });
+        albedo = albedo.mul(detail.colorModulation);
+        roughness = clamp(roughness.add(detail.roughnessVariation), 0, 1);
 
         // Brush overlay — ring + fill. Color comes from a single uniform (set in updateBrush).
         const brushPos = this.brushPosUniform;
@@ -304,14 +316,14 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const brushIntensity = ringFactor.mul(0.95).add(insideFill);
         const brushActiveFloat = brushType.greaterThan(0).select(float(1), float(0));
         const brushBlend = brushActiveFloat.mul(brushIntensity);
-        litColor = litColor.add(brushCol.mul(brushBlend));
+        let emissive = brushCol.mul(brushBlend);
 
         // --- Water source indicators (red glow, unrolled over DataTexture) ---
         // Each iteration reads one texel from the 16×1 source data texture.
         // Inactive sources at (-10,-10) with size=0 naturally produce 0 glow.
-        // IMPORTANT: use litColor.add(c.mul(t)) instead of mix(litColor, litColor.add(c), t)
-        // because mix(a, a+c, t) = a + c*t algebraically, but the mix form references litColor
-        // twice per iteration, causing exponential node traversal in TSL (2^N paths).
+        // IMPORTANT: use emissive.add(c.mul(t)) instead of mix(emissive, emissive.add(c), t)
+        // because mix(a, a+c, t) = a + c*t algebraically, but the mix form references the
+        // accumulator twice per iteration, causing exponential node traversal in TSL (2^N paths).
         const sourceGlowCol = vec3(0.8, 0.15, 0.1);
         const srcTex = texture(this.sourceDataTexture);
         const MAX_SOURCES = 16;
@@ -321,7 +333,7 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             const srcDist = length(sampling.uv.sub(vec2(srcData.x, srcData.y)));
             const srcRadius = float(0.01).mul(srcData.z).max(float(0.0001));
             const srcGlow = float(1).sub(srcDist.div(srcRadius)).clamp(0, 1).mul(srcData.w);
-            litColor = litColor.add(sourceGlowCol.mul(0.5).mul(srcGlow));
+            emissive = emissive.add(sourceGlowCol.mul(0.5).mul(srcGlow));
         }
 
         // --- Lava source indicators (orange glow, unrolled over DataTexture) ---
@@ -333,21 +345,21 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             const lsDist = length(sampling.uv.sub(vec2(lsData.x, lsData.y)));
             const lsRadius = float(0.01).mul(lsData.z).max(float(0.0001));
             const lsGlow = float(1).sub(lsDist.div(lsRadius)).clamp(0, 1).mul(lsData.w);
-            litColor = litColor.add(lavaSourceGlowCol.mul(0.5).mul(lsGlow));
+            emissive = emissive.add(lavaSourceGlowCol.mul(0.5).mul(lsGlow));
         }
 
-        // --- Flow trace overlay ---
+        // --- Flow trace overlay (modifies albedo; PBR will light it) ---
         const flowTraceEnabled = this.showFlowTraceUniform.equal(1);
         const sval = sampling.sedimentBlend;
         const flowIntensity = float(1).sub(pow(float(2.718), sval.mul(-300).clamp(-10, 0)));
-        const terrainLum = litColor.x.mul(0.299).add(litColor.y.mul(0.587)).add(litColor.z.mul(0.114));
+        const albedoLum = albedo.x.mul(0.299).add(albedo.y.mul(0.587)).add(albedo.z.mul(0.114));
         const flowColorBright = vec3(240 / 255, 230 / 255, 140 / 255);
         const flowColorDark = vec3(0.35, 0.25, 0.10);
-        const flowColor = mix(flowColorBright, flowColorDark, smoothstep(float(0.35), float(0.55), terrainLum));
-        const flowBlended = mix(litColor, flowColor.mul(lamb).add(ambientCol), flowIntensity.mul(1.5).clamp(0, 0.85));
-        litColor = flowTraceEnabled.select(flowBlended, litColor);
+        const flowColor = mix(flowColorBright, flowColorDark, smoothstep(float(0.35), float(0.55), albedoLum));
+        const flowBlended = mix(albedo, flowColor, flowIntensity.mul(1.5).clamp(0, 0.85));
+        albedo = flowTraceEnabled.select(flowBlended, albedo);
 
-        // --- Sediment trace overlay (3-tier gradient) ---
+        // --- Sediment trace overlay (3-tier gradient, modifies albedo) ---
         const sedTraceEnabled = this.showSedimentTraceUniform.equal(1);
         const ssval = float(1).sub(pow(float(2.718), sampling.sediment.x.mul(-7).clamp(-10, 0)));
         const lightSediCol = vec3(0.0, 0.5, 0.3);
@@ -355,13 +367,30 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
         const deepSediCol = vec3(0.0, 0.0, 0.99);
         const smallThresh = float(0.4);
         const largeThresh = float(0.7);
-        const band1 = mix(litColor, lightSediCol.mul(lamb), ssval.div(smallThresh).clamp(0, 1));
+        const band1 = mix(albedo, lightSediCol, ssval.div(smallThresh).clamp(0, 1));
         const band2 = mix(lightSediCol, medSediCol, ssval.sub(smallThresh).div(float(0.3)).clamp(0, 1));
         const band3 = mix(medSediCol, deepSediCol, ssval.sub(largeThresh).div(float(0.3)).clamp(0, 1));
         const sediColor = ssval.lessThan(smallThresh).select(band1,
-            ssval.lessThan(largeThresh).select(band2.mul(lamb), band3.mul(lamb)));
-        const sedBlended = mix(litColor, sediColor, ssval.clamp(0, 1));
-        litColor = sedTraceEnabled.select(sedBlended, litColor);
+            ssval.lessThan(largeThresh).select(band2, band3));
+        const sedBlended = mix(albedo, sediColor, ssval.clamp(0, 1));
+        albedo = sedTraceEnabled.select(sedBlended, albedo);
+
+        // --- PBR node assignments ---
+        // Shadows handled by Three.js built-in shadow mapping (DirectionalLight.castShadow)
+        this.colorNode = albedo;
+        // Blend detail normal with heightmap normal (additive in tangent space).
+        // Heightmap normal is object-space; detail normal is tangent-space perturbation.
+        // We add the XZ perturbation from detail into the heightmap normal, then re-normalize.
+        const hmNormal = sampling.normal.negate();
+        const blendedNormal = normalize(vec3(
+            hmNormal.x.add(detail.detailNormal.x),
+            hmNormal.y.add(detail.detailNormal.y.sub(float(1))), // subtract 1 since detailNormal.y = 1 (flat base)
+            hmNormal.z.add(detail.detailNormal.z),
+        ));
+        this.normalNode = transformNormalToView(blendedNormal);
+        this.roughnessNode = roughness;
+        this.metalnessNode = float(0.0);
+        this.emissiveNode = emissive;
 
         // --- Debug visualization (all modes from legacy terrain-frag) ---
         // 0=normal, 1=sediment, 2=velocity, 3=terrain, 4=flux, 5=terrainflux, 7=flow, 10=rock
@@ -458,7 +487,7 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
             debugBasalt = basaltNorm.lessThan(float(0.33)).select(basaltLow, basaltHigh);
         }
 
-        const finalColor = dbg.equal(3).select(debugTerrain,
+        const debugColor = dbg.equal(3).select(debugTerrain,
             dbg.equal(1).select(debugSediment,
                 dbg.equal(2).select(debugVelocity,
                     dbg.equal(4).select(debugFlux,
@@ -475,8 +504,12 @@ export class TerrainMaterialNode extends MeshBasicNodeMaterial {
                                                                 dbg.equal(18).select(debugLavaDeltaH,
                                                                     dbg.equal(19).select(debugThermalErosionRate,
                                                                         dbg.equal(20).select(debugBasalt,
-                                                                            litColor)))))))))))))))));
+                                                                            vec3(0, 0, 0))))))))))))))))));
 
-        this.colorNode = finalColor;
+        // Debug override: bypass PBR with flat unlit color when debug mode is active
+        this.outputNode = dbg.greaterThan(float(0)).select(
+            vec4(debugColor, float(1)),
+            output
+        );
     }
 }
