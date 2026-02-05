@@ -1,6 +1,6 @@
 import { Texture, Vector2, Vector3, DataTexture, FloatType, RGBAFormat, NearestFilter } from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { abs, clamp, dot, float, floor, fract, length, mix, normalLocal, output, positionLocal, pow, sin, smoothstep, texture, transformNormalToView, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
+import { abs, clamp, float, length, mix, normalize, normalLocal, output, positionLocal, pow, smoothstep, texture, transformNormalToView, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -53,6 +53,11 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
     private slopeRockAmountUniform: any;
     /** Brush overlay color (set from JS based on brushType) */
     private brushColorUniform: any;
+    // Terrain detail uniforms
+    private detailIntensityUniform: any;
+    private detailNormalStrengthUniform: any;
+    private detailRoughnessVarUniform: any;
+    private detailScaleUniform: any;
     /** Water source data packed into a 16×1 RGBA32F DataTexture (R=u, G=v, B=size, A=active) */
     private sourceDataTexture: DataTexture;
     private sourceCountUniform: any;
@@ -82,6 +87,10 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
         this.snowLineUniform = uniform(0.70);
         this.slopeRockAmountUniform = uniform(1.0);
         this.brushColorUniform = uniform(new Vector3(0.1, 0.3, 0.8)); // default: water brush blue
+        this.detailIntensityUniform = uniform(1.0);
+        this.detailNormalStrengthUniform = uniform(0.5);
+        this.detailRoughnessVarUniform = uniform(0.5);
+        this.detailScaleUniform = uniform(1.0);
 
         // 16×1 RGBA32F texture packing source data: R=u, G=v, B=size, A=active(0/1)
         const MAX_SOURCES = 16;
@@ -207,6 +216,10 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
         rockLine?: number;
         snowLine?: number;
         slopeRockAmount?: number;
+        detailIntensity?: number;
+        detailNormalStrength?: number;
+        detailRoughnessVar?: number;
+        detailScale?: number;
     }): void {
         if (params.terrainPalette !== undefined) this.terrainPaletteUniform.value = params.terrainPalette;
         if (params.maxHeight !== undefined) this.maxHeightUniform.value = params.maxHeight;
@@ -217,6 +230,10 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
         if (params.slopeRockAmount !== undefined) this.slopeRockAmountUniform.value = params.slopeRockAmount;
         if (params.showFlowTrace !== undefined) this.showFlowTraceUniform.value = params.showFlowTrace ? 1 : 0;
         if (params.showSedimentTrace !== undefined) this.showSedimentTraceUniform.value = params.showSedimentTrace ? 1 : 0;
+        if (params.detailIntensity !== undefined) this.detailIntensityUniform.value = params.detailIntensity;
+        if (params.detailNormalStrength !== undefined) this.detailNormalStrengthUniform.value = params.detailNormalStrength;
+        if (params.detailRoughnessVar !== undefined) this.detailRoughnessVarUniform.value = params.detailRoughnessVar;
+        if (params.detailScale !== undefined) this.detailScaleUniform.value = params.detailScale;
     }
 
     /** getValueType() returns null for plain arrays; use Vector2 so WGSL gets type 'vec2'. */
@@ -274,24 +291,15 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
             roughness = mix(roughness, float(1.0), basaltBlend);
         }
 
-        // Detail noise: break up flat biome colors with micro-texture variation.
-        // Single-octave value noise with bilinear interpolation (~±8% brightness).
-        // Hash: fract(sin(dot(p, K)) * 43758.5453) — standard GPU pseudo-random.
-        const noiseScale = float(50); // ~50 tiles across terrain
-        const noiseUv = sampling.uv.mul(noiseScale);
-        const noiseP = floor(noiseUv);
-        const noiseF = fract(noiseUv);
-        const K = vec2(127.1, 311.7);
-        const hashConst = float(43758.5453);
-        const h00 = fract(sin(dot(noiseP, K)).mul(hashConst));
-        const h10 = fract(sin(dot(noiseP.add(vec2(1, 0)), K)).mul(hashConst));
-        const h01 = fract(sin(dot(noiseP.add(vec2(0, 1)), K)).mul(hashConst));
-        const h11 = fract(sin(dot(noiseP.add(vec2(1, 1)), K)).mul(hashConst));
-        const sx = smoothstep(float(0), float(1), noiseF.x);
-        const sy = smoothstep(float(0), float(1), noiseF.y);
-        const noiseVal = mix(mix(h00, h10, sx), mix(h01, h11, sx), sy);
-        // Map [0,1] → [0.92, 1.08] for ±8% brightness variation
-        albedo = albedo.mul(float(0.92).add(noiseVal.mul(0.16)));
+        // Procedural detail: multi-scale FBM for color, normals, and roughness variation
+        const detail = this.controller.getDetailNode(sampling.uv, palette.biomeWeights, {
+            intensity: this.detailIntensityUniform,
+            normalStrength: this.detailNormalStrengthUniform,
+            roughnessVar: this.detailRoughnessVarUniform,
+            scale: this.detailScaleUniform,
+        });
+        albedo = albedo.mul(detail.colorModulation);
+        roughness = clamp(roughness.add(detail.roughnessVariation), 0, 1);
 
         // Brush overlay — ring + fill. Color comes from a single uniform (set in updateBrush).
         const brushPos = this.brushPosUniform;
@@ -370,9 +378,16 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
         // --- PBR node assignments ---
         // Shadows handled by Three.js built-in shadow mapping (DirectionalLight.castShadow)
         this.colorNode = albedo;
-        // normalNode expects view-space normals (feeds directly into transformedNormalView).
-        // Heightmap normals are in object space — transform via modelNormalMatrix + viewMatrix.
-        this.normalNode = transformNormalToView(sampling.normal.negate());
+        // Blend detail normal with heightmap normal (additive in tangent space).
+        // Heightmap normal is object-space; detail normal is tangent-space perturbation.
+        // We add the XZ perturbation from detail into the heightmap normal, then re-normalize.
+        const hmNormal = sampling.normal.negate();
+        const blendedNormal = normalize(vec3(
+            hmNormal.x.add(detail.detailNormal.x),
+            hmNormal.y.add(detail.detailNormal.y.sub(float(1))), // subtract 1 since detailNormal.y = 1 (flat base)
+            hmNormal.z.add(detail.detailNormal.z),
+        ));
+        this.normalNode = transformNormalToView(blendedNormal);
         this.roughnessNode = roughness;
         this.metalnessNode = float(0.0);
         this.emissiveNode = emissive;

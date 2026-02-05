@@ -98,12 +98,12 @@ export class SceneLighting {
         // Intensity: compensate for PBR 1/π diffuse factor (~3× manual Lambert)
         this.directionalLight.intensity = MathUtils.lerp(1.2, 2.5, t);
 
-        // Ambient fills shadows so they aren't pitch-black
-        // Noon: cool blue-grey sky fill; Sunset: warm fill
+        // Ambient fills shadows — outdoor sky fill is substantial (~30-40% of sun)
+        // Noon: cool blue-grey sky; Sunset: warm orange-pink fill
         this.ambientLight.color.setRGB(
-            MathUtils.lerp(0.12, 0.08, t),
-            MathUtils.lerp(0.08, 0.09, t),
-            MathUtils.lerp(0.05, 0.12, t),
+            MathUtils.lerp(0.45, 0.35, t),
+            MathUtils.lerp(0.30, 0.38, t),
+            MathUtils.lerp(0.20, 0.48, t),
         );
     }
 

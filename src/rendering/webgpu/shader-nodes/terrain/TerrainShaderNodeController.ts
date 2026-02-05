@@ -2,6 +2,8 @@ import { TerrainSamplingInputs, TerrainSamplingNode, TerrainSamplingResult } fro
 import { TerrainPaletteInputs, TerrainPaletteNode, TerrainPaletteResult } from './TerrainPaletteNode';
 import { TerrainDebugViewInputs, TerrainDebugViewNode, TerrainDebugViewResult } from './TerrainDebugViewNode';
 import { TerrainShadowInputs, TerrainShadowNode, TerrainShadowResult } from './TerrainShadowNode';
+import { createTerrainDetailNode, TerrainDetailUniforms, TerrainDetailResult } from './TerrainDetailNode';
+import type { BiomeWeights } from './TerrainPaletteNode';
 
 export class TerrainShaderNodeController {
     constructor(
@@ -17,6 +19,10 @@ export class TerrainShaderNodeController {
 
     getPaletteNode(inputs: TerrainPaletteInputs): TerrainPaletteResult {
         return this.paletteNode.build(inputs);
+    }
+
+    getDetailNode(uvCoord: any, biomeWeights: BiomeWeights, uniforms: TerrainDetailUniforms): TerrainDetailResult {
+        return createTerrainDetailNode(uvCoord, biomeWeights, uniforms);
     }
 
     getDebugViewNode(inputs: TerrainDebugViewInputs): TerrainDebugViewResult {

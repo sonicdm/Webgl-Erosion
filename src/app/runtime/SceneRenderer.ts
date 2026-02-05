@@ -108,6 +108,10 @@ export class SceneRenderer {
                 rockLine: controls.RockLine,
                 snowLine: controls.SnowLine,
                 slopeRockAmount: controls.SlopeRockAmount,
+                detailIntensity: controls.terrainDetailIntensity,
+                detailNormalStrength: controls.terrainDetailNormalStrength,
+                detailRoughnessVar: controls.terrainDetailRoughnessVar,
+                detailScale: controls.terrainDetailScale,
             });
             terrainMat.updateSources(waterSources.map(s => ({
                 position: [s.position[0], s.position[1]] as [number, number],

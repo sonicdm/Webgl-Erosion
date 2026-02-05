@@ -22,6 +22,13 @@ export interface TerrainPaletteInputs {
     slopeRockAmount?: any;
 }
 
+export interface BiomeWeights {
+    sand: any;
+    grass: any;
+    rock: any;
+    snow: any;
+}
+
 export interface TerrainPaletteResult {
     color: any;
     baseColor: any;
@@ -29,6 +36,8 @@ export interface TerrainPaletteResult {
     rockBlend: any;
     /** Per-biome roughness (0=mirror, 1=fully rough) */
     roughness: any;
+    /** Per-biome blend weights for detail noise modulation */
+    biomeWeights: BiomeWeights;
 }
 
 export interface TerrainPaletteEvaluationInputs {
@@ -147,11 +156,11 @@ export class TerrainPaletteNode {
         baseColor = terrainPalette.equal(float(1)).select(desertBase, baseColor);
 
         // --- Per-biome roughness (blended in parallel with color) ---
-        // Sand/dirt: 0.85 (granular), Grass: 0.75, Rock: 0.95, Snow: 0.3 (icy)
+        // Sand/dirt: 0.85 (granular), Grass: 0.75, Rock: 0.95, Snow: 0.55 (crystalline, catches sunlight)
         let roughness = float(0.85); // sand base
         roughness = mix(roughness, float(0.75), grassBlend);
         roughness = mix(roughness, float(0.95), rockHeightBlend);
-        roughness = mix(roughness, float(0.3), snowBlend);
+        roughness = mix(roughness, float(0.55), snowBlend);
         roughness = mix(roughness, float(0.95), slopeRock);
 
         // --- Painted rock material override ---
@@ -162,12 +171,22 @@ export class TerrainPaletteNode {
         const finalColor = mix(baseColor, paintedRockColor, paintedRockBlend);
         roughness = mix(roughness, float(0.95), paintedRockBlend);
 
+        // Biome weights for detail noise modulation
+        const rockWeight = clamp(rockHeightBlend.add(slopeRock).add(paintedRockBlend), 0, 1);
+        const sandWeight = clamp(float(1).sub(grassBlend).sub(snowBlend).sub(rockWeight), 0, 1);
+
         return {
             color: finalColor,
             baseColor,
             rockColor: paintedRockColor,
             rockBlend: paintedRockBlend,
             roughness,
+            biomeWeights: {
+                sand: sandWeight,
+                grass: grassBlend,
+                rock: rockWeight,
+                snow: snowBlend,
+            },
         };
     }
 

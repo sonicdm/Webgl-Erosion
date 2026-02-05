@@ -448,6 +448,18 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     tip(terrainLayers.add(controls, 'SlopeRockAmount', 0.0, 3.0).step(0.1).name('Slope Rock'),
         'How much steep slopes force rock texture regardless of height');
 
+    // Terrain detail subfolder
+    const terrainDetail = renderingpara.addFolder('Terrain Detail');
+    tip(terrainDetail.add(controls, 'terrainDetailIntensity', 0.0, 2.0).step(0.05).name('Detail Intensity'),
+        'Strength of color variation from procedural micro-texture');
+    tip(terrainDetail.add(controls, 'terrainDetailNormalStrength', 0.0, 2.0).step(0.05).name('Normal Strength'),
+        'Strength of surface bump/normal perturbation from detail noise');
+    tip(terrainDetail.add(controls, 'terrainDetailRoughnessVar', 0.0, 1.0).step(0.05).name('Roughness Var'),
+        'Amount of roughness micro-variation across surface');
+    tip(terrainDetail.add(controls, 'terrainDetailScale', 0.1, 4.0).step(0.1).name('Detail Scale'),
+        'Frequency multiplier for detail noise (higher = finer grain)');
+    terrainDetail.open();
+
     // Light direction subfolder
     const lightFolder = renderingpara.addFolder('Sun Direction');
     lightFolder.add(controls, 'lightPosX', -1.0, 1.0).name('X');
