@@ -2,6 +2,8 @@
 @group(0) @binding(1) var readTerrain: texture_2d<f32>;
 @group(0) @binding(2) var writeLava: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(3) var writeTerrain: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(5) var readBasalt: texture_2d<f32>;
+@group(0) @binding(6) var writeBasalt: texture_storage_2d<rgba32float, write>;
 
 struct Uniforms {
     u_SimRes: f32,
@@ -31,6 +33,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var water = terrain.g;
     var rock = terrain.b;
     var baseRock = terrain.a;
+    var basalt = textureLoad(readBasalt, coord, 0).r;
 
     // --- MUTUAL EXCLUSION: capacity-based ---
     // Lava and water cannot occupy the same cell volume.
@@ -73,14 +76,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             water = max(0.0, water - flashEvap);
         }
 
-        // Immediate solidification only if deeply quenched (well below threshold)
+        // Immediate solidification only if deeply quenched (well below threshold).
+        // Quenched lava becomes basalt (porous, brittle igneous rock), NOT terrain/rock.
         if (temperature < uniforms.u_SolidificationThreshold * 0.5) {
             let solidAmount = min(min(lavaHeight * 0.003, lavaHeight), 0.0001);
-            terrainHeight += solidAmount;
-            rock = min(1.0, rock + solidAmount * uniforms.u_RockFraction);
-            if (rock > 0.1 && baseRock < 0.001) {
-                baseRock = terrainHeight;
-            }
+            basalt += solidAmount;
             lavaHeight = max(0.0, lavaHeight - solidAmount);
         }
     }
@@ -121,4 +121,5 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     textureStore(writeLava, coord, vec4<f32>(lavaHeight, temperature, viscosity, crustThickness));
     textureStore(writeTerrain, coord, vec4<f32>(terrainHeight, water, rock, baseRock));
+    textureStore(writeBasalt, coord, vec4<f32>(basalt, 0.0, 0.0, 0.0));
 }

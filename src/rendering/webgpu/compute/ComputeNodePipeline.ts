@@ -2510,6 +2510,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 createStorageTextureLayoutEntry(2, 'write-only'),
                 createStorageTextureLayoutEntry(3, 'write-only'),
                 createUniformBufferLayoutEntry(4),
+                createSampledTextureLayoutEntry(5),   // readBasalt
+                createStorageTextureLayoutEntry(6, 'write-only'),  // writeBasalt
             ]);
             this.lavaWaterInteractionPipeline = this.createComputePipeline(
                 lavaWaterInteractionShader, 'main', this.lavaWaterInteractionBindGroupLayout
@@ -2545,6 +2547,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             createStorageTextureBinding(texturePool.writeLavaTexture, 2),
             createStorageTextureBinding(texturePool.writeTerrainTexture, 3),
             { binding: 4, resource: { buffer: uniformBuffer } },
+            createSampledTextureBinding(texturePool.readBasaltTexture, 5),
+            createStorageTextureBinding(texturePool.writeBasaltTexture, 6),
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);

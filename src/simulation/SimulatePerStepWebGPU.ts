@@ -309,6 +309,7 @@ export function SimulatePerStepWebGPU(
             });
             texturePool.swapLavaTextures();
             texturePool.swapTerrainTextures();
+            texturePool.swapBasaltTextures();
         }
 
         // 9i. Lava diagnostics (rate-limited logging)
