@@ -653,3 +653,59 @@ No flux memory between steps. Each step computes flow purely from current height
   - `lavaProportionalCooling`: 0.001 → 0.0004
   - `lavaAmbientCoolingRate`: 0.001 → 0.0004
 - **Test preset** updated to match
+
+---
+
+### Change 43 — Lava Full Opacity
+**Commit:** `e4138ea` — `fix(lava): make lava fully opaque (no transparency)`
+**Why:** Lava is physically opaque — even thin films should be fully visible. The old multiplier (5000) allowed near-transparent edges.
+**Changes:**
+- `LavaMaterialNode.ts`: Changed opacity multiplier from 5000 → 100000
+
+---
+
+### Change 44 — Water Flow Accounts for Solidified Lava Layers
+**Commit:** `cd51de2` — `fix(water): account for coolLava and basalt in water flow surface height`
+**Why:** Water flow shader only used `terrain.x + terrain.y` for surface height, ignoring coolLava and basalt layers. Water flowed under solidified lava, creating visible seam artifacts at lava-water boundaries.
+**Changes:**
+- `water-flow.wgsl`: Added `readCoolLava` (binding 5) and `readBasalt` (binding 6) texture reads. Surface height now includes all solidified layers: `terrain + basalt + coolLava + water`
+- `ComputeNodePipeline.ts`: Added coolLava/basalt layout entries and bind group entries to `flowPass()`
+
+---
+
+### Change 45 — Quenched Lava Produces Basalt (Not Rock)
+**Commit:** `9e6a5b0` — `fix(lava): quenched lava produces basalt instead of rock`
+**Why:** Lava-water interaction was converting quenched lava into terrain height + rock material. Quenched lava should become basalt (porous volcanic rock), not dense rock.
+**Changes:**
+- `lava-water-interaction.wgsl`: Added `readBasalt`/`writeBasalt` bindings (5, 6). Changed solidification from `terrainHeight += solidAmount; rock += ...` to `basalt += solidAmount`
+- `ComputeNodePipeline.ts`: Added basalt texture bindings to `lavaWaterInteractionPass()`
+- `SimulatePerStepWebGPU.ts`: Added `swapBasaltTextures()` after water-interaction pass
+
+---
+
+### Change 46 — Extract All Inline Shaders to External .wgsl Files
+**Commit:** `aabcca5` — `refactor(shaders): extract all inline WGSL to external files + add basalt erosion resistance`
+**Why:** Inline shaders violate project convention. All WGSL should be in external `.wgsl` files imported via `?raw`.
+**Changes:**
+- Extracted 13 inline shaders from `ComputeNodePipeline.ts` to `src/rendering/webgpu/compute/shaders/`:
+  - `rain.wgsl`, `evaporation.wgsl`, `water-flow.wgsl`, `water-height.wgsl`
+  - `sediment.wgsl`, `sediment-advect-simple.wgsl`, `sediment-advect-forward.wgsl`, `sediment-advect-backward.wgsl`
+  - `maccormack-correction.wgsl`, `max-slippage.wgsl`
+  - `thermal-flux.wgsl`, `thermal-apply.wgsl`, `average.wgsl`
+- Removed ~1070 lines of inline shader strings
+- All shaders imported via `import shader from './shaders/name.wgsl?raw'`
+
+---
+
+### Change 47 — Basalt Erosion Resistance for Water
+**Commit:** `aabcca5` (same as Change 46)
+**Why:** Water erosion had no concept of basalt resistance. Basalt is porous/brittle volcanic rock — it should resist erosion at about half the rate of dense rock (0.4 vs 0.8).
+**Changes:**
+- `sediment.wgsl`: Added `readBasalt` (binding 8) and `u_BasaltErosionResistance` uniform. Basalt height is read and applied as a multiplicative factor on erosion rate
+- `thermal-flux.wgsl`: Added `readBasalt` (binding 4) and `u_BasaltErosionResistance` uniform
+- `thermal-apply.wgsl`: Added `readBasalt` (binding 4) and `u_BasaltErosionResistance` uniform
+- `ComputeNodePipeline.ts`: Updated `sedimentPass()`, `thermalFluxPass()`, `thermalApplyPass()`, and `thermalPass()` with basalt texture bindings and new uniform
+- `SimulatePerStepWebGPU.ts`: Passes `basaltErosionResistance` from controls to all three passes
+- `controls-factory.ts`: Added `basaltErosionResistance: 0.4`
+- `types.ts`: Added `basaltErosionResistance: number`
+- `gui-setup.ts`: Moved Rock Resistance from Terrain Editor to Erosion Parameters. Added Basalt Resistance slider (0.0–1.0)
