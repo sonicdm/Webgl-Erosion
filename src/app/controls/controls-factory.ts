@@ -22,7 +22,6 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         'Clear Height Map': actions.clearHeightMap,
         'Export Height Map': actions.exportHeightMap,
 
-        tesselations: 5,
         pipelen: 0.8,
         Kc: 0.04,
         Ks: 0.02,
@@ -37,13 +36,9 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         VelocityMultiplier: 1,
         RainDegree: 4.5,
         AdvectionSpeedScaling: 1.0,
-        spawnposx: 0.5,
-        spawnposy: 0.5,
         posTemp: vec2.fromValues(0.0, 0.0),
 
-        TerrainBaseMap: 0,
         TerrainBaseType: 0,
-        TerrainBiomeType: 1,
         TerrainScale: 3.2,
         TerrainHeight: 2.0,
         TerrainMask: 0,
@@ -97,13 +92,10 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lightPosX: 0.4,
         lightPosY: 0.8,
         lightPosZ: -0.0,
-        showScattering: true,
-        enableBilateralBlur: true,
         AdvectionMethod: 1,
         VelocityAdvectionMag: 0.2,
 
         // Lava simulation (speeds relative to water equivalents)
-        lavaEnabled: false,
         lavaViscosityScale: 5.0,
         lavaYieldStress: 0.1,
         lavaCoolingRate: 0.002,

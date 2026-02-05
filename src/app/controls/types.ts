@@ -33,13 +33,11 @@ export interface IAppControls {
     'Clear Height Map': () => void;
     'Export Height Map': () => void;
     // Terrain
-    TerrainBaseMap: number;
     TerrainBaseType: number;
     TerrainScale: number;
     TerrainHeight: number;
     TerrainMask: number;
     TerrainDebug: number;
-    TerrainBiomeType: number;
     // Brush
     brushType: number;
     brushSize: number;
@@ -69,8 +67,6 @@ export interface IAppControls {
     AdvectionMethod: number;
     RainDegree: number;
     AdvectionSpeedScaling: number;
-    spawnposx: number;
-    spawnposy: number;
     // Terrain generator (GPU)
     terrainFrequency: number;
     terrainAmplitude: number;
@@ -103,8 +99,6 @@ export interface IAppControls {
     lightPosX: number;
     lightPosY: number;
     lightPosZ: number;
-    showScattering: boolean;
-    enableBilateralBlur: boolean;
     rockErosionResistance: number;
     basaltErosionResistance: number;
     thermalTalusAngleScale: number;
@@ -112,9 +106,7 @@ export interface IAppControls {
     thermalErosionScale: number;
     raycastMethod: 'heightmap' | 'bvh';
     'Reset Erosion Parameters'?: () => void;
-    tesselations?: number;
     // Lava simulation
-    lavaEnabled: boolean;
     lavaViscosityScale: number;
     lavaYieldStress: number;
     lavaCoolingRate: number;
@@ -130,6 +122,10 @@ export interface IAppControls {
     lavaCrustGrowthRate: number;
     lavaRockMeltThreshold: number;
     lavaSourceCount: number;
+    // Lava visual
+    lavaOrangeTemp: number;
+    lavaYellowTemp: number;
+    lavaEmissiveStrength: number;
     // Lava overhaul: new parameters
     lavaSofteningTemp: number;
     lavaKCond: number;
