@@ -1,6 +1,6 @@
 import { Texture, Vector2, Vector3, DataTexture, FloatType, RGBAFormat, NearestFilter } from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { abs, clamp, float, length, mix, normalLocal, output, positionLocal, pow, smoothstep, texture, transformNormalToView, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
+import { abs, clamp, dot, float, floor, fract, length, mix, normalLocal, output, positionLocal, pow, sin, smoothstep, texture, transformNormalToView, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
 import { TerrainShaderNodeController } from '../shader-nodes/terrain/TerrainShaderNodeController';
 import { TerrainSamplingInputs } from '../shader-nodes/terrain/TerrainSamplingNode';
 
@@ -8,7 +8,6 @@ export interface TerrainMaterialNodeInputs extends TerrainSamplingInputs {
     terrainPalette?: number;
     /** Max terrain height for palette normalization (terrainHeight * 120) */
     maxHeight?: number;
-    shadowCoord?: any;
     /** Brush center in UV [0,1] (for overlay); (-10,-10) = off */
     brushPos?: [number, number] | any;
     brushSize?: number | any;
@@ -262,21 +261,37 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
             snowLine: this.snowLineUniform,
             slopeRockAmount: this.slopeRockAmountUniform,
         });
-        const shadowCoord = inputs.shadowCoord ?? vec3(sampling.uv, float(1));
-        const shadow = this.controller.getShadowNode({
-            shadowMap: inputs.shadowMap,
-            shadowCoord,
-        });
 
         // --- Albedo (PBR handles lighting via MeshStandardNodeMaterial) ---
         let albedo = palette.color;
+        let roughness = palette.roughness;
 
-        // Basalt: blend dark igneous rock into albedo
+        // Basalt: blend dark igneous rock into albedo + max roughness (volcanic rock)
         if (inputs.basaltMap) {
             const basaltH = texture(inputs.basaltMap, sampling.uv).x;
             const basaltBlend = clamp(basaltH.mul(float(500)).div(this.simresUniform), 0, 1);
             albedo = mix(albedo, vec3(0.12, 0.11, 0.10), basaltBlend);
+            roughness = mix(roughness, float(1.0), basaltBlend);
         }
+
+        // Detail noise: break up flat biome colors with micro-texture variation.
+        // Single-octave value noise with bilinear interpolation (~±8% brightness).
+        // Hash: fract(sin(dot(p, K)) * 43758.5453) — standard GPU pseudo-random.
+        const noiseScale = float(50); // ~50 tiles across terrain
+        const noiseUv = sampling.uv.mul(noiseScale);
+        const noiseP = floor(noiseUv);
+        const noiseF = fract(noiseUv);
+        const K = vec2(127.1, 311.7);
+        const hashConst = float(43758.5453);
+        const h00 = fract(sin(dot(noiseP, K)).mul(hashConst));
+        const h10 = fract(sin(dot(noiseP.add(vec2(1, 0)), K)).mul(hashConst));
+        const h01 = fract(sin(dot(noiseP.add(vec2(0, 1)), K)).mul(hashConst));
+        const h11 = fract(sin(dot(noiseP.add(vec2(1, 1)), K)).mul(hashConst));
+        const sx = smoothstep(float(0), float(1), noiseF.x);
+        const sy = smoothstep(float(0), float(1), noiseF.y);
+        const noiseVal = mix(mix(h00, h10, sx), mix(h01, h11, sx), sy);
+        // Map [0,1] → [0.92, 1.08] for ±8% brightness variation
+        albedo = albedo.mul(float(0.92).add(noiseVal.mul(0.16)));
 
         // Brush overlay — ring + fill. Color comes from a single uniform (set in updateBrush).
         const brushPos = this.brushPosUniform;
@@ -353,11 +368,12 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
         albedo = sedTraceEnabled.select(sedBlended, albedo);
 
         // --- PBR node assignments ---
-        this.colorNode = albedo.mul(shadow.shadowFactor);
+        // Shadows handled by Three.js built-in shadow mapping (DirectionalLight.castShadow)
+        this.colorNode = albedo;
         // normalNode expects view-space normals (feeds directly into transformedNormalView).
         // Heightmap normals are in object space — transform via modelNormalMatrix + viewMatrix.
         this.normalNode = transformNormalToView(sampling.normal.negate());
-        this.roughnessNode = float(0.9);
+        this.roughnessNode = roughness;
         this.metalnessNode = float(0.0);
         this.emissiveNode = emissive;
 

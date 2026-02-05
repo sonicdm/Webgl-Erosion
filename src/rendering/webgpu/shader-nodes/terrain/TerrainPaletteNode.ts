@@ -27,6 +27,8 @@ export interface TerrainPaletteResult {
     baseColor: any;
     rockColor: any;
     rockBlend: any;
+    /** Per-biome roughness (0=mirror, 1=fully rough) */
+    roughness: any;
 }
 
 export interface TerrainPaletteEvaluationInputs {
@@ -144,18 +146,28 @@ export class TerrainPaletteNode {
         const desertBase = mix(baseColor, mix(sandCol, desertGrass, grassBlend), float(0.8));
         baseColor = terrainPalette.equal(float(1)).select(desertBase, baseColor);
 
+        // --- Per-biome roughness (blended in parallel with color) ---
+        // Sand/dirt: 0.85 (granular), Grass: 0.75, Rock: 0.95, Snow: 0.3 (icy)
+        let roughness = float(0.85); // sand base
+        roughness = mix(roughness, float(0.75), grassBlend);
+        roughness = mix(roughness, float(0.95), rockHeightBlend);
+        roughness = mix(roughness, float(0.3), snowBlend);
+        roughness = mix(roughness, float(0.95), slopeRock);
+
         // --- Painted rock material override ---
         const rockDark = vec3(0.15, 0.18, 0.25);
         const rockLight = vec3(0.35, 0.38, 0.45);
         const paintedRockBlend = clamp(rock.sub(float(0.1)).div(float(0.9)), 0, 1);
         const paintedRockColor = mix(rockDark, rockLight, paintedRockBlend);
         const finalColor = mix(baseColor, paintedRockColor, paintedRockBlend);
+        roughness = mix(roughness, float(0.95), paintedRockBlend);
 
         return {
             color: finalColor,
             baseColor,
             rockColor: paintedRockColor,
             rockBlend: paintedRockBlend,
+            roughness,
         };
     }
 
