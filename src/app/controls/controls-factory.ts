@@ -136,7 +136,21 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         terrainDetailIntensity: 1.0,
         terrainDetailNormalStrength: 0.5,
         terrainDetailRoughnessVar: 0.5,
-        terrainDetailScale: 1.0
+        terrainDetailScale: 1.0,
+        // Appearance / Post-Processing
+        ppExposure: 1.0,
+        ppBloomStrength: 0.35,
+        ppBloomRadius: 0.4,
+        ppBloomThreshold: 0.85,
+        fogEnabled: false,
+        fogNear: 0.5,
+        fogFar: 3.0,
+        fogColorR: 0.7,
+        fogColorG: 0.75,
+        fogColorB: 0.82,
+        sunIntensity: 1.0,
+        ambientIntensity: 1.0,
+        envMapIntensity: 0.4
     };
 
     if (actions.resetErosionParameters) {

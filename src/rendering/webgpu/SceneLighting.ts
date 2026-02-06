@@ -17,6 +17,11 @@ export class SceneLighting {
     readonly directionalLight: DirectionalLight;
     readonly ambientLight: AmbientLight;
 
+    /** GUI-controlled multiplier on auto-computed sun intensity. */
+    sunIntensityMultiplier: number = 1.0;
+    /** GUI-controlled multiplier on ambient light intensity. */
+    ambientIntensityMultiplier: number = 1.0;
+
     /** Place light far enough for good shadow depth precision. */
     private static readonly LIGHT_DISTANCE = 2.0;
 
@@ -96,10 +101,11 @@ export class SceneLighting {
             MathUtils.lerp(0.15, 0.92, t),
         );
         // Intensity: compensate for PBR 1/π diffuse factor (~3× manual Lambert)
-        this.directionalLight.intensity = MathUtils.lerp(1.2, 2.5, t);
+        this.directionalLight.intensity = MathUtils.lerp(1.2, 2.5, t) * this.sunIntensityMultiplier;
 
         // Ambient fills shadows — outdoor sky fill is substantial (~30-40% of sun)
         // Noon: cool blue-grey sky; Sunset: warm orange-pink fill
+        this.ambientLight.intensity = 1.0 * this.ambientIntensityMultiplier;
         this.ambientLight.color.setRGB(
             MathUtils.lerp(0.45, 0.35, t),
             MathUtils.lerp(0.30, 0.38, t),

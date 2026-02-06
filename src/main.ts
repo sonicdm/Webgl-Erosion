@@ -197,6 +197,10 @@ async function main() {
     skyMesh.frustumCulled = false;
     webgpuScene.add(skyMesh);
 
+    // Note: PMREMGenerator env map skipped — its internal ShaderMaterial blur
+    // passes are not compatible with the WebGPU NodeMaterial system in r171.
+    // The envMapIntensity slider exists for future use when PMREM gains WebGPU support.
+
     _tlog('materials + scene setup');
     console.log('[WebGPU] Renderer, compute pipeline, texture pool, and terrain generator initialized');
   } catch (error) {

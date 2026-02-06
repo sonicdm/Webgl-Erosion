@@ -20,6 +20,7 @@ export class SkyMaterialNode extends MeshBasicNodeMaterial {
 
         this.side = 1; // BackSide — render inside of sphere
         this.depthWrite = false;
+        this.fog = false;
 
         this.buildGraph();
     }

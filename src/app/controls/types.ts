@@ -149,4 +149,18 @@ export interface IAppControls {
     terrainDetailNormalStrength: number;
     terrainDetailRoughnessVar: number;
     terrainDetailScale: number;
+    // Appearance / Post-Processing
+    ppExposure: number;
+    ppBloomStrength: number;
+    ppBloomRadius: number;
+    ppBloomThreshold: number;
+    fogEnabled: boolean;
+    fogNear: number;
+    fogFar: number;
+    fogColorR: number;
+    fogColorG: number;
+    fogColorB: number;
+    sunIntensity: number;
+    ambientIntensity: number;
+    envMapIntensity: number;
 }

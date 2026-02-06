@@ -1,5 +1,9 @@
 import type { vec2 } from 'gl-matrix';
 import type { Scene, Mesh } from 'three';
+import { Fog, Color } from 'three';
+import { PostProcessing } from 'three/webgpu';
+import { pass, uniform, luminance, smoothstep } from 'three/tsl';
+import { gaussianBlur } from 'three/examples/jsm/tsl/display/GaussianBlurNode.js';
 import type Camera from '../../Camera';
 import type { IAppControls } from '../controls/types';
 import type { WebGPURendererWrapper } from '../../rendering/webgpu/WebGPURendererWrapper';
@@ -38,6 +42,13 @@ export interface RenderParams {
 export class SceneRenderer {
     private sceneCompileStarted = false;
     private sceneCompileDone = false;
+    private postProcessing: PostProcessing | null = null;
+    private _thresholdUniform: any = null;
+    private _strengthUniform: any = null;
+    private fog: Fog | null = null;
+    private postProcessingNeedsRebuild = true;
+    private _lastWidth = 0;
+    private _lastHeight = 0;
 
     constructor(
         private rendererWrapper: WebGPURendererWrapper,
@@ -49,6 +60,36 @@ export class SceneRenderer {
     resetCompilationState(): void {
         this.sceneCompileStarted = false;
         this.sceneCompileDone = false;
+        this.postProcessingNeedsRebuild = true;
+        this.postProcessing = null;
+        this._thresholdUniform = null;
+        this._strengthUniform = null;
+    }
+
+    private initPostProcessing(camera: any): void {
+        const renderer = this.rendererWrapper.getRenderer();
+        if (!renderer) return;
+        const scenePass = pass(this.scene, camera);
+        scenePass.setMRT(null);
+        const scenePassColor = scenePass.getTextureNode('output');
+
+        // Soft threshold: extract pixels brighter than threshold
+        this._thresholdUniform = uniform(0.85);
+        this._strengthUniform = uniform(0.35);
+        const lum = luminance(scenePassColor.rgb);
+        const brightMask = smoothstep(this._thresholdUniform, this._thresholdUniform.add(0.1), lum);
+        const bright = scenePassColor.mul(brightMask);
+
+        // Single separable gaussian blur at half resolution (2 passes vs BloomNode's 12+)
+        const blurred = gaussianBlur(bright, null, 3);
+        (blurred as any).resolution.set(0.5, 0.5);
+
+        // Additive composite: scene + blurred brights * strength
+        this.postProcessing = new PostProcessing(renderer as any);
+        (this.postProcessing as any).outputNode = scenePassColor.add(
+            blurred.mul(this._strengthUniform),
+        );
+        this.postProcessingNeedsRebuild = false;
     }
 
     render(params: RenderParams): void {
@@ -57,7 +98,13 @@ export class SceneRenderer {
         const poolSync = this.deps.getPoolSyncTextures();
         if (!texturePool || !poolSync) return;
 
-        this.rendererWrapper.setSize(window.innerWidth, window.innerHeight);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        if (w !== this._lastWidth || h !== this._lastHeight) {
+            this._lastWidth = w;
+            this._lastHeight = h;
+            this.rendererWrapper.setSize(w, h);
+        }
         const rendererThree = this.rendererWrapper.getRenderer() as any;
         const backend = rendererThree?.backend;
 
@@ -168,6 +215,7 @@ export class SceneRenderer {
             });
         }
 
+        // --- Render (appearance controls disabled for perf test) ---
         this.rendererWrapper.render(this.scene, camera.threeCamera);
     }
 }

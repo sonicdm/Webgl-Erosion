@@ -467,6 +467,42 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     lightFolder.add(controls, 'lightPosZ', -1.0, 1.0).name('Z');
     lightFolder.open();
 
+    // Appearance / Post-Processing subfolder
+    const appearanceFolder = renderingpara.addFolder('Appearance');
+    tip(appearanceFolder.add(controls, 'ppExposure', 0.1, 3.0).step(0.05).name('Exposure'),
+        'Global exposure multiplier (ACES tone mapping)');
+
+    const bloomFolder = appearanceFolder.addFolder('Bloom');
+    tip(bloomFolder.add(controls, 'ppBloomStrength', 0.0, 2.0).step(0.05).name('Strength'),
+        'Bloom glow intensity (0 = off)');
+    tip(bloomFolder.add(controls, 'ppBloomRadius', 0.0, 1.0).step(0.05).name('Radius'),
+        'How far bloom spreads from bright areas');
+    tip(bloomFolder.add(controls, 'ppBloomThreshold', 0.0, 2.0).step(0.05).name('Threshold'),
+        'Minimum brightness to trigger bloom (in linear HDR space)');
+
+    const atmosphereFolder = appearanceFolder.addFolder('Atmosphere');
+    tip(atmosphereFolder.add(controls, 'fogEnabled').name('Enable Fog'),
+        'Enable distance-based atmospheric fog');
+    tip(atmosphereFolder.add(controls, 'fogNear', 0.0, 5.0).step(0.1).name('Fog Near'),
+        'Distance where fog starts (in scene units)');
+    tip(atmosphereFolder.add(controls, 'fogFar', 0.5, 20.0).step(0.1).name('Fog Far'),
+        'Distance where fog is fully opaque');
+    tip(atmosphereFolder.add(controls, 'fogColorR', 0.0, 1.0).step(0.01).name('Fog Red'),
+        'Red component of fog color');
+    tip(atmosphereFolder.add(controls, 'fogColorG', 0.0, 1.0).step(0.01).name('Fog Green'),
+        'Green component of fog color');
+    tip(atmosphereFolder.add(controls, 'fogColorB', 0.0, 1.0).step(0.01).name('Fog Blue'),
+        'Blue component of fog color');
+
+    const ppLightingFolder = appearanceFolder.addFolder('Lighting');
+    tip(ppLightingFolder.add(controls, 'sunIntensity', 0.0, 3.0).step(0.05).name('Sun Intensity'),
+        'Multiplier on directional light intensity');
+    tip(ppLightingFolder.add(controls, 'ambientIntensity', 0.0, 3.0).step(0.05).name('Ambient'),
+        'Multiplier on ambient light intensity');
+    tip(ppLightingFolder.add(controls, 'envMapIntensity', 0.0, 2.0).step(0.05).name('Env Reflections'),
+        'Environment map reflection intensity (IBL on terrain)');
+    appearanceFolder.open();
+
     // Debug views subfolder
     const debugFolder = renderingpara.addFolder('Debug Views');
     debugFolder.add(controls, 'TerrainDebug', {

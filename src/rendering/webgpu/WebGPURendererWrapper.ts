@@ -59,6 +59,12 @@ export class WebGPURendererWrapper {
         return this.initPromise;
     }
 
+    /** Update tone mapping exposure (ACES filmic). Call per-frame from render loop. */
+    setExposure(exposure: number): void {
+        if (!this.initialized || !this.renderer) return;
+        this.renderer.toneMappingExposure = exposure;
+    }
+
     /**
      * Set the clear color for the renderer.
      * Matches OpenGLRenderer interface.
