@@ -72,8 +72,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // Persistent lava sources — additive with low emission constant.
-    // GPU Jacobi can only propagate 16 cells/frame, so emission must be low enough
-    // that accumulation at the source stays reasonable (~10-80 peak after 10s).
+    // Keep emission low enough that source pools remain in a controllable range
+    // as flow iterations/timestep compensation are tuned for performance.
     // Thin lava films are made visible via boosted opacity in the rendering material.
     for (var i: i32 = 0; i < uniforms.u_SourceCount; i++) {
         let srcPos = sources.positions[i];

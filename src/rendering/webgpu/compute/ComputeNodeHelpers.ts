@@ -2,6 +2,19 @@
  * Helper utilities for creating WebGPU compute shader bindings and resources.
  */
 
+// Reuse default views for the lifetime of each GPUTexture to avoid recreating
+// a GPUTextureView on every pass dispatch.
+const textureViewCache = new WeakMap<GPUTexture, GPUTextureView>();
+
+function getCachedTextureView(texture: GPUTexture): GPUTextureView {
+    let view = textureViewCache.get(texture);
+    if (!view) {
+        view = texture.createView();
+        textureViewCache.set(texture, view);
+    }
+    return view;
+}
+
 /**
  * Create a storage texture binding entry for a compute shader.
  * Storage textures can be read from and written to in compute shaders.
@@ -13,7 +26,7 @@ export function createStorageTextureBinding(
 ): GPUBindGroupEntry {
     return {
         binding: binding,
-        resource: texture.createView(),
+        resource: getCachedTextureView(texture),
     };
 }
 
@@ -27,7 +40,7 @@ export function createSampledTextureBinding(
 ): GPUBindGroupEntry {
     return {
         binding: binding,
-        resource: texture.createView(),
+        resource: getCachedTextureView(texture),
     };
 }
 

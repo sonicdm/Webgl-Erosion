@@ -51,9 +51,9 @@ describe('ComputeNodePipeline', () => {
             expect(typeof pipeline.thermalPass).toBe('function');
         });
 
-        it('should have placeholder method for lava pass', () => {
+        it('should have lava source pass', () => {
             const pipeline = new ComputeNodePipeline(mockDevice);
-            expect(typeof pipeline.lavaPass).toBe('function');
+            expect(typeof pipeline.lavaSourcePass).toBe('function');
         });
     });
 

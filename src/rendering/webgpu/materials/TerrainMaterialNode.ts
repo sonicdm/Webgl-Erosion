@@ -220,7 +220,9 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
         detailNormalStrength?: number;
         detailRoughnessVar?: number;
         detailScale?: number;
+        simres?: number;
     }): void {
+        if (params.simres !== undefined) this.simresUniform.value = params.simres;
         if (params.terrainPalette !== undefined) this.terrainPaletteUniform.value = params.terrainPalette;
         if (params.maxHeight !== undefined) this.maxHeightUniform.value = params.maxHeight;
         if (params.debugMode !== undefined) this.debugModeUniform.value = params.debugMode;
@@ -420,7 +422,7 @@ export class TerrainMaterialNode extends MeshStandardNodeMaterial {
             debugLavaVolume = mix(vec3(0, 0, 0.1), mix(vec3(1, 0.3, 0), vec3(1, 1, 0.5), thermalMass), thermalMass);
 
             // LavaLayering: sample 4 neighbors to show insulation pattern
-            const eps = float(1).div(float(inputs.simres ?? 512));
+            const eps = float(1).div(this.simresUniform);
             const nT = texture(inputs.lavaMap, curUv.add(vec2(0, eps)));
             const nR = texture(inputs.lavaMap, curUv.add(vec2(eps, 0)));
             const nB = texture(inputs.lavaMap, curUv.add(vec2(0, eps.negate())));

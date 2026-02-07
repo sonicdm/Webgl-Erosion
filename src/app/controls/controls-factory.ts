@@ -122,7 +122,7 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         lavaEmissiveStrength: 1.5,
         // Lava channeling mechanics
         lavaFlowStrength: 0.3,
-        lavaFlowIterations: 16,
+        lavaFlowIterations: 8,
         lavaDepthBoost: 20.0,
         lavaMomentum: 0.7,
         lavaNoiseResist: 3.0,
@@ -139,7 +139,7 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         terrainDetailScale: 1.0,
         // Appearance / Post-Processing
         ppExposure: 1.0,
-        ppBloomStrength: 0.35,
+        ppBloomStrength: 0.0,
         ppBloomRadius: 0.4,
         ppBloomThreshold: 0.85,
         fogEnabled: false,
@@ -150,7 +150,8 @@ export function createControls(ctx: AppContext, actions: ControlsActions): IAppC
         fogColorB: 0.82,
         sunIntensity: 1.0,
         ambientIntensity: 1.0,
-        envMapIntensity: 0.4
+        envMapIntensity: 0.4,
+        shadowsEnabled: true,
     };
 
     if (actions.resetErosionParameters) {

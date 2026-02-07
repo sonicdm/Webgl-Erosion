@@ -172,9 +172,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         let tempIn = tempWeightedSum / max(fin, 0.001);
-        // fin is height of incoming lava; d2 is total lava height after flow.
+        // Convert incoming flux to incoming height-volume so blending uses
+        // consistent units (flux -> volume/height via dt and L²).
+        let incomingVol = uniforms.u_timestep * fin / (uniforms.u_PipeLen * uniforms.u_PipeLen);
         // inFrac = what fraction of the final pool is new material.
-        let inFrac = clamp(fin / max(d2, 0.001), 0.0, 1.0);
+        let inFrac = clamp(incomingVol / max(d2, 0.001), 0.0, 1.0);
         newTemp = mix(cur.g, tempIn, inFrac);
     }
 

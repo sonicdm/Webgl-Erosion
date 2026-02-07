@@ -414,7 +414,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
             controls.lavaYellowTemp = 780;
             controls.lavaEmissiveStrength = 1.5;
             controls.lavaFlowStrength = 0.3;
-            controls.lavaFlowIterations = 16;
+            controls.lavaFlowIterations = 8;
             controls.lavaDepthBoost = 20.0;
             controls.lavaMomentum = 0.7;
             controls.lavaNoiseResist = 3.0;
@@ -499,6 +499,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
         'Multiplier on directional light intensity');
     tip(ppLightingFolder.add(controls, 'ambientIntensity', 0.0, 3.0).step(0.05).name('Ambient'),
         'Multiplier on ambient light intensity');
+    ppLightingFolder.add(controls, 'shadowsEnabled').name('Shadows');
     tip(ppLightingFolder.add(controls, 'envMapIntensity', 0.0, 2.0).step(0.05).name('Env Reflections'),
         'Environment map reflection intensity (IBL on terrain)');
     appearanceFolder.open();

@@ -10,16 +10,27 @@ import type { IAppControls } from '../app/controls/types';
 import { getWaterSourceCount, waterSources, MAX_WATER_SOURCES } from '../utils/water-sources';
 import { getLavaSourceCount, lavaSources, MAX_LAVA_SOURCES } from '../utils/lava-sources';
 import { lavaLogger, LogCategory } from '../utils/rate-limited-logger';
+import { copyPoolToThreeTextures } from '../utils/webgpu-pool-to-three-texture-copy';
+import { getPoolCopyTextureNamesForView } from '../utils/webgpu-pool-to-three-texture-copy';
+import type { WebGPUBackendLike } from '../utils/webgpu-pool-to-three-texture-copy';
+import type { PoolSyncTextures } from '../utils/webgpu-pool-to-three-texture-copy';
+
+/** When provided, pool→Three.js copy is encoded in the same encoder as this step (one fewer submit). */
+export interface CopyAfterStepParams {
+    backend: WebGPUBackendLike;
+    poolSync: PoolSyncTextures;
+}
 
 /**
  * Execute one complete simulation step using WebGPU compute shaders.
- * 
+ *
  * @param computePipeline - Compute pipeline with all passes
  * @param texturePool - WebGPU texture pool
  * @param appContext - Application context with state holders
  * @param controls - Simulation controls
  * @param timer - Current simulation time step
  * @param brushState - Brush state (mouse world pos, dir, brush pos, etc.)
+ * @param copyAfterStep - If set, encode pool→Three.js texture copy in this step's encoder (call on last step only).
  */
 export function SimulatePerStepWebGPU(
     computePipeline: ComputeNodePipeline,
@@ -31,13 +42,16 @@ export function SimulatePerStepWebGPU(
         mouseWorldPos: [number, number, number, number];
         mouseWorldDir: [number, number, number];
         brushPos: [number, number];
-    }
+    },
+    copyAfterStep?: CopyAfterStepParams
 ): void {
     if (appContext.simulationState.pauseGeneration) {
         return;
     }
 
     const simres = appContext.simulationState.simres;
+    const device = computePipeline.getDevice();
+    const encoder = device.createCommandEncoder();
 
     // Prepare reusable arrays for water sources (avoid per-frame allocations)
     const reusableSourceBuffers = appContext.simulationState.getWaterSourceBuffers(MAX_WATER_SOURCES);
@@ -85,7 +99,7 @@ export function SimulatePerStepWebGPU(
         sourcePositions: reusableSourcePositions,
         sourceSizes: reusableSourceSizes,
         sourceStrengths: reusableSourceStrengths,
-    });
+    }, encoder);
     texturePool.swapTerrainTextures();
 
     // 1. Flow (Flux)
@@ -94,7 +108,7 @@ export function SimulatePerStepWebGPU(
         pipeLen: controls.pipelen,
         timestep: controls.timestep,
         pipeArea: controls.pipeAra,
-    });
+    }, encoder);
     texturePool.swapFluxTextures();
 
     // 2. Water Height/Velocity (MRT: 2 outputs)
@@ -106,7 +120,7 @@ export function SimulatePerStepWebGPU(
         velMult: controls.VelocityMultiplier,
         time: timer,
         velAdvMag: controls.VelocityAdvectionMag,
-    });
+    }, encoder);
     texturePool.swapTerrainTextures();
     texturePool.swapVelTextures();
 
@@ -121,7 +135,7 @@ export function SimulatePerStepWebGPU(
         time: timer,
         rockErosionResistance: controls.rockErosionResistance,
         basaltErosionResistance: controls.basaltErosionResistance,
-    });
+    }, encoder);
     texturePool.swapTerrainTextures();
     texturePool.swapSedimentTextures();
     texturePool.swapVelTextures();
@@ -132,7 +146,7 @@ export function SimulatePerStepWebGPU(
         timestep: controls.timestep,
         advectionMethod: controls.AdvectionMethod,
         advectMultiplier: controls.AdvectionSpeedScaling,
-    });
+    }, encoder);
     texturePool.swapSedimentTextures();
     texturePool.swapSedimentBlendTextures();
     texturePool.swapVelTextures();
@@ -141,7 +155,7 @@ export function SimulatePerStepWebGPU(
     computePipeline.maxSlippagePass(texturePool, {
         simRes: simres,
         talusScale: controls.thermalTalusAngleScale,
-    });
+    }, encoder);
     texturePool.swapMaxSlippageTextures();
 
     // 6. Thermal Terrain Flux
@@ -153,7 +167,7 @@ export function SimulatePerStepWebGPU(
         thermalRate: controls.thermalRate,
         rockErosionResistance: controls.rockErosionResistance,
         basaltErosionResistance: controls.basaltErosionResistance,
-    });
+    }, encoder);
     texturePool.swapTerrainFluxTextures();
 
     // 7. Thermal Apply
@@ -165,14 +179,14 @@ export function SimulatePerStepWebGPU(
         thermalErosionScale: controls.thermalErosionScale,
         rockErosionResistance: controls.rockErosionResistance,
         basaltErosionResistance: controls.basaltErosionResistance,
-    });
+    }, encoder);
     texturePool.swapTerrainTextures();
 
     // 8. Evaporation
     computePipeline.evaporationPass(texturePool, {
         simRes: simres,
         evaporationConstant: controls.EvaporationConstant,
-    });
+    }, encoder);
     texturePool.swapTerrainTextures();
 
     // 9. Lava Simulation
@@ -194,10 +208,7 @@ export function SimulatePerStepWebGPU(
             }
         }
 
-        // 9a. Source injection — once per frame, then multiple flow iterations drain it.
-        // Interleaving (emit inside loop) was counterproductive: the center got refilled
-        // each sub-step, preventing drainage. Better: emit once, then let N iterations
-        // propagate the lava outward without interference.
+        // Source injection — once per frame, then multiple flow iterations drain it.
         computePipeline.lavaSourcePass(texturePool, {
             simRes: simres,
             brushSize: controls.brushSize,
@@ -212,19 +223,23 @@ export function SimulatePerStepWebGPU(
             sourceSizes: lavaSrcBuffers.sizes,
             sourceStrengths: lavaSrcBuffers.strengths,
             time: timer,
-        });
+        }, encoder);
         texturePool.swapLavaTextures();
 
-        // 9b/9c. Flow sub-iterations (flux + height/velocity).
-        // Each iteration propagates lava one cell outward. More iterations = wider
-        // propagation per frame, reducing accumulation at sources.
+        // Flow sub-iterations (flux + height/velocity).
+        // Keep effective transport budget approximately stable vs. iteration count by
+        // scaling the per-iteration timestep against a 16-iteration baseline.
+        // This preserves vent drainage when iterations are reduced for performance.
         const flowIters = Math.max(1, Math.round(controls.lavaFlowIterations));
+        const flowIterationBaseline = 16;
+        const flowTimestepScale = Math.min(4.0, Math.max(0.5, flowIterationBaseline / flowIters));
+        const compensatedFlowTimestep = controls.timestep * flowTimestepScale;
 
         for (let iter = 0; iter < flowIters; iter++) {
             computePipeline.lavaFluxPass(texturePool, {
                 simRes: simres,
                 pipeLen: controls.pipelen,
-                timestep: controls.timestep,
+                timestep: compensatedFlowTimestep,
                 pipeArea: controls.lavaFlowStrength,
                 viscosityScale: controls.lavaViscosityScale,
                 yieldStress: controls.lavaYieldStress,
@@ -232,32 +247,32 @@ export function SimulatePerStepWebGPU(
                 depthBoostStrength: controls.lavaDepthBoost,
                 momentumStrength: controls.lavaMomentum,
                 noiseResistPower: controls.lavaNoiseResist,
-            });
+            }, encoder);
             texturePool.swapLavaFluxTextures();
             texturePool.swapLavaFlux2Textures();
 
             computePipeline.lavaHeightVelPass(texturePool, {
                 simRes: simres,
                 pipeLen: controls.pipelen,
-                timestep: controls.timestep,
+                timestep: compensatedFlowTimestep,
                 pipeArea: controls.pipeAra,
                 momentum: controls.lavaMomentum,
-            });
+            }, encoder);
             texturePool.swapLavaTextures();
             texturePool.swapLavaVelTextures();
         }
 
-        // 9d. Lava Thermal Transfer (heat conduction between lava cells, re-mobilization)
+        // Lava Thermal Transfer (heat conduction between lava cells, re-mobilization)
         computePipeline.lavaThermalTransferPass(texturePool, {
             simRes: simres,
             kCond: controls.lavaKCond,
             crustMixSuppression: controls.lavaCrustMixSuppression,
             softeningTemp: controls.lavaSofteningTemp / 1200,
             timestep: controls.timestep,
-        });
+        }, encoder);
         texturePool.swapLavaTextures();
 
-        // 9e. Lava Thermal Erosion (bounded — hot lava erodes terrain and basalt beneath)
+        // Lava Thermal Erosion (bounded — hot lava erodes terrain and basalt beneath)
         computePipeline.lavaThermalErosionPass(texturePool, {
             simRes: simres,
             thermalErosionRate: controls.lavaThermalErosionRate,
@@ -265,11 +280,11 @@ export function SimulatePerStepWebGPU(
             erosionSpeedClamp: controls.lavaErosionSpeedClamp,
             rockMeltThreshold: controls.lavaRockMeltThreshold / 1200,
             timestep: controls.timestep,
-        });
+        }, encoder);
         texturePool.swapTerrainTextures();
         texturePool.swapBasaltTextures();
 
-        // 9f. Lava Cooling & Solidification
+        // Lava Cooling & Solidification
         computePipeline.lavaCoolingPass(texturePool, {
             simRes: simres,
             coolingRate: controls.lavaCoolingRate,
@@ -280,11 +295,11 @@ export function SimulatePerStepWebGPU(
             ambientCoolingRate: controls.lavaAmbientCoolingRate,
             viscTempScale: controls.lavaViscTempScale,
             timestep: controls.timestep,
-        });
+        }, encoder);
         texturePool.swapLavaTextures();
         texturePool.swapTerrainTextures();
 
-        // 9g. Lava Solidification (three-layer: mobile → cool → basalt)
+        // Lava Solidification (three-layer: mobile → cool → basalt)
         computePipeline.lavaSolidificationPass(texturePool, {
             simRes: simres,
             coolThreshold: 0.2,
@@ -294,13 +309,18 @@ export function SimulatePerStepWebGPU(
             reMeltRate: controls.lavaReMeltRate,
             basaltMeltRate: controls.lavaBasaltMeltRate,
             noiseModulation: controls.lavaNoiseModulation,
-        });
+        }, encoder);
         texturePool.swapLavaTextures();
         texturePool.swapCoolLavaTextures();
         texturePool.swapBasaltTextures();
 
-        // 9h. Lava-Water Interaction (mutual exclusion, quench cooling, evaporation)
-        if (controls.lavaWaterInteraction) {
+        // Lava-Water Interaction (mutual exclusion, quench cooling, evaporation)
+        const brushAffectsWater = controls.brushPressed === 1 && controls.brushType === 2;
+        const hasWaterActivity = sourceCount > 0
+            || controls.RainDegree > 0
+            || controls.RainErosion
+            || brushAffectsWater;
+        if (controls.lavaWaterInteraction && hasWaterActivity) {
             computePipeline.lavaWaterInteractionPass(texturePool, {
                 simRes: simres,
                 heatRadius: controls.lavaHeatRadius,
@@ -309,13 +329,12 @@ export function SimulatePerStepWebGPU(
                 rockFraction: controls.lavaRockFraction,
                 waterEvapRate: 0.1,
                 timestep: controls.timestep,
-            });
+            }, encoder);
             texturePool.swapLavaTextures();
             texturePool.swapTerrainTextures();
             texturePool.swapBasaltTextures();
         }
 
-        // 9i. Lava diagnostics (rate-limited logging)
         if (lavaSourceCount > 0) {
             lavaLogger.log(LogCategory.LAVA_SIM, 'step',
                 `sources=${lavaSourceCount} dt=${controls.timestep.toFixed(4)} viscScale=${controls.lavaViscosityScale} erosionCap=${controls.lavaMaxErosionPerStep}`);
@@ -326,6 +345,23 @@ export function SimulatePerStepWebGPU(
     computePipeline.averagePass(texturePool, {
         simRes: simres,
         erosionMode: controls.ErosionMode,
-    });
+    }, encoder);
     texturePool.swapTerrainTextures();
+
+    if (copyAfterStep) {
+        const copyTextureNames = getPoolCopyTextureNamesForView({
+            debugMode: controls.TerrainDebug ?? 0,
+            showFlowTrace: controls.ShowFlowTrace ?? false,
+        });
+        copyPoolToThreeTextures(
+            copyAfterStep.backend,
+            texturePool,
+            copyAfterStep.poolSync,
+            simres,
+            encoder,
+            copyTextureNames
+        );
+    }
+
+    device.queue.submit([encoder.finish()]);
 }

@@ -163,4 +163,5 @@ export interface IAppControls {
     sunIntensity: number;
     ambientIntensity: number;
     envMapIntensity: number;
+    shadowsEnabled: boolean;
 }

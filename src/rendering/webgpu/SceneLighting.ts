@@ -28,31 +28,32 @@ export class SceneLighting {
     /** Pre-allocated for zero-alloc shadow stabilization. */
     private readonly _shadowOrigin = new Vector3();
 
-    constructor(scene: Scene, renderer?: WebGPURenderer) {
+    /** When false, no shadow pass — use for perf testing (often +50–80 FPS). */
+    private _shadowsEnabled: boolean;
+    private _renderer: WebGPURenderer | undefined;
+
+    constructor(scene: Scene, renderer?: WebGPURenderer, options?: { shadowsEnabled?: boolean }) {
+        this._renderer = renderer;
+        this._shadowsEnabled = options?.shadowsEnabled !== false;
         this.directionalLight = new DirectionalLight(0xffffff, 2.5);
         this.directionalLight.position.set(0.4, 0.8, 0.0);
 
-        // Shadow mapping — terrain self-shadowing from the sun
-        this.directionalLight.castShadow = true;
-        this.directionalLight.shadow.mapSize.set(4096, 4096);
-        // VSM uses gaussian blur on the shadow map, so bias can be minimal
-        this.directionalLight.shadow.bias = -0.0001;
-        this.directionalLight.shadow.normalBias = 0.01;
-        // Blur radius and sample count for VSM gaussian pass
-        this.directionalLight.shadow.radius = 8;
-        (this.directionalLight.shadow as any).blurSamples = 25;
+        this.directionalLight.castShadow = this._shadowsEnabled;
+        if (this._shadowsEnabled) {
+            this.directionalLight.shadow.mapSize.set(4096, 4096);
+            this.directionalLight.shadow.bias = -0.0001;
+            this.directionalLight.shadow.normalBias = 0.01;
+            this.directionalLight.shadow.radius = 8;
+            (this.directionalLight.shadow as any).blurSamples = 25;
+            const cam = this.directionalLight.shadow.camera;
+            cam.left = -0.8;
+            cam.right = 0.8;
+            cam.top = 0.8;
+            cam.bottom = -0.8;
+            cam.near = 0.01;
+            cam.far = 3.0;
+        }
 
-        // Shadow camera: orthographic frustum covering the 1×1 terrain plane.
-        // Terrain displacement peaks at roughly height/simres ≈ 0.5 units above Y=0.
-        const cam = this.directionalLight.shadow.camera;
-        cam.left = -0.8;
-        cam.right = 0.8;
-        cam.top = 0.8;
-        cam.bottom = -0.8;
-        cam.near = 0.01;
-        cam.far = 3.0;
-
-        // Target at scene center (needed for shadow camera alignment)
         this.directionalLight.target.position.set(0, 0, 0);
         scene.add(this.directionalLight.target);
 
@@ -61,10 +62,19 @@ export class SceneLighting {
         scene.add(this.directionalLight);
         scene.add(this.ambientLight);
 
-        // Enable shadow map on the renderer if provided
         if (renderer) {
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = VSMShadowMap;
+            renderer.shadowMap.enabled = this._shadowsEnabled;
+            if (this._shadowsEnabled) renderer.shadowMap.type = VSMShadowMap;
+        }
+    }
+
+    setShadowsEnabled(enabled: boolean): void {
+        if (this._shadowsEnabled === enabled) return;
+        this._shadowsEnabled = enabled;
+        this.directionalLight.castShadow = enabled;
+        if (this._renderer) {
+            this._renderer.shadowMap.enabled = enabled;
+            if (enabled) this._renderer.shadowMap.type = VSMShadowMap;
         }
     }
 
@@ -86,8 +96,7 @@ export class SceneLighting {
             nz * SceneLighting.LIGHT_DISTANCE,
         );
 
-        // Snap shadow camera to texel grid to prevent sub-texel swimming
-        this.stabilizeShadowCamera();
+        if (this._shadowsEnabled) this.stabilizeShadowCamera();
 
         // Elevation: Y component of normalised direction (0 = horizon, 1 = zenith)
         const elevation = Math.max(ny, 0);

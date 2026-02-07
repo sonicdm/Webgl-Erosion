@@ -151,45 +151,44 @@ export class WebGPUTexturePool {
 
     /**
      * Resize all simulation textures when simres changes.
+     * Old GPU textures are destroyed only after in-flight GPU work completes
+     * to avoid "Destroyed texture used in a submit" validation errors.
      */
     resizeSimulationTextures(newSimres: number): void {
+        // Collect old textures before creating replacements
+        const oldTextures: (GPUTexture | null)[] = [
+            this.readTerrainTexture, this.writeTerrainTexture,
+            this.readFluxTexture, this.writeFluxTexture,
+            this.readTerrainFluxTexture, this.writeTerrainFluxTexture,
+            this.readMaxSlippageTexture, this.writeMaxSlippageTexture,
+            this.readVelTexture, this.writeVelTexture,
+            this.readSedimentTexture, this.writeSedimentTexture,
+            this.terrainNorTexture,
+            this.readSedimentBlendTexture, this.writeSedimentBlendTexture,
+            this.sedimentAdvectATexture, this.sedimentAdvectBTexture,
+            this.readLavaTexture, this.writeLavaTexture,
+            this.readLavaFluxTexture, this.writeLavaFluxTexture,
+            this.readLavaVelTexture, this.writeLavaVelTexture,
+            this.readLavaFlux2Texture, this.writeLavaFlux2Texture,
+            this.readCoolLavaTexture, this.writeCoolLavaTexture,
+            this.readBasaltTexture, this.writeBasaltTexture,
+            this.noiseTexture,
+        ];
+
         this.simres = newSimres;
         this.zeroBuffer = null;
 
-        // Destroy old textures
-        this.destroyTexture(this.readTerrainTexture);
-        this.destroyTexture(this.writeTerrainTexture);
-        this.destroyTexture(this.readFluxTexture);
-        this.destroyTexture(this.writeFluxTexture);
-        this.destroyTexture(this.readTerrainFluxTexture);
-        this.destroyTexture(this.writeTerrainFluxTexture);
-        this.destroyTexture(this.readMaxSlippageTexture);
-        this.destroyTexture(this.writeMaxSlippageTexture);
-        this.destroyTexture(this.readVelTexture);
-        this.destroyTexture(this.writeVelTexture);
-        this.destroyTexture(this.readSedimentTexture);
-        this.destroyTexture(this.writeSedimentTexture);
-        this.destroyTexture(this.terrainNorTexture);
-        this.destroyTexture(this.readSedimentBlendTexture);
-        this.destroyTexture(this.writeSedimentBlendTexture);
-        this.destroyTexture(this.sedimentAdvectATexture);
-        this.destroyTexture(this.sedimentAdvectBTexture);
-        this.destroyTexture(this.readLavaTexture);
-        this.destroyTexture(this.writeLavaTexture);
-        this.destroyTexture(this.readLavaFluxTexture);
-        this.destroyTexture(this.writeLavaFluxTexture);
-        this.destroyTexture(this.readLavaVelTexture);
-        this.destroyTexture(this.writeLavaVelTexture);
-        this.destroyTexture(this.readLavaFlux2Texture);
-        this.destroyTexture(this.writeLavaFlux2Texture);
-        this.destroyTexture(this.readCoolLavaTexture);
-        this.destroyTexture(this.writeCoolLavaTexture);
-        this.destroyTexture(this.readBasaltTexture);
-        this.destroyTexture(this.writeBasaltTexture);
-        this.destroyTexture(this.noiseTexture);
-
         // Recreate textures with new size
         this.setup();
+
+        // Defer destruction until GPU finishes with old textures
+        this.device.queue.onSubmittedWorkDone()
+            .catch(() => undefined)
+            .then(() => {
+                for (const tex of oldTextures) {
+                    if (tex) tex.destroy();
+                }
+            });
     }
 
     /**

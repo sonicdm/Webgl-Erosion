@@ -23,6 +23,56 @@ export interface PoolSyncTextures {
   basaltMap: DataTexture;
 }
 
+export type PoolSyncTextureName = keyof PoolSyncTextures;
+
+export interface PoolCopyViewOptions {
+  debugMode: number;
+  showFlowTrace: boolean;
+}
+
+/**
+ * Build the minimal texture sync set for the current view state.
+ * Normal rendering does not need every debug texture each frame.
+ */
+export function getPoolCopyTextureNamesForView(options: PoolCopyViewOptions): PoolSyncTextureName[] {
+  const { debugMode, showFlowTrace } = options;
+  const names: PoolSyncTextureName[] = [
+    'heightmap',
+    'sedimentMap',
+    'lavaMap',
+    'lavaVelocityMap',
+    'coolLavaMap',
+    'basaltMap',
+  ];
+
+  // Flow trace overlay samples sediment blend.
+  if (showFlowTrace || debugMode === 7) {
+    names.push('sedimentBlendMap');
+  }
+
+  // Debug-only maps.
+  if (debugMode === 2 || debugMode === 9) names.push('velocityMap');
+  if (debugMode === 4) names.push('fluxMap');
+  if (debugMode === 5) names.push('terrainFluxMap');
+  if (debugMode === 6) names.push('maxSlippageMap');
+
+  return names;
+}
+
+/**
+ * Resize existing pool sync DataTextures in place (new zero buffer + dimensions).
+ * Avoids recreating material graph references, so shaders do NOT recompile.
+ * The WebGPU backend will recreate its internal GPUTextures on next render
+ * when it sees the bumped version (needsUpdate = true).
+ */
+export function resizePoolSyncTextures(sync: PoolSyncTextures, newRes: number): void {
+  const sharedZeroData = new Float32Array(newRes * newRes * 4);
+  for (const tex of Object.values(sync) as DataTexture[]) {
+    tex.image = { data: sharedZeroData, width: newRes, height: newRes };
+    tex.needsUpdate = true;
+  }
+}
+
 /**
  * Create DataTextures with rgba32float-compatible format (RGBAFormat + FloatType)
  * so the WebGPU backend creates GPUTextures we can copy into from the pool.
@@ -69,6 +119,9 @@ export interface WebGPUBackendLike {
  * we skip copy when backend texture is not yet initialized.
  * After first successful copy we set needsUpdate = false so the backend does not re-upload CPU
  * data and overwrite our GPU copy.
+ *
+ * If existingEncoder is provided, copy commands are added to it and no submit is performed
+ * (caller must submit the encoder). Use this to merge the copy into another pass (e.g. last sim step).
  */
 let _copyLogged = false;
 let _skipLogged = false;
@@ -77,31 +130,45 @@ export function copyPoolToThreeTextures(
   backend: WebGPUBackendLike,
   pool: WebGPUTexturePool,
   sync: PoolSyncTextures,
-  simres: number
+  simres: number,
+  existingEncoder?: GPUCommandEncoder,
+  textureNames?: readonly PoolSyncTextureName[]
 ): void {
   const device = backend.device;
-  const textures: Array<[GPUTexture, DataTexture]> = [
-    [pool.readTerrainTexture, sync.heightmap],
-    [pool.terrainNorTexture, sync.normalMap],
-    [pool.readSedimentTexture, sync.sedimentMap],
-    [pool.readVelTexture, sync.velocityMap],
-    [pool.readFluxTexture, sync.fluxMap],
-    [pool.readTerrainFluxTexture, sync.terrainFluxMap],
-    [pool.readMaxSlippageTexture, sync.maxSlippageMap],
-    [pool.readSedimentBlendTexture, sync.sedimentBlendMap],
-    [pool.readLavaTexture, sync.lavaMap],
-    [pool.readLavaVelTexture, sync.lavaVelocityMap],
-    [pool.readCoolLavaTexture, sync.coolLavaMap],
-    [pool.readBasaltTexture, sync.basaltMap],
+  const textures: Array<{ name: PoolSyncTextureName; source: GPUTexture; target: DataTexture }> = [
+    { name: 'heightmap', source: pool.readTerrainTexture, target: sync.heightmap },
+    { name: 'normalMap', source: pool.terrainNorTexture, target: sync.normalMap },
+    { name: 'sedimentMap', source: pool.readSedimentTexture, target: sync.sedimentMap },
+    { name: 'velocityMap', source: pool.readVelTexture, target: sync.velocityMap },
+    { name: 'fluxMap', source: pool.readFluxTexture, target: sync.fluxMap },
+    { name: 'terrainFluxMap', source: pool.readTerrainFluxTexture, target: sync.terrainFluxMap },
+    { name: 'maxSlippageMap', source: pool.readMaxSlippageTexture, target: sync.maxSlippageMap },
+    { name: 'sedimentBlendMap', source: pool.readSedimentBlendTexture, target: sync.sedimentBlendMap },
+    { name: 'lavaMap', source: pool.readLavaTexture, target: sync.lavaMap },
+    { name: 'lavaVelocityMap', source: pool.readLavaVelTexture, target: sync.lavaVelocityMap },
+    { name: 'coolLavaMap', source: pool.readCoolLavaTexture, target: sync.coolLavaMap },
+    { name: 'basaltMap', source: pool.readBasaltTexture, target: sync.basaltMap },
   ];
+  const enabledNames = textureNames ? new Set(textureNames) : null;
 
   const copySize: GPUExtent3D = [simres, simres, 1];
   let copied = 0;
   let skipped = 0;
   const copies: Array<{ source: GPUTexture; dest: GPUTexture; threeTex: DataTexture }> = [];
-  for (const [poolTex, threeTex] of textures) {
+  for (const texture of textures) {
+    if (enabledNames && !enabledNames.has(texture.name)) {
+      continue;
+    }
+
+    const poolTex = texture.source;
+    const threeTex = texture.target;
     const data = backend.get(threeTex);
     if (!data?.texture) {
+      skipped++;
+      continue;
+    }
+    // Skip if the backend GPUTexture hasn't been resized yet (avoids size-mismatch validation error)
+    if (data.texture.width !== simres || data.texture.height !== simres) {
       skipped++;
       continue;
     }
@@ -109,7 +176,7 @@ export function copyPoolToThreeTextures(
   }
   if (copies.length > 0) {
     try {
-      const encoder = device.createCommandEncoder();
+      const encoder = existingEncoder ?? device.createCommandEncoder();
       for (const { source, dest, threeTex } of copies) {
         encoder.copyTextureToTexture(
           { texture: source },
@@ -119,7 +186,9 @@ export function copyPoolToThreeTextures(
         threeTex.needsUpdate = false;
         copied++;
       }
-      device.queue.submit([encoder.finish()]);
+      if (!existingEncoder) {
+        device.queue.submit([encoder.finish()]);
+      }
     } catch (e) {
       if (!_copyLogged) {
         console.warn('[WebGPU] copyTextureToTexture failed:', e);

@@ -15,6 +15,7 @@ import type { WaterMaterialNode } from '../../rendering/webgpu/materials/WaterMa
 import type { LavaMaterialNode } from '../../rendering/webgpu/materials/LavaMaterialNode';
 import type { PoolSyncTextures } from '../../utils/webgpu-pool-to-three-texture-copy';
 import { copyPoolToThreeTextures } from '../../utils/webgpu-pool-to-three-texture-copy';
+import { getPoolCopyTextureNamesForView } from '../../utils/webgpu-pool-to-three-texture-copy';
 import { waterSources } from '../../utils/water-sources';
 import { lavaSources } from '../../utils/lava-sources';
 
@@ -34,6 +35,10 @@ export interface RenderParams {
     controls: IAppControls;
     brushPos: vec2;
     timer: number;
+    /** When true, skip pool→Three copy this frame (experiment: ?copyEvery=2). */
+    skipCopy?: boolean;
+    /** When true, skip final draw (experiment: ?skipRender=2). */
+    skipDraw?: boolean;
 }
 
 /**
@@ -66,16 +71,17 @@ export class SceneRenderer {
         this._strengthUniform = null;
     }
 
-    private initPostProcessing(camera: any): void {
+    private initPostProcessing(camera: any, controls: { ppBloomThreshold?: number; ppBloomStrength?: number }): void {
         const renderer = this.rendererWrapper.getRenderer();
         if (!renderer) return;
         const scenePass = pass(this.scene, camera);
         scenePass.setMRT(null);
         const scenePassColor = scenePass.getTextureNode('output');
 
-        // Soft threshold: extract pixels brighter than threshold
-        this._thresholdUniform = uniform(0.85);
-        this._strengthUniform = uniform(0.35);
+        const threshold = controls.ppBloomThreshold ?? 0.85;
+        const strength = controls.ppBloomStrength ?? 0.35;
+        this._thresholdUniform = uniform(threshold);
+        this._strengthUniform = uniform(strength);
         const lum = luminance(scenePassColor.rgb);
         const brightMask = smoothstep(this._thresholdUniform, this._thresholdUniform.add(0.1), lum);
         const bright = scenePassColor.mul(brightMask);
@@ -90,6 +96,10 @@ export class SceneRenderer {
             blurred.mul(this._strengthUniform),
         );
         this.postProcessingNeedsRebuild = false;
+    }
+
+    private shouldUsePostProcessing(controls: { ppBloomStrength?: number }): boolean {
+        return (controls.ppBloomStrength ?? 0) > 0.001;
     }
 
     render(params: RenderParams): void {
@@ -128,17 +138,31 @@ export class SceneRenderer {
             });
         }
 
-        // Copy pool textures once compilation is done
-        if (this.sceneCompileDone && backend?.device) {
-            copyPoolToThreeTextures(backend, texturePool, poolSync, this.deps.getSimres());
-        }
-
         if (!this.sceneCompileDone) return;
 
-        // --- Material uniform updates ---
+        const usePostProcessing = this.shouldUsePostProcessing(controls);
+        if (usePostProcessing) {
+            if (!this.postProcessing || this.postProcessingNeedsRebuild) {
+                this.initPostProcessing(camera.threeCamera, controls);
+            }
+            if (this._thresholdUniform != null) this._thresholdUniform.value = controls.ppBloomThreshold ?? 0.85;
+            if (this._strengthUniform != null) this._strengthUniform.value = controls.ppBloomStrength ?? 0.35;
+        }
+
+        // Copy pool textures (once compilation is done)
+        performance.mark('render-start');
+        if (backend?.device && !params.skipCopy) {
+            const copyTextureNames = getPoolCopyTextureNamesForView({
+                debugMode: controls.TerrainDebug ?? 0,
+                showFlowTrace: controls.ShowFlowTrace ?? false,
+            });
+            copyPoolToThreeTextures(backend, texturePool, poolSync, this.deps.getSimres(), undefined, copyTextureNames);
+        }
+        performance.mark('render-after-copy');
+        // --- Material uniform updates (TerrainMaterialNode only; basic material has no updateBrush/updateUniforms) ---
         const terrainMesh = this.deps.getTerrainMesh();
-        if (terrainMesh?.material) {
-            const terrainMat = terrainMesh.material as unknown as TerrainMaterialNode;
+        const terrainMat = terrainMesh?.material as unknown as TerrainMaterialNode | undefined;
+        if (terrainMat && typeof (terrainMat as TerrainMaterialNode).updateBrush === 'function') {
             const brushPosValid = brushPos[0] >= 0 && brushPos[0] <= 1 && brushPos[1] >= 0 && brushPos[1] <= 1;
             terrainMat.updateBrush(
                 [brushPos[0], brushPos[1]],
@@ -170,12 +194,18 @@ export class SceneRenderer {
             })));
         }
 
-        // Scene lighting
-        this.deps.getSceneLighting()?.update(
-            controls.lightPosX ?? 0.4,
-            controls.lightPosY ?? 0.8,
-            controls.lightPosZ ?? 0.0,
-        );
+        // Scene lighting (wire GUI intensity and shadow toggle)
+        const lighting = this.deps.getSceneLighting();
+        if (lighting) {
+            lighting.sunIntensityMultiplier = controls.sunIntensity ?? 1.0;
+            lighting.ambientIntensityMultiplier = controls.ambientIntensity ?? 1.0;
+            lighting.setShadowsEnabled(controls.shadowsEnabled ?? true);
+            lighting.update(
+                controls.lightPosX ?? 0.4,
+                controls.lightPosY ?? 0.8,
+                controls.lightPosZ ?? 0.0,
+            );
+        }
 
         // Water
         const waterMesh = this.deps.getWaterMesh();
@@ -214,8 +244,18 @@ export class SceneRenderer {
                 lightDir: [controls.lightPosX ?? 0.4, controls.lightPosY ?? 0.8, controls.lightPosZ ?? 0.0],
             });
         }
+        performance.mark('render-after-materials');
 
-        // --- Render (appearance controls disabled for perf test) ---
-        this.rendererWrapper.render(this.scene, camera.threeCamera);
+        if (!params.skipDraw) {
+            if (usePostProcessing && this.postProcessing) {
+                (this.postProcessing as any).render();
+            } else {
+                this.rendererWrapper.render(this.scene, camera.threeCamera);
+            }
+        }
+        performance.mark('render-end');
+        performance.measure('render-copy', 'render-start', 'render-after-copy');
+        performance.measure('render-materials', 'render-after-copy', 'render-after-materials');
+        performance.measure('render-draw', 'render-after-materials', 'render-end');
     }
 }

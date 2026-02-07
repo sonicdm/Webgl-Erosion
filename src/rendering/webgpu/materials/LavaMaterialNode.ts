@@ -87,7 +87,9 @@ export class LavaMaterialNode extends MeshBasicNodeMaterial {
         emissiveStrength?: number;
         time?: number;
         debugMode?: number;
+        simres?: number;
     }): void {
+        if (params.simres !== undefined) this.simresUniform.value = params.simres;
         if (params.lightDir !== undefined) {
             this.lightDirUniform.value.set(params.lightDir[0], params.lightDir[1], params.lightDir[2]);
         }

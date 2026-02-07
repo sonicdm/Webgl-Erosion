@@ -11,6 +11,10 @@ export class ComputePass {
         this.device = device;
     }
 
+    getDevice(): GPUDevice {
+        return this.device;
+    }
+
     /**
      * Create a compute pipeline from WGSL shader code.
      * @param shaderCode WGSL source

@@ -198,3 +198,5 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let finalWater = max(cur.y + rain * uniforms.raindeg + addwater, 0.0);
     textureStore(writeTerrain, vec2<i32>(global_id.xy), vec4<f32>(finalHeight, finalWater, rockMaterial, baseRockSurfaceHeight));
 }
+
+

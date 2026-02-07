@@ -16,10 +16,11 @@ export interface ITexturePool {
 
 /**
  * Simulation runner: performs one simulation step.
- * LegacySimulationRunner (WebGL) and SimulatePerStepWebGPU (WebGPU) both implement this.
+ * LegacySimulationRunner (WebGL) and WebGPUSimulationRunner (WebGPU) implement this.
+ * @param isLastStep - When true (WebGPU), copy pool→Three.js can be merged into this step's encoder to reduce submits.
  */
 export interface ISimulationRunner {
-    step(): void;
+    step(isLastStep?: boolean): void;
     dispose?(): void;
 }
 

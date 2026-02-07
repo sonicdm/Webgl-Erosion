@@ -8,7 +8,7 @@ import type { ISimulationRunner } from './types';
 export class LegacySimulationRunner implements ISimulationRunner {
     constructor(private stepImpl: () => void) {}
 
-    step(): void {
+    step(_isLastStep?: boolean): void {
         this.stepImpl();
     }
 }

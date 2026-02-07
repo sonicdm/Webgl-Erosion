@@ -80,7 +80,8 @@ export class ComputeNodePipeline extends ComputePass {
             sourcePositions: Float32Array;
             sourceSizes: Float32Array;
             sourceStrengths: Float32Array;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -199,13 +200,13 @@ export class ComputeNodePipeline extends ComputePass {
 
         // Dispatch compute
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.rainPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
 
@@ -263,7 +264,8 @@ export class ComputeNodePipeline extends ComputePass {
             pipeLen: number;
             timestep: number;
             pipeArea: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -309,13 +311,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.flowPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -327,7 +329,8 @@ export class ComputeNodePipeline extends ComputePass {
         uniforms: {
             simRes: number;
             evaporationConstant: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -359,13 +362,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.evaporationPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -382,7 +385,8 @@ export class ComputeNodePipeline extends ComputePass {
             velMult: number;
             time: number;
             velAdvMag: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -431,13 +435,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.waterHeightPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -456,7 +460,8 @@ export class ComputeNodePipeline extends ComputePass {
             time: number;
             rockErosionResistance: number;
             basaltErosionResistance: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -516,13 +521,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.sedimentPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -536,7 +541,8 @@ export class ComputeNodePipeline extends ComputePass {
             timestep: number;
             advectionMethod: number; // 1 = MacCormack, else = Simple
             advectMultiplier: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -623,9 +629,9 @@ export class ComputeNodePipeline extends ComputePass {
 
             const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
 
+            const commandEncoder = encoder ?? device.createCommandEncoder();
             // 1. Forward advect: read sediment, vel -> write sedimentAdvectA
-            const encoder1 = device.createCommandEncoder();
-            const pass1 = encoder1.beginComputePass();
+            const pass1 = commandEncoder.beginComputePass();
             pass1.setPipeline(this.sedimentAdvectForwardPipeline);
             pass1.setBindGroup(0, this.createBindGroup(this.sedimentAdvectForwardBindGroupLayout!, [
                 createSampledTextureBinding(texturePool.readVelTexture, 0),
@@ -635,11 +641,9 @@ export class ComputeNodePipeline extends ComputePass {
             ]));
             pass1.dispatchWorkgroups(workgroupX, workgroupY, 1);
             pass1.end();
-            device.queue.submit([encoder1.finish()]);
 
             // 2. Backward advect: read vel, sedimentAdvectA -> write sedimentAdvectB
-            const encoder2 = device.createCommandEncoder();
-            const pass2 = encoder2.beginComputePass();
+            const pass2 = commandEncoder.beginComputePass();
             pass2.setPipeline(this.sedimentAdvectBackwardPipeline);
             pass2.setBindGroup(0, this.createBindGroup(this.sedimentAdvectBackwardBindGroupLayout!, [
                 createSampledTextureBinding(texturePool.readVelTexture, 0),
@@ -649,11 +653,9 @@ export class ComputeNodePipeline extends ComputePass {
             ]));
             pass2.dispatchWorkgroups(workgroupX, workgroupY, 1);
             pass2.end();
-            device.queue.submit([encoder2.finish()]);
 
             // 3. Correction: read sediment, A, B -> write sediment
-            const encoder3 = device.createCommandEncoder();
-            const pass3 = encoder3.beginComputePass();
+            const pass3 = commandEncoder.beginComputePass();
             pass3.setPipeline(this.maccormackCorrectionPipeline);
             pass3.setBindGroup(0, this.createBindGroup(this.maccormackCorrectionBindGroupLayout!, [
                 createSampledTextureBinding(texturePool.readVelTexture, 0),
@@ -668,7 +670,7 @@ export class ComputeNodePipeline extends ComputePass {
             ]));
             pass3.dispatchWorkgroups(workgroupX, workgroupY, 1);
             pass3.end();
-            device.queue.submit([encoder3.finish()]);
+            if (!encoder) device.queue.submit([commandEncoder.finish()]);
         } else {
             // Simple: one pass
             if (!this.sedimentAdvectSimplePipeline) {
@@ -715,13 +717,13 @@ export class ComputeNodePipeline extends ComputePass {
             ]);
 
             const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-            const commandEncoder = device.createCommandEncoder();
+            const commandEncoder = encoder ?? device.createCommandEncoder();
             const computePass = commandEncoder.beginComputePass();
             computePass.setPipeline(this.sedimentAdvectSimplePipeline);
             computePass.setBindGroup(0, bindGroup);
             computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
             computePass.end();
-            device.queue.submit([commandEncoder.finish()]);
+            if (!encoder) device.queue.submit([commandEncoder.finish()]);
         }
     }
 
@@ -734,7 +736,8 @@ export class ComputeNodePipeline extends ComputePass {
         uniforms: {
             simRes: number;
             talusScale: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -768,13 +771,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.maxSlippagePipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -791,7 +794,8 @@ export class ComputeNodePipeline extends ComputePass {
             thermalRate: number;
             rockErosionResistance: number;
             basaltErosionResistance: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -838,13 +842,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.thermalFluxPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -859,9 +863,10 @@ export class ComputeNodePipeline extends ComputePass {
             timestep: number;
             pipeArea: number;
             thermalErosionScale: number;
-            rockErosionResistance: number;
-            basaltErosionResistance: number;
-        }
+        rockErosionResistance: number;
+        basaltErosionResistance: number;
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -908,13 +913,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.thermalApplyPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -932,7 +937,8 @@ export class ComputeNodePipeline extends ComputePass {
             thermalErosionScale: number;
             rockErosionResistance: number;
             basaltErosionResistance: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         this.thermalFluxPass(texturePool, {
             simRes: uniforms.simRes,
@@ -942,7 +948,7 @@ export class ComputeNodePipeline extends ComputePass {
             thermalRate: uniforms.thermalRate,
             rockErosionResistance: uniforms.rockErosionResistance,
             basaltErosionResistance: uniforms.basaltErosionResistance,
-        });
+        }, encoder);
         texturePool.swapTerrainFluxTextures();
         this.thermalApplyPass(texturePool, {
             simRes: uniforms.simRes,
@@ -952,7 +958,7 @@ export class ComputeNodePipeline extends ComputePass {
             thermalErosionScale: uniforms.thermalErosionScale,
             rockErosionResistance: uniforms.rockErosionResistance,
             basaltErosionResistance: uniforms.basaltErosionResistance,
-        });
+        }, encoder);
     }
 
     /**
@@ -964,7 +970,8 @@ export class ComputeNodePipeline extends ComputePass {
         uniforms: {
             simRes: number;
             erosionMode: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1000,13 +1007,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.averagePipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     // ===== LAVA COMPUTE PASSES =====
@@ -1031,7 +1038,8 @@ export class ComputeNodePipeline extends ComputePass {
             sourceSizes: Float32Array;
             sourceStrengths: Float32Array;
             time: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1098,13 +1106,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaSourcePipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -1124,7 +1132,8 @@ export class ComputeNodePipeline extends ComputePass {
             depthBoostStrength: number;
             momentumStrength: number;
             noiseResistPower: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1179,13 +1188,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaFluxPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -1200,7 +1209,8 @@ export class ComputeNodePipeline extends ComputePass {
             timestep: number;
             pipeArea: number;
             momentum: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1245,13 +1255,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaHeightVelPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -1267,7 +1277,8 @@ export class ComputeNodePipeline extends ComputePass {
             crustMixSuppression: number;
             softeningTemp: number;
             timestep: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1308,13 +1319,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaThermalTransferPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -1330,7 +1341,8 @@ export class ComputeNodePipeline extends ComputePass {
             erosionSpeedClamp: number;
             rockMeltThreshold: number;
             timestep: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1377,13 +1389,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaThermalErosionPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -1402,7 +1414,8 @@ export class ComputeNodePipeline extends ComputePass {
             ambientCoolingRate: number;
             viscTempScale: number;
             timestep: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1451,13 +1464,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaCoolingPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -1474,7 +1487,8 @@ export class ComputeNodePipeline extends ComputePass {
             rockFraction: number;
             waterEvapRate: number;
             timestep: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1528,13 +1542,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaWaterInteractionPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**
@@ -1553,7 +1567,8 @@ export class ComputeNodePipeline extends ComputePass {
             reMeltRate: number;
             basaltMeltRate: number;
             noiseModulation: number;
-        }
+        },
+        encoder?: GPUCommandEncoder
     ): void {
         const device = this.device;
 
@@ -1604,13 +1619,13 @@ export class ComputeNodePipeline extends ComputePass {
         ]);
 
         const [workgroupX, workgroupY] = calculateWorkgroupCount2D(uniforms.simRes, 8);
-        const commandEncoder = device.createCommandEncoder();
+        const commandEncoder = encoder ?? device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
         computePass.setPipeline(this.lavaSolidificationPipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(workgroupX, workgroupY, 1);
         computePass.end();
-        device.queue.submit([commandEncoder.finish()]);
+        if (!encoder) device.queue.submit([commandEncoder.finish()]);
     }
 
     /**

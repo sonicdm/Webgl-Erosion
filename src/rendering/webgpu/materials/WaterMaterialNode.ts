@@ -57,7 +57,9 @@ export class WaterMaterialNode extends MeshBasicNodeMaterial {
     updateUniforms(params: {
         waterTransparency?: number;
         lightDir?: [number, number, number];
+        simres?: number;
     }): void {
+        if (params.simres !== undefined) this.simresUniform.value = params.simres;
         if (params.waterTransparency !== undefined) {
             this.waterTransparencyUniform.value = params.waterTransparency;
         }

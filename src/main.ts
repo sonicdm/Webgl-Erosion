@@ -23,11 +23,12 @@ import { WebGPUTexturePool } from './simulation/WebGPUTexturePool';
 import { WebGPUSimulationRunner } from './app/runtime/WebGPUSimulationRunner';
 import { Scene, Mesh, PlaneGeometry, SphereGeometry } from 'three';
 import { TerrainMaterialNode } from './rendering/webgpu/materials/TerrainMaterialNode';
+import { TerrainBasicMaterialNode } from './rendering/webgpu/materials/TerrainBasicMaterialNode';
 import { WaterMaterialNode } from './rendering/webgpu/materials/WaterMaterialNode';
 import { LavaMaterialNode } from './rendering/webgpu/materials/LavaMaterialNode';
 import { SkyMaterialNode } from './rendering/webgpu/materials/SkyMaterialNode';
 import { SceneLighting } from './rendering/webgpu/SceneLighting';
-import { createPoolSyncTextures, type PoolSyncTextures } from './utils/webgpu-pool-to-three-texture-copy';
+import { createPoolSyncTextures, resizePoolSyncTextures, type PoolSyncTextures, type WebGPUBackendLike } from './utils/webgpu-pool-to-three-texture-copy';
 import { initLavaDiagnostics } from './utils/lava-diagnostics';
 import { RaycastManager } from './app/runtime/RaycastManager';
 import { InputManager } from './app/runtime/InputManager';
@@ -135,25 +136,39 @@ async function main() {
 
     const segments = appContext.configHolder.raycastMeshResolution - 1;
 
+    // Perf experiments: ?terrainMaterial=basic (lighter terrain), ?hideWater=1 / ?hideLava=1 (fewer draws)
+    const searchParams = typeof URLSearchParams !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const terrainMaterialBasic = searchParams?.get('terrainMaterial') === 'basic';
+    const hideWater = searchParams?.get('hideWater') === '1';
+    const hideLava = searchParams?.get('hideLava') === '1';
+
     // Terrain
     const terrainGeo = new PlaneGeometry(1, 1, segments, segments);
     terrainGeo.rotateX(-Math.PI / 2);
-    webgpuTerrainMesh = new Mesh(terrainGeo, new TerrainMaterialNode({
-      heightmap: webgpuPoolSyncTextures.heightmap,
-      normalMap: webgpuPoolSyncTextures.normalMap,
-      sedimentMap: webgpuPoolSyncTextures.sedimentMap,
-      velocityMap: webgpuPoolSyncTextures.velocityMap,
-      fluxMap: webgpuPoolSyncTextures.fluxMap,
-      terrainFluxMap: webgpuPoolSyncTextures.terrainFluxMap,
-      maxSlippageMap: webgpuPoolSyncTextures.maxSlippageMap,
-      sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
-      lavaMap: webgpuPoolSyncTextures.lavaMap,
-      lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
-      coolLavaMap: webgpuPoolSyncTextures.coolLavaMap,
-      basaltMap: webgpuPoolSyncTextures.basaltMap,
-      simres,
-      maxHeight: (controls?.TerrainHeight ?? 2) * 120,
-    }) as any);
+    webgpuTerrainMesh = new Mesh(
+      terrainGeo,
+      terrainMaterialBasic
+        ? (new TerrainBasicMaterialNode() as any)
+        : (new TerrainMaterialNode({
+            heightmap: webgpuPoolSyncTextures.heightmap,
+            normalMap: webgpuPoolSyncTextures.normalMap,
+            sedimentMap: webgpuPoolSyncTextures.sedimentMap,
+            velocityMap: webgpuPoolSyncTextures.velocityMap,
+            fluxMap: webgpuPoolSyncTextures.fluxMap,
+            terrainFluxMap: webgpuPoolSyncTextures.terrainFluxMap,
+            maxSlippageMap: webgpuPoolSyncTextures.maxSlippageMap,
+            sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
+            lavaMap: webgpuPoolSyncTextures.lavaMap,
+            lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
+            coolLavaMap: webgpuPoolSyncTextures.coolLavaMap,
+            basaltMap: webgpuPoolSyncTextures.basaltMap,
+            simres,
+            maxHeight: (controls?.TerrainHeight ?? 2) * 120,
+          }) as any)
+    );
+    if (terrainMaterialBasic || hideWater || hideLava) {
+      console.log('[Perf] Experiments: terrainMaterial=basic=', terrainMaterialBasic, 'hideWater=', hideWater, 'hideLava=', hideLava);
+    }
     webgpuTerrainMesh.frustumCulled = true;
     webgpuTerrainMesh.castShadow = true;
     webgpuTerrainMesh.receiveShadow = true;
@@ -170,7 +185,7 @@ async function main() {
     }) as any);
     webgpuWaterMesh.frustumCulled = true;
     webgpuWaterMesh.renderOrder = 1;
-    webgpuWaterMesh.visible = true;
+    webgpuWaterMesh.visible = !hideWater;
     webgpuScene.add(webgpuWaterMesh);
 
     // Lava
@@ -186,7 +201,7 @@ async function main() {
     }) as any);
     webgpuLavaMesh.frustumCulled = true;
     webgpuLavaMesh.renderOrder = 2;
-    webgpuLavaMesh.visible = true;
+    webgpuLavaMesh.visible = !hideLava;
     webgpuScene.add(webgpuLavaMesh);
 
     // Sky
@@ -281,11 +296,19 @@ async function main() {
     mouseWorldDir: [0, 0, 0] as [number, number, number],
     brushPos: [0, 0] as [number, number],
   };
+  /** Pool→Three.js copy is encoded in the last sim step's encoder to reduce submits (no separate copy submit). */
+  const useMergedPoolCopy = true;
   let simRunner: WebGPUSimulationRunner | null = null;
   if (webgpuComputePipeline && webgpuTexturePool) {
     simRunner = new WebGPUSimulationRunner(
-      webgpuComputePipeline, webgpuTexturePool, appContext,
-      getControls, () => timer, () => currentBrushState,
+      webgpuComputePipeline,
+      webgpuTexturePool,
+      appContext,
+      getControls,
+      () => timer,
+      () => currentBrushState,
+      () => (webgpuRendererWrapper?.getRenderer() as { backend?: WebGPUBackendLike } | null)?.backend ?? null,
+      () => webgpuPoolSyncTextures,
     );
     if (webgpuDevice) {
       initLavaDiagnostics(webgpuDevice, webgpuTexturePool, appContext.simulationState.simres, getControls);
@@ -309,55 +332,17 @@ async function main() {
       webgpuTexturePool!.resizeSimulationTextures(newRes);
       appContext.simulationState.resizeHeightMapCpuBuf(newRes);
 
-      const oldPoolSync = webgpuPoolSyncTextures;
-      webgpuPoolSyncTextures = createPoolSyncTextures(newRes);
-      if (oldPoolSync && webgpuDevice) {
-        webgpuDevice.queue.onSubmittedWorkDone()
-          .catch(() => undefined)
-          .then(() => { Object.values(oldPoolSync).forEach((tex: any) => tex.dispose()); });
-      }
-      sceneRenderer.resetCompilationState();
+      // Resize existing DataTextures in place — keeps the same object references
+      // so TSL texture nodes stay valid and shaders do NOT recompile.
+      resizePoolSyncTextures(webgpuPoolSyncTextures!, newRes);
 
-      // Recreate materials — TSL graph rebuild on a compiled material
-      // causes "Uniform string not declared" errors due to stale builder state.
-      if (webgpuTerrainMesh) {
-        (webgpuTerrainMesh.material as any)?.dispose();
-        webgpuTerrainMesh.material = new TerrainMaterialNode({
-          heightmap: webgpuPoolSyncTextures.heightmap,
-          normalMap: webgpuPoolSyncTextures.normalMap,
-          sedimentMap: webgpuPoolSyncTextures.sedimentMap,
-          velocityMap: webgpuPoolSyncTextures.velocityMap,
-          fluxMap: webgpuPoolSyncTextures.fluxMap,
-          terrainFluxMap: webgpuPoolSyncTextures.terrainFluxMap,
-          maxSlippageMap: webgpuPoolSyncTextures.maxSlippageMap,
-          sedimentBlendMap: webgpuPoolSyncTextures.sedimentBlendMap,
-          lavaMap: webgpuPoolSyncTextures.lavaMap,
-          lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
-          coolLavaMap: webgpuPoolSyncTextures.coolLavaMap,
-          basaltMap: webgpuPoolSyncTextures.basaltMap,
-          simres: newRes,
-          maxHeight: (controls?.TerrainHeight ?? 2) * 120,
-        }) as any;
-      }
-      if (webgpuWaterMesh) {
-        (webgpuWaterMesh.material as any)?.dispose();
-        webgpuWaterMesh.material = new WaterMaterialNode({
-          heightmap: webgpuPoolSyncTextures.heightmap,
-          sedimentMap: webgpuPoolSyncTextures.sedimentMap,
-          simres: newRes,
-        }) as any;
-      }
-      if (webgpuLavaMesh) {
-        (webgpuLavaMesh.material as any)?.dispose();
-        webgpuLavaMesh.material = new LavaMaterialNode({
-          heightmap: webgpuPoolSyncTextures.heightmap,
-          lavaMap: webgpuPoolSyncTextures.lavaMap,
-          lavaVelocityMap: webgpuPoolSyncTextures.lavaVelocityMap,
-          coolLavaMap: webgpuPoolSyncTextures.coolLavaMap,
-          basaltMap: webgpuPoolSyncTextures.basaltMap,
-          simres: newRes,
-        }) as any;
-      }
+      // Update simres uniforms on existing materials (no graph rebuild)
+      const terrainMat = webgpuTerrainMesh?.material as TerrainMaterialNode | undefined;
+      if (terrainMat?.updateUniforms) terrainMat.updateUniforms({ simres: newRes });
+      const waterMat = webgpuWaterMesh?.material as unknown as WaterMaterialNode | undefined;
+      if (waterMat?.updateUniforms) waterMat.updateUniforms({ simres: newRes });
+      const lavaMat = webgpuLavaMesh?.material as unknown as LavaMaterialNode | undefined;
+      if (lavaMat?.updateUniforms) lavaMat.updateUniforms({ simres: newRes });
 
       // Clear old BVH/geometry (invalid for new resolution)
       if (appContext.terrainState.terrainBVH) appContext.terrainState.setTerrainBVH(null);
@@ -387,14 +372,51 @@ async function main() {
   let lastBrushPressed = 0;
   let lastReadMouseX = -1;
   let lastReadMouseY = -1;
+  let heightmapReadbackInFlight = false;
 
   _tlog('tick() defined — starting render loop');
 
+  // Per-frame perf and experiments
+  const urlParams = typeof URLSearchParams !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const perfEnabled = urlParams?.get('perf') === '1';
+  const PERF_LOG_INTERVAL = 60;
+  const renderEvery = Math.max(1, parseInt(urlParams?.get('skipRender') ?? '1', 10));
+  const copyEvery = Math.max(1, parseInt(urlParams?.get('copyEvery') ?? '1', 10));
+  if (renderEvery > 1 || copyEvery > 1) {
+    console.log('[Perf] Experiments: skipRender=', renderEvery, 'copyEvery=', copyEvery, '— if FPS/spikes improve, the skipped work is implicated.');
+  }
+  let tickFrameCount = 0;
+  let lastTickEntryTime = 0;
+  let interFrameMs = 0;
+  const gapSamples: number[] = [];
+  const interFrameSamples: number[] = [];
+
+  // Long-task observer: log when main thread is blocked ≥50ms (helps find gap cause)
+  if (perfEnabled && typeof PerformanceObserver !== 'undefined') {
+    try {
+      const longTaskObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          console.warn('[Perf] long task', `${(entry.duration).toFixed(0)}ms`, `start +${(entry.startTime - (performance.getEntriesByType('navigation')[0]?.startTime ?? 0)).toFixed(0)}ms`);
+        }
+      });
+      longTaskObserver.observe({ type: 'longtask', buffered: true });
+    } catch {
+      // longtask not supported (e.g. Chrome only with flag or origin trial)
+    }
+  }
+
   // ── Render loop ────────────────────────────────────────────────────
   function tick() {
+    const now = perfEnabled ? performance.now() : 0;
+    if (perfEnabled) {
+      performance.mark('tick-entry');
+      if (lastTickEntryTime > 0) interFrameMs = now - lastTickEntryTime;
+      lastTickEntryTime = now;
+    }
     stats.begin();
     if (!webgpuRendererWrapper) { requestAnimationFrame(tick); return; }
 
+    if (perfEnabled) performance.mark('tick-start');
     camera.update(controlsConfig.camera);
 
     // ── Raycast ──────────────────────────────────────────────────
@@ -420,6 +442,7 @@ async function main() {
       camera,
     };
     updateBrushState(rayResult.uvPos, brushContext);
+    if (perfEnabled) performance.mark('tick-after-input');
 
     const brushPressed = controls.brushPressed === 1;
     const brushVisible = Number(controls.brushType) !== 0;
@@ -448,10 +471,12 @@ async function main() {
     currentBrushState.brushPos[0] = rayResult.uvPos[0];
     currentBrushState.brushPos[1] = rayResult.uvPos[1];
 
-    for (let i = 0; i < controls.SimulationSpeed; i++) {
-      if (simRunner) simRunner.step();
+    const simSteps = controls.SimulationSpeed;
+    for (let i = 0; i < simSteps; i++) {
+      if (simRunner) simRunner.step(i === simSteps - 1);
       appContext.simulationState.incrementSimFrameCount();
     }
+    if (perfEnabled) performance.mark('tick-after-sim');
     if (appContext.simulationState.enableBVHUpdates && controls.SimulationSpeed > 0 && !appContext.simulationState.pauseGeneration) {
       appContext.simulationState.incrementGeometryUpdateCounter();
     }
@@ -459,12 +484,25 @@ async function main() {
     // ── Heightmap readback throttling ────────────────────────────
     const mouseMoved = (lastReadMouseX < 0 || lastReadMouseY < 0) ||
       (Math.abs(appContext.simulationState.lastX - lastReadMouseX) + Math.abs(appContext.simulationState.lastY - lastReadMouseY) > 1);
-    const shouldRead = (justPressed || mouseMoved) &&
-      appContext.configHolder.shouldReadHeightmap(brushPressed, brushVisible, appContext.simulationState.simres, appContext.simulationState.heightMapBufCounter);
+    // Heightmap readback policy:
+    // - In BVH mode, avoid hover/mouse-move readbacks (they can stall frame cadence).
+    // - Keep readback while actively brushing, and occasional low-frequency BVH refresh.
+    // - Never queue overlapping readbacks.
+    const usingHeightmapRaycast = controls.raycastMethod === 'heightmap';
+    const shouldReadForBrush = brushPressed &&
+      appContext.configHolder.shouldReadHeightmap(true, brushVisible, appContext.simulationState.simres, appContext.simulationState.heightMapBufCounter);
+    const shouldReadForHeightmapRaycast = usingHeightmapRaycast && mouseMoved &&
+      appContext.configHolder.shouldReadHeightmap(false, brushVisible, appContext.simulationState.simres, appContext.simulationState.heightMapBufCounter);
+    const bvhRefreshInterval = appContext.configHolder.maxHeightmapBufCounter * 2;
+    const shouldReadForBvhRefresh = !brushPressed && !usingHeightmapRaycast &&
+      appContext.simulationState.enableBVHUpdates &&
+      appContext.simulationState.heightMapBufCounter >= bvhRefreshInterval;
+    const shouldRead = shouldReadForBrush || shouldReadForHeightmapRaycast || shouldReadForBvhRefresh;
     const shouldReadForBVH = appContext.simulationState.enableBVHUpdates && justReleased &&
       appContext.terrainState.terrainGeometry && appContext.terrainState.terrainBVH;
 
-    if (shouldRead || shouldReadForBVH) {
+    if ((shouldRead || shouldReadForBVH) && !heightmapReadbackInFlight) {
+      heightmapReadbackInFlight = true;
       appContext.simulationState.readHeightmapFromWebGPU(webgpuDevice, webgpuTexturePool.readTerrainTexture)
         .then(() => {
           lastReadMouseX = appContext.simulationState.lastX;
@@ -472,8 +510,12 @@ async function main() {
           if (!brushPressed && !brushVisible && appContext.simulationState.heightMapBufCounter >= appContext.configHolder.maxHeightmapBufCounter) {
             appContext.simulationState.resetHeightMapBufCounter();
           }
+          heightmapReadbackInFlight = false;
         })
-        .catch((error) => console.error('[WebGPU] Readback failed:', error));
+        .catch((error) => {
+          heightmapReadbackInFlight = false;
+          console.error('[WebGPU] Readback failed:', error);
+        });
     }
 
     // ── BVH geometry refit ───────────────────────────────────────
@@ -515,9 +557,87 @@ async function main() {
     lastBrushPressed = brushPressed ? 1 : 0;
 
     // ── Render ───────────────────────────────────────────────────
-    sceneRenderer.render({ camera, controls, brushPos: rayResult.uvPos, timer });
+    sceneRenderer.render({
+      camera,
+      controls,
+      brushPos: rayResult.uvPos,
+      timer,
+      skipCopy: (useMergedPoolCopy && simSteps > 0) || (copyEvery > 1 && timer % copyEvery !== 0),
+      skipDraw: renderEvery > 1 && timer % renderEvery !== 0,
+    });
+    if (perfEnabled) {
+      performance.mark('tick-after-render');
+      performance.measure('frame-input', 'tick-start', 'tick-after-input');
+      performance.measure('frame-sim', 'tick-after-input', 'tick-after-sim');
+      performance.measure('frame-render', 'tick-after-sim', 'tick-after-render');
+      performance.measure('tick-total', 'tick-entry', 'tick-after-render');
+    }
 
     stats.end();
+
+    if (perfEnabled) {
+      performance.mark('tick-before-rAF');
+      performance.measure('post-render', 'tick-after-render', 'tick-before-rAF');
+      if (interFrameMs > 0) {
+        const measures = performance.getEntriesByType('measure');
+        const tickTotal = measures.filter((m) => m.name === 'tick-total').pop()?.duration ?? 0;
+        gapSamples.push(Math.max(0, interFrameMs - tickTotal));
+        if (gapSamples.length > PERF_LOG_INTERVAL) gapSamples.shift();
+        interFrameSamples.push(interFrameMs);
+        if (interFrameSamples.length > PERF_LOG_INTERVAL) interFrameSamples.shift();
+      }
+      tickFrameCount++;
+      if (tickFrameCount % PERF_LOG_INTERVAL === 0) {
+        const measures = performance.getEntriesByType('measure');
+        const byName: Record<string, number> = {};
+        for (const m of measures) byName[m.name] = m.duration;
+        const totalMs = byName['tick-total'] ?? 0;
+        const postMs = byName['post-render'] ?? 0;
+        const gapMs = interFrameMs > 0 ? Math.max(0, interFrameMs - totalMs) : 0;
+        const copyMs = byName['render-copy'] != null ? (byName['render-copy']).toFixed(1) : '';
+        const matMs = byName['render-materials'] != null ? (byName['render-materials']).toFixed(1) : '';
+        const drawMs = byName['render-draw'] != null ? (byName['render-draw']).toFixed(1) : '';
+        const renderBreakdown = [copyMs && `copy: ${copyMs}`, matMs && `materials: ${matMs}`, drawMs && `draw: ${drawMs}`].filter(Boolean).join(' ');
+        console.log(
+          '[Perf] frame (ms)',
+          `input: ${(byName['frame-input'] ?? 0).toFixed(1)}`,
+          `sim: ${(byName['frame-sim'] ?? 0).toFixed(1)}`,
+          `render: ${(byName['frame-render'] ?? 0).toFixed(1)}`,
+          `| tick-total: ${totalMs.toFixed(1)}`,
+          `post-render: ${postMs.toFixed(1)}`,
+          interFrameMs > 0 ? `| inter-frame: ${interFrameMs.toFixed(1)} gap: ${gapMs.toFixed(1)}` : '',
+          renderBreakdown ? `| ${renderBreakdown}` : '',
+        );
+        if (gapSamples.length >= PERF_LOG_INTERVAL) {
+          const buckets = [0, 2, 5, 10, 15, 20, Infinity];
+          const hist = buckets.slice(0, -1).map((lo, i) => {
+            const hi = buckets[i + 1];
+            const n = gapSamples.filter((g) => g >= lo && g < hi).length;
+            return `${lo}-${hi === Infinity ? '∞' : hi}:${n}`;
+          });
+          const spikeThresholdMs = 16;
+          const spikes = gapSamples.filter((g) => g >= spikeThresholdMs).length;
+          console.log(
+            '[Perf] gap histogram (ms) last 60 frames:',
+            hist.join(' '),
+            `| spikes(≥${spikeThresholdMs}ms): ${spikes}/60`,
+          );
+        }
+        if (interFrameSamples.length >= PERF_LOG_INTERVAL) {
+          const sorted = [...interFrameSamples].sort((a, b) => a - b);
+          const medianInterFrame = sorted[Math.floor(sorted.length / 2)];
+          const impliedCapFps = medianInterFrame > 0 ? 1000 / medianInterFrame : 0;
+          console.log(
+            '[Perf] cadence',
+            `median inter-frame: ${medianInterFrame.toFixed(2)}ms`,
+            `(~${impliedCapFps.toFixed(1)} FPS cap)`,
+          );
+        }
+        performance.clearMarks();
+        performance.clearMeasures();
+      }
+    }
+
     requestAnimationFrame(tick);
   }
 

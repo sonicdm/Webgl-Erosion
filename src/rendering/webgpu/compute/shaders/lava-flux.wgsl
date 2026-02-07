@@ -31,6 +31,9 @@ const dirDx = array<i32, 8>(0, 1, 1, 1, 0, -1, -1, -1);
 const dirDy = array<i32, 8>(1, 1, 0, -1, -1, -1, 0, 1);
 // Distance scaling: cardinal = 1.0, diagonal = 1/sqrt(2)
 const dirDist = array<f32, 8>(1.0, 0.7071, 1.0, 0.7071, 1.0, 0.7071, 1.0, 0.7071);
+// Normalized direction vectors for momentum bias
+const dirNx = array<f32, 8>(0.0, 0.7071, 1.0, 0.7071, 0.0, -0.7071, -1.0, -0.7071);
+const dirNy = array<f32, 8>(1.0, 0.7071, 0.0, -0.7071, -1.0, -0.7071, 0.0, 0.7071);
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -90,6 +93,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Hot lava (visc≈0): drag≈1.0, no friction. Cool lava (visc≈4): drag≈0.96, slow deceleration.
     // Much gentler than the old model which destroyed 77% of flux per frame.
     let viscDrag = 1.0 - 0.01 * viscosity_val;
+    let thermalOverride = clamp(temperature * 2.0 - 0.5, 0.0, 1.0);
+    let effectiveCrustStrength = uniforms.u_CrustStrength * (1.0 - thermalOverride);
+
+    let curVel = textureLoad(readLavaVel, coord, 0).xy;
+    let curVelMag = length(curVel);
+    let momentumInfluence = clamp(uniforms.u_MomentumStrength, 0.0, 1.0) * 0.5;
 
     // Compute new flux per direction using the pipe model:
     // f_new = max(0, f_old * drag + dt * g * A * dh / L * viscDamping)
@@ -115,13 +124,30 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let nSurfaceHeight = nTerrain.r + nBasalt + nCoolLava + nTerrain.g + nLava.r;
         let dh = surfaceHeight - nSurfaceHeight;
 
-        // Yield stress gate: no flow if dh is below threshold
-        let effectiveDh = select(dh, 0.0, dh < yieldThreshold);
+        // Directional channeling terms (previously unused controls).
+        // These help low-iteration runs avoid vent pileup by biasing transport:
+        // deeper downhill paths, aligned momentum, and terrain noise resistance.
+        let terrainDiff = clamp(curTerrain.r - nTerrain.r, -0.08, 0.08);
+        let depthBoost = pow(2.0, terrainDiff * uniforms.u_DepthBoostStrength * 0.5);
+
+        var momentumBias: f32 = 1.0;
+        if (curVelMag > 0.001) {
+            let aligned = (curVel.x * dirNx[d] + curVel.y * dirNy[d]) / curVelMag;
+            momentumBias = clamp(1.0 + aligned * momentumInfluence, 0.5, 1.5);
+        }
+
+        let noiseVal = textureLoad(readNoise, nCoord, 0).r;
+        let noiseBias = pow(clamp(noiseVal, 0.05, 1.0), uniforms.u_NoiseResistPower * 0.35);
+        let channelGain = depthBoost * momentumBias * noiseBias;
+
+        // Yield + crust gate: cooler crusted neighbors resist inflow.
+        let barrier = yieldThreshold + nLava.a * effectiveCrustStrength;
+        let effectiveDh = select(dh, 0.0, dh < barrier);
 
         // Pipe model: accumulate flux with viscosity-damped acceleration
         // Existing flux persists (with gentle drag), new acceleration is scaled by viscosity
         let effectivePipeLen = pipeLen / dirDist[d];
-        let accel = dt * g * pipeArea * effectiveDh / effectivePipeLen;
+        let accel = dt * g * pipeArea * effectiveDh * channelGain / effectivePipeLen;
         flux[d] = max(0.0, prevFlux[d] * viscDrag + accel * viscDamping);
         totalFlux += flux[d];
     }
