@@ -134,10 +134,16 @@ async function main() {
     if (initLoadingText) initLoadingText.textContent = 'Building materials...';
     await new Promise<void>(r => requestAnimationFrame(() => r()));
 
-    const segments = appContext.configHolder.raycastMeshResolution - 1;
-
     // Perf experiments: ?terrainMaterial=basic (lighter terrain), ?hideWater=1 / ?hideLava=1 (fewer draws)
+    // ?meshRes=N overrides render mesh resolution (default: min(simres, 1024))
     const searchParams = typeof URLSearchParams !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const meshResOverride = searchParams ? parseInt(searchParams.get('meshRes') ?? '', 10) : NaN;
+    // Render mesh matches simres (capped at 1024) for shadow-quality on steep terrain.
+    // Raycast mesh stays at configHolder.raycastMeshResolution (256) for CPU BVH perf.
+    const renderMeshRes = Number.isFinite(meshResOverride) && meshResOverride >= 64 && meshResOverride <= 2048
+        ? meshResOverride
+        : Math.min(simres, 1024);
+    const segments = renderMeshRes - 1;
     const terrainMaterialBasic = searchParams?.get('terrainMaterial') === 'basic';
     const hideWater = searchParams?.get('hideWater') === '1';
     const hideLava = searchParams?.get('hideLava') === '1';
