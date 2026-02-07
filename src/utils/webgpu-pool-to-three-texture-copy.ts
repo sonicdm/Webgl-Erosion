@@ -68,9 +68,15 @@ export function getPoolCopyTextureNamesForView(options: PoolCopyViewOptions): Po
 export function resizePoolSyncTextures(sync: PoolSyncTextures, newRes: number): void {
   const sharedZeroData = new Float32Array(newRes * newRes * 4);
   for (const tex of Object.values(sync) as DataTexture[]) {
+    // Dispose forces the WebGPU backend to drop its cached GPUTexture (still at old size).
+    // Without this, the backend tries to upload newRes data into the old-size GPUTexture → validation error.
+    tex.dispose();
     tex.image = { data: sharedZeroData, width: newRes, height: newRes };
     tex.needsUpdate = true;
   }
+  // Reset copy log flags so we see confirmation when copies resume at new size.
+  _copyLogged = false;
+  _skipLogged = false;
 }
 
 /**

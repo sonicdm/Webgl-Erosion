@@ -88,11 +88,15 @@ export class SimulationStateHolder {
     }
     
     incrementSimFrameCount(): void {
-        this.simFrameCount++;
+        const current = Number(this.simFrameCount);
+        this.simFrameCount = (Number.isFinite(current) ? current : 0) + 1;
     }
 
     addSimFrameCount(amount: number): void {
-        this.simFrameCount += amount;
+        const delta = Number(amount);
+        if (!Number.isFinite(delta)) return;
+        const current = Number(this.simFrameCount);
+        this.simFrameCount = (Number.isFinite(current) ? current : 0) + delta;
     }
     
     setTerrainGeometryDirty(value: boolean): void {
@@ -121,11 +125,15 @@ export class SimulationStateHolder {
     }
     
     incrementGeometryUpdateCounter(): void {
-        this.geometryUpdateCounter++;
+        const current = Number(this.geometryUpdateCounter);
+        this.geometryUpdateCounter = (Number.isFinite(current) ? current : 0) + 1;
     }
 
     addGeometryUpdateCounter(amount: number): void {
-        this.geometryUpdateCounter += amount;
+        const delta = Number(amount);
+        if (!Number.isFinite(delta)) return;
+        const current = Number(this.geometryUpdateCounter);
+        this.geometryUpdateCounter = (Number.isFinite(current) ? current : 0) + delta;
     }
     
     resetGeometryUpdateCounter(): void {
@@ -145,7 +153,11 @@ export class SimulationStateHolder {
     }
     
     shouldUpdateGeometry(): boolean {
-        return this.enableBVHUpdates && (this.geometryNeedsUpdate || this.geometryUpdateCounter >= this.geometryUpdateInterval);
+        return this.enableBVUpdatesSafe() && (this.geometryNeedsUpdate || Number(this.geometryUpdateCounter) >= Number(this.geometryUpdateInterval));
+    }
+
+    private enableBVUpdatesSafe(): boolean {
+        return this.enableBVHUpdates === true;
     }
 
     /**

@@ -472,7 +472,10 @@ async function main() {
     currentBrushState.brushPos[0] = rayResult.uvPos[0];
     currentBrushState.brushPos[1] = rayResult.uvPos[1];
 
-    const speedScale = controls.SimulationSpeed;
+    // Defensive numeric coercion: dat.GUI can supply option values as strings.
+    // If speed is a string, "+=" would concatenate and corrupt counters/time.
+    const speedScaleRaw = Number(controls.SimulationSpeed);
+    const speedScale = Number.isFinite(speedScaleRaw) ? Math.max(0, Math.min(3, speedScaleRaw)) : 1;
     if (simRunner && speedScale > 0 && !appContext.simulationState.pauseGeneration) {
       simTime += speedScale;
       simRunner.step({ isLastStep: true, timestepScale: speedScale, simTime });
