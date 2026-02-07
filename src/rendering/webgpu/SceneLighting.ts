@@ -1,4 +1,4 @@
-import { DirectionalLight, AmbientLight, Scene, MathUtils, VSMShadowMap, WebGPURenderer, Vector3 } from 'three';
+import { DirectionalLight, AmbientLight, Scene, MathUtils, PCFSoftShadowMap, WebGPURenderer, Vector3 } from 'three';
 
 /**
  * Manages scene lighting for PBR materials (terrain uses MeshStandardNodeMaterial).
@@ -6,9 +6,9 @@ import { DirectionalLight, AmbientLight, Scene, MathUtils, VSMShadowMap, WebGPUR
  * Encapsulates DirectionalLight (sun) + AmbientLight (sky fill) and provides
  * a typed API for per-frame updates driven by GUI controls.
  *
- * Shadow mapping uses VSMShadowMap (Variance Shadow Maps) with gaussian
- * blur for soft shadows. Texel-grid snapping prevents shadow swimming
- * when the light direction changes.
+ * Shadow mapping uses PCFSoftShadowMap (Percentage-Closer Filtering) for
+ * clean terrain self-shadowing without VSM light-bleeding artifacts.
+ * Texel-grid snapping prevents shadow swimming when the light direction changes.
  *
  * Sun color shifts warm-orange at low elevation angles (sunset/sunrise) and
  * stays slightly warm-white at high elevation (noon).
@@ -41,15 +41,18 @@ export class SceneLighting {
         this.directionalLight.castShadow = this._shadowsEnabled;
         if (this._shadowsEnabled) {
             this.directionalLight.shadow.mapSize.set(4096, 4096);
-            this.directionalLight.shadow.bias = -0.0001;
-            this.directionalLight.shadow.normalBias = 0.01;
-            this.directionalLight.shadow.radius = 8;
-            (this.directionalLight.shadow as any).blurSamples = 25;
+            // normalBias is disabled: the terrain mesh is a displaced PlaneGeometry
+            // whose vertex normals are all (0,1,0). Three.js shifts shadow lookups
+            // along these flat normals, which points in the wrong direction for steep
+            // slopes and creates larger artifacts on canyon walls.
+            this.directionalLight.shadow.bias = -0.002;
+            this.directionalLight.shadow.normalBias = 0;
+            this.directionalLight.shadow.radius = 3;
             const cam = this.directionalLight.shadow.camera;
-            cam.left = -0.8;
-            cam.right = 0.8;
-            cam.top = 0.8;
-            cam.bottom = -0.8;
+            cam.left = -0.6;
+            cam.right = 0.6;
+            cam.top = 0.6;
+            cam.bottom = -0.6;
             cam.near = 0.01;
             cam.far = 3.0;
         }
@@ -64,7 +67,7 @@ export class SceneLighting {
 
         if (renderer) {
             renderer.shadowMap.enabled = this._shadowsEnabled;
-            if (this._shadowsEnabled) renderer.shadowMap.type = VSMShadowMap;
+            if (this._shadowsEnabled) renderer.shadowMap.type = PCFSoftShadowMap;
         }
     }
 
@@ -74,7 +77,7 @@ export class SceneLighting {
         this.directionalLight.castShadow = enabled;
         if (this._renderer) {
             this._renderer.shadowMap.enabled = enabled;
-            if (enabled) this._renderer.shadowMap.type = VSMShadowMap;
+            if (enabled) this._renderer.shadowMap.type = PCFSoftShadowMap;
         }
     }
 
