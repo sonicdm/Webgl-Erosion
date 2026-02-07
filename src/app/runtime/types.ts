@@ -14,13 +14,22 @@ export interface ITexturePool {
     swapFluxTextures(): void;
 }
 
+/** Options for a single simulation step. */
+export interface SimStepOptions {
+    /** When true (WebGPU), copy pool→Three.js can be merged into this step's encoder. */
+    isLastStep?: boolean;
+    /** Time-scale multiplier applied to the base timestep (default 1.0). */
+    timestepScale?: number;
+    /** Separate simulation clock (advances by speedScale each frame). */
+    simTime?: number;
+}
+
 /**
  * Simulation runner: performs one simulation step.
  * LegacySimulationRunner (WebGL) and WebGPUSimulationRunner (WebGPU) implement this.
- * @param isLastStep - When true (WebGPU), copy pool→Three.js can be merged into this step's encoder to reduce submits.
  */
 export interface ISimulationRunner {
-    step(isLastStep?: boolean): void;
+    step(options?: SimStepOptions): void;
     dispose?(): void;
 }
 

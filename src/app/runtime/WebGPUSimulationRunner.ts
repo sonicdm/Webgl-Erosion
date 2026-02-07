@@ -1,4 +1,4 @@
-import type { ISimulationRunner } from './types';
+import type { ISimulationRunner, SimStepOptions } from './types';
 import type { ComputeNodePipeline } from '../../rendering/webgpu/compute/ComputeNodePipeline';
 import type { WebGPUTexturePool } from '../../simulation/WebGPUTexturePool';
 import type { AppContext } from '../context';
@@ -27,7 +27,8 @@ export class WebGPUSimulationRunner implements ISimulationRunner {
         private getPoolSync: () => PoolSyncTextures | null
     ) {}
 
-    step(isLastStep?: boolean): void {
+    step(options?: SimStepOptions): void {
+        const isLastStep = options?.isLastStep;
         const backend = isLastStep ? this.getBackend() : null;
         const poolSync = isLastStep ? this.getPoolSync() : null;
         const copyAfterStep =
@@ -42,7 +43,9 @@ export class WebGPUSimulationRunner implements ISimulationRunner {
             this.getControls(),
             this.getTimer(),
             this.getBrushState(),
-            copyAfterStep
+            copyAfterStep,
+            options?.timestepScale,
+            options?.simTime
         );
     }
 }

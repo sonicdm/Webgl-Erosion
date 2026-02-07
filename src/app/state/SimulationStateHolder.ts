@@ -90,6 +90,10 @@ export class SimulationStateHolder {
     incrementSimFrameCount(): void {
         this.simFrameCount++;
     }
+
+    addSimFrameCount(amount: number): void {
+        this.simFrameCount += amount;
+    }
     
     setTerrainGeometryDirty(value: boolean): void {
         this.terrainGeometryDirty = value;
@@ -118,6 +122,10 @@ export class SimulationStateHolder {
     
     incrementGeometryUpdateCounter(): void {
         this.geometryUpdateCounter++;
+    }
+
+    addGeometryUpdateCounter(amount: number): void {
+        this.geometryUpdateCounter += amount;
     }
     
     resetGeometryUpdateCounter(): void {

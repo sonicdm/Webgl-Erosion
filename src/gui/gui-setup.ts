@@ -39,7 +39,7 @@ export function setupGUI(controls: Controls): { gui: DAT.GUI, controllers: GUICo
     const simcontrols = gui.addFolder('Simulation Controls');
     simcontrols.add(controls, 'Pause/Resume');
     tip(simcontrols.add(controls, 'SimulationSpeed', { fast: 3, medium: 2, slow: 1 }),
-        'Number of simulation steps per frame');
+        'Simulation time-scale multiplier');
     simcontrols.open();
 
     // ── Terrain Generation ──────────────────────────────────────────────

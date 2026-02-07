@@ -28,9 +28,11 @@ export interface CopyAfterStepParams {
  * @param texturePool - WebGPU texture pool
  * @param appContext - Application context with state holders
  * @param controls - Simulation controls
- * @param timer - Current simulation time step
+ * @param timer - Current render-frame counter (used as fallback for time-driven uniforms)
  * @param brushState - Brush state (mouse world pos, dir, brush pos, etc.)
  * @param copyAfterStep - If set, encode pool→Three.js texture copy in this step's encoder (call on last step only).
+ * @param timestepScale - Multiplier for base timestep (default 1.0). SimulationSpeed drives this.
+ * @param simTime - Separate simulation clock that advances by speedScale each frame (fallback: timer).
  */
 export function SimulatePerStepWebGPU(
     computePipeline: ComputeNodePipeline,
@@ -43,7 +45,9 @@ export function SimulatePerStepWebGPU(
         mouseWorldDir: [number, number, number];
         brushPos: [number, number];
     },
-    copyAfterStep?: CopyAfterStepParams
+    copyAfterStep?: CopyAfterStepParams,
+    timestepScale?: number,
+    simTime?: number
 ): void {
     if (appContext.simulationState.pauseGeneration) {
         return;
@@ -52,6 +56,11 @@ export function SimulatePerStepWebGPU(
     const simres = appContext.simulationState.simres;
     const device = computePipeline.getDevice();
     const encoder = device.createCommandEncoder();
+
+    // Time-scale model: scale the base timestep by SimulationSpeed multiplier
+    const effectiveTimestep = controls.timestep * (timestepScale ?? 1.0);
+    // Simulation clock for time-driven forcing (rain noise, lava source pulsing)
+    const effectiveTime = simTime ?? timer;
 
     // Prepare reusable arrays for water sources (avoid per-frame allocations)
     const reusableSourceBuffers = appContext.simulationState.getWaterSourceBuffers(MAX_WATER_SOURCES);
@@ -77,7 +86,7 @@ export function SimulatePerStepWebGPU(
 
     // 0. Rain Precipitation
     computePipeline.rainPass(texturePool, {
-        time: timer,
+        time: effectiveTime,
         rainDegree: controls.RainDegree,
         simRes: simres,
         mouseWorldPos: brushState?.mouseWorldPos || [0, 0, 0, 0],
@@ -106,7 +115,7 @@ export function SimulatePerStepWebGPU(
     computePipeline.flowPass(texturePool, {
         simRes: simres,
         pipeLen: controls.pipelen,
-        timestep: controls.timestep,
+        timestep: effectiveTimestep,
         pipeArea: controls.pipeAra,
     }, encoder);
     texturePool.swapFluxTextures();
@@ -115,10 +124,10 @@ export function SimulatePerStepWebGPU(
     computePipeline.waterHeightPass(texturePool, {
         simRes: simres,
         pipeLen: controls.pipelen,
-        timestep: controls.timestep,
+        timestep: effectiveTimestep,
         pipeArea: controls.pipeAra,
         velMult: controls.VelocityMultiplier,
-        time: timer,
+        time: effectiveTime,
         velAdvMag: controls.VelocityAdvectionMag,
     }, encoder);
     texturePool.swapTerrainTextures();
@@ -128,11 +137,11 @@ export function SimulatePerStepWebGPU(
     computePipeline.sedimentPass(texturePool, {
         simRes: simres,
         pipeLen: controls.pipelen,
-        timestep: controls.timestep,
+        timestep: effectiveTimestep,
         Kc: controls.Kc,
         Ks: controls.Ks,
         Kd: controls.Kd,
-        time: timer,
+        time: effectiveTime,
         rockErosionResistance: controls.rockErosionResistance,
         basaltErosionResistance: controls.basaltErosionResistance,
     }, encoder);
@@ -143,7 +152,7 @@ export function SimulatePerStepWebGPU(
     // 4. Sediment Advection (Conditional: MacCormack or Simple)
     computePipeline.sedimentAdvectionPass(texturePool, {
         simRes: simres,
-        timestep: controls.timestep,
+        timestep: effectiveTimestep,
         advectionMethod: controls.AdvectionMethod,
         advectMultiplier: controls.AdvectionSpeedScaling,
     }, encoder);
@@ -162,7 +171,7 @@ export function SimulatePerStepWebGPU(
     computePipeline.thermalFluxPass(texturePool, {
         simRes: simres,
         pipeLen: controls.pipelen,
-        timestep: controls.timestep,
+        timestep: effectiveTimestep,
         pipeArea: controls.pipeAra,
         thermalRate: controls.thermalRate,
         rockErosionResistance: controls.rockErosionResistance,
@@ -174,7 +183,7 @@ export function SimulatePerStepWebGPU(
     computePipeline.thermalApplyPass(texturePool, {
         simRes: simres,
         pipeLen: controls.pipelen,
-        timestep: controls.timestep,
+        timestep: effectiveTimestep,
         pipeArea: controls.pipeAra,
         thermalErosionScale: controls.thermalErosionScale,
         rockErosionResistance: controls.rockErosionResistance,
@@ -222,7 +231,7 @@ export function SimulatePerStepWebGPU(
             sourcePositions: lavaSrcBuffers.positions,
             sourceSizes: lavaSrcBuffers.sizes,
             sourceStrengths: lavaSrcBuffers.strengths,
-            time: timer,
+            time: effectiveTime,
         }, encoder);
         texturePool.swapLavaTextures();
 
@@ -233,7 +242,7 @@ export function SimulatePerStepWebGPU(
         const flowIters = Math.max(1, Math.round(controls.lavaFlowIterations));
         const flowIterationBaseline = 16;
         const flowTimestepScale = Math.min(4.0, Math.max(0.5, flowIterationBaseline / flowIters));
-        const compensatedFlowTimestep = controls.timestep * flowTimestepScale;
+        const compensatedFlowTimestep = effectiveTimestep * flowTimestepScale;
 
         for (let iter = 0; iter < flowIters; iter++) {
             computePipeline.lavaFluxPass(texturePool, {
@@ -268,7 +277,7 @@ export function SimulatePerStepWebGPU(
             kCond: controls.lavaKCond,
             crustMixSuppression: controls.lavaCrustMixSuppression,
             softeningTemp: controls.lavaSofteningTemp / 1200,
-            timestep: controls.timestep,
+            timestep: effectiveTimestep,
         }, encoder);
         texturePool.swapLavaTextures();
 
@@ -279,7 +288,7 @@ export function SimulatePerStepWebGPU(
             maxErosionPerStep: controls.lavaMaxErosionPerStep,
             erosionSpeedClamp: controls.lavaErosionSpeedClamp,
             rockMeltThreshold: controls.lavaRockMeltThreshold / 1200,
-            timestep: controls.timestep,
+            timestep: effectiveTimestep,
         }, encoder);
         texturePool.swapTerrainTextures();
         texturePool.swapBasaltTextures();
@@ -294,7 +303,7 @@ export function SimulatePerStepWebGPU(
             crustGrowthRate: controls.lavaCrustGrowthRate,
             ambientCoolingRate: controls.lavaAmbientCoolingRate,
             viscTempScale: controls.lavaViscTempScale,
-            timestep: controls.timestep,
+            timestep: effectiveTimestep,
         }, encoder);
         texturePool.swapLavaTextures();
         texturePool.swapTerrainTextures();
@@ -328,7 +337,7 @@ export function SimulatePerStepWebGPU(
                 solidificationThreshold: controls.lavaSolidificationThreshold / 1200,
                 rockFraction: controls.lavaRockFraction,
                 waterEvapRate: 0.1,
-                timestep: controls.timestep,
+                timestep: effectiveTimestep,
             }, encoder);
             texturePool.swapLavaTextures();
             texturePool.swapTerrainTextures();
@@ -337,7 +346,7 @@ export function SimulatePerStepWebGPU(
 
         if (lavaSourceCount > 0) {
             lavaLogger.log(LogCategory.LAVA_SIM, 'step',
-                `sources=${lavaSourceCount} dt=${controls.timestep.toFixed(4)} viscScale=${controls.lavaViscosityScale} erosionCap=${controls.lavaMaxErosionPerStep}`);
+                `sources=${lavaSourceCount} dt=${effectiveTimestep.toFixed(4)} viscScale=${controls.lavaViscosityScale} erosionCap=${controls.lavaMaxErosionPerStep}`);
         }
     }
 

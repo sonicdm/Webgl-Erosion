@@ -1,4 +1,4 @@
-import type { ISimulationRunner } from './types';
+import type { ISimulationRunner, SimStepOptions } from './types';
 
 /**
  * Legacy (WebGL) simulation runner. Delegates to an injected step implementation.
@@ -8,7 +8,7 @@ import type { ISimulationRunner } from './types';
 export class LegacySimulationRunner implements ISimulationRunner {
     constructor(private stepImpl: () => void) {}
 
-    step(_isLastStep?: boolean): void {
+    step(_options?: SimStepOptions): void {
         this.stepImpl();
     }
 }

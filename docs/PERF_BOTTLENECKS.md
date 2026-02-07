@@ -115,6 +115,7 @@ Use query params to **skip work** and see if FPS or spike count improves. If it 
 - **Post-processing bypass when bloom is off:** SceneRenderer now skips the post-processing pipeline entirely when `ppBloomStrength <= 0.001`, avoiding blur/composite GPU cost when bloom is disabled. Default bloom strength is now `0.0` for performance baseline.
 - **Tighter lava-water pass condition:** Lava-water interaction now runs only when both lava is being simulated this step and water activity is present.
 - **Compute binding micro-opt:** Compute texture bindings now reuse cached `GPUTextureView` objects instead of creating a new view for every pass dispatch.
+- **SimulationSpeed time-scale model:** `SimulationSpeed` is now a time-scale multiplier (1×/2×/3×) applied to the base `timestep`, not a loop count. One simulation step runs per frame regardless of speed setting, with the timestep scaled up. At speed=3 this reduces dispatches from 96 to 32 per frame.
 
 ## What did *not* explain the slowness
 

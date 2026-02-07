@@ -291,6 +291,7 @@ async function main() {
 
   // ── Simulation runner ──────────────────────────────────────────────
   let timer = 0;
+  let simTime = 0;
   const currentBrushState = {
     mouseWorldPos: [0, 0, 0, 0] as [number, number, number, number],
     mouseWorldDir: [0, 0, 0] as [number, number, number],
@@ -471,14 +472,15 @@ async function main() {
     currentBrushState.brushPos[0] = rayResult.uvPos[0];
     currentBrushState.brushPos[1] = rayResult.uvPos[1];
 
-    const simSteps = controls.SimulationSpeed;
-    for (let i = 0; i < simSteps; i++) {
-      if (simRunner) simRunner.step(i === simSteps - 1);
-      appContext.simulationState.incrementSimFrameCount();
+    const speedScale = controls.SimulationSpeed;
+    if (simRunner && speedScale > 0 && !appContext.simulationState.pauseGeneration) {
+      simTime += speedScale;
+      simRunner.step({ isLastStep: true, timestepScale: speedScale, simTime });
+      appContext.simulationState.addSimFrameCount(speedScale);
     }
     if (perfEnabled) performance.mark('tick-after-sim');
-    if (appContext.simulationState.enableBVHUpdates && controls.SimulationSpeed > 0 && !appContext.simulationState.pauseGeneration) {
-      appContext.simulationState.incrementGeometryUpdateCounter();
+    if (appContext.simulationState.enableBVHUpdates && speedScale > 0 && !appContext.simulationState.pauseGeneration) {
+      appContext.simulationState.addGeometryUpdateCounter(speedScale);
     }
 
     // ── Heightmap readback throttling ────────────────────────────
@@ -562,7 +564,7 @@ async function main() {
       controls,
       brushPos: rayResult.uvPos,
       timer,
-      skipCopy: (useMergedPoolCopy && simSteps > 0) || (copyEvery > 1 && timer % copyEvery !== 0),
+      skipCopy: (useMergedPoolCopy && speedScale > 0 && !appContext.simulationState.pauseGeneration) || (copyEvery > 1 && timer % copyEvery !== 0),
       skipDraw: renderEvery > 1 && timer % renderEvery !== 0,
     });
     if (perfEnabled) {
